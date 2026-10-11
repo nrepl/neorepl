@@ -2,6 +2,10 @@
 
 ## main (unreleased)
 
+### Features
+
+- [#3](https://github.com/nrepl/neorepl/pull/3): `neorepl test` and `neorepl retest`, and `,test` and `,retest` in the REPL, run tests through cider-nrepl or babashka's server, or plain `clojure.test` without either.
+
 ## 0.1.0 (2026-10-10)
 
 Initial release.
