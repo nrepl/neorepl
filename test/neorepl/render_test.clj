@@ -30,6 +30,38 @@
     {:file "/x.clj" :line 3} "/x.clj:3"
     {:file "/x.clj"} "/x.clj"))
 
+(deftest test-report-text-test
+  (testing "like clojure.test"
+    (is (= (str "FAIL in my.app-test/adds (/x/app_test.clj:3)\n"
+                "with a context\n"
+                "adds up\n"
+                "expected: 3\n"
+                "  actual: {:a 1,\n"
+                "           :b 2}\n"
+                "\n"
+                "ERROR in my.app-test/throws\n"
+                "   error: clojure.lang.ExceptionInfo: boom {}\n"
+                "\n"
+                "Ran 3 tests containing 4 assertions.\n"
+                "1 failure, 1 error.")
+           (render/test-report-text {:summary {:ns 1 :var 3 :test 4 :pass 2 :fail 1 :error 1}
+                                     :failures [{:type "fail" :ns "my.app-test" :var "adds"
+                                                 :context "with a context" :message "adds up"
+                                                 :expected "3" :actual "{:a 1,\n :b 2}"
+                                                 :file "/x/app_test.clj" :line 3}
+                                                {:type "error" :ns "my.app-test" :var "throws"
+                                                 :error "clojure.lang.ExceptionInfo: boom {}"}]}))))
+  (testing "a fixture failing outside the tests"
+    (is (= "ERROR in my.app-test\n   error: java.lang.Exception: no db\n\nRan 1 test containing 0 assertions.\n0 failures, 1 error."
+           (render/test-report-text {:summary {:ns 1 :var 1 :test 0 :pass 0 :fail 0 :error 1}
+                                     :failures [{:type "error" :ns "my.app-test" :error "java.lang.Exception: no db"}]}))))
+  (testing "all passing"
+    (is (= "Ran 1 test containing 1 assertion.\n0 failures, 0 errors."
+           (render/test-report-text {:summary {:ns 1 :var 1 :test 1 :pass 1 :fail 0 :error 0} :failures []}))))
+  (testing "nothing to run"
+    (is (= "No tests ran."
+           (render/test-report-text {:summary {:ns 0 :var 0 :test 0 :pass 0 :fail 0 :error 0} :failures []})))))
+
 (deftest error-text-test
   (is (= (str "clojure.lang.ExceptionInfo: boom\n"
               "  {:k 1,\n"

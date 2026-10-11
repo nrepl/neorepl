@@ -54,3 +54,35 @@
   [{:keys [file line column]}]
   (str/join ":" (remove nil? [file line column])))
 
+(defn- labeled
+  "text after label, with the lines after the first lined up with it."
+  [label text]
+  (let [indent (apply str (repeat (count label) " "))]
+    (str label (str/join (str "\n" indent) (str/split-lines text)))))
+
+(defn- counted [n word]
+  (str n " " word (when-not (= 1 n) "s")))
+
+(defn- failure-text
+  "A test that didn't pass, from a run-tests report, as clojure.test prints it."
+  [{:keys [type ns var context message expected actual error file line]}]
+  (str/join "\n" (remove nil? [(str (str/upper-case type)
+                                     ;; Not in a test, when a fixture fails.
+                                     (some->> (not-empty (str/join "/" (remove nil? [ns var]))) (str " in "))
+                                     (when file (str " (" (location-text {:file file :line line}) ")")))
+                                context
+                                message
+                                (some->> expected (labeled "expected: "))
+                                (if (= "error" type)
+                                  (some->> error (labeled "   error: "))
+                                  (some->> actual (labeled "  actual: ")))])))
+
+(defn test-report-text
+  "A report from run-tests as text, the way clojure.test prints one: what
+  didn't pass, then how it went."
+  [{{:keys [var test fail error]} :summary :keys [failures]}]
+  (str/join "\n\n" (concat (map failure-text failures)
+                            [(if (zero? var)
+                               "No tests ran."
+                               (str "Ran " (counted var "test") " containing " (counted test "assertion") ".\n"
+                                    (counted fail "failure") ", " (counted error "error") "."))])))

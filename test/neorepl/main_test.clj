@@ -484,13 +484,39 @@
     (run "-s" "pst-short" "(throw (ex-info \"boom\" {:xs (range) :deep {:er 1}}))")
     (is (str/starts-with? (:out (run-command "pst" "-s" "pst-short")) "clojure.lang.ExceptionInfo: boom\n"))))
 
+(deftest test-test
+  (testing "what didn't pass, and how many did"
+    (let [{:keys [status out err]} (run-command "test" "neorepl.sample-suite")]
+      (is (= 1 status))
+      (is (= "" err))
+      (is (str/starts-with? out "passing prints\nERROR in neorepl.sample-suite/erring ("))
+      (is (str/includes? out "\n\nFAIL in neorepl.sample-suite/failing ("))
+      (is (str/ends-with? out "\nRan 3 tests containing 3 assertions.\n1 failure, 1 error.\n"))))
+  (testing "passing"
+    (is (= {:status 0 :out "passing prints\nRan 1 test containing 1 assertion.\n0 failures, 0 errors.\n" :err ""}
+           (run-command "test" "neorepl.sample-suite/passing"))))
+  (testing "json"
+    (let [{:keys [status out]} (run-command "test" "--format" "json" "neorepl.sample-suite/failing")]
+      (is (= 1 status))
+      (is (str/starts-with? out "{\"status\":\"failed\",\"out\":\"\",\"err\":\"\",\"summary\":{\"ns\":1,\"var\":1,\"test\":1,\"pass\":0,\"fail\":1,\"error\":0},\"failures\":[{"))))
+  (testing "what can't run"
+    (is (= {:status 1 :out "" :err "neorepl: No test called neorepl.sample-suite/nope\n"}
+           (run-command "test" "neorepl.sample-suite/nope")))
+    (is (= {:status 1 :out "" :err "neorepl: Rerunning the tests that failed takes cider-nrepl or babashka on the server\n"}
+           (run-command "retest")))
+    (is (= 2 (:status (run-command "retest" "neorepl.sample-suite"))))))
+
 (deftest repl-commands-test
   (let [repl #(:out (run-in *dir* % "repl" "-p" (str *port*)))]
     (testing "commands"
       (is (str/starts-with? (repl ",doc map\n") "user=> clojure.core/map\n([f] [f coll]"))
       (is (str/starts-with? (repl ",source when\n") "user=> (defmacro when\n"))
       (is (= "user=> (if x (do y))\nuser=> \n" (repl ",macroexpand (when x\n  y)\n")))
-      (is (str/includes? (repl "(/ 1 0)\n,pst\n") "user=> java.lang.ArithmeticException: Divide by zero\n")))
+      (is (str/includes? (repl "(/ 1 0)\n,pst\n") "user=> java.lang.ArithmeticException: Divide by zero\n"))
+      (is (= "user=> passing prints\nRan 1 test containing 1 assertion.\n0 failures, 0 errors.\nuser=> \n"
+             (repl ",test neorepl.sample-suite/passing\n")))
+      (is (= "user=> Rerunning the tests that failed takes cider-nrepl or babashka on the server\nuser=> \n"
+             (repl ",retest\n"))))
     (testing "a command's trouble doesn't end the REPL"
       (is (str/ends-with? (repl "(set! *print-length* 2)\n(throw (ex-info \"boom\" {:xs (range 10)}))\n,pst\n(+ 1 2)\n")
                           "user=> 3\nuser=> \n")))
@@ -668,6 +694,8 @@
     ["pst" "--help"] "Usage: neorepl pst"
     ["where" "--help"] "Usage: neorepl where"
     ["reload" "--help"] "Usage: neorepl reload"
+    ["test" "--help"] "Usage: neorepl test"
+    ["retest" "--help"] "Usage: neorepl retest"
     ["server" "--help"] "Usage: neorepl server"))
 
 (deftest version-test

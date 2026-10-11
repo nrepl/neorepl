@@ -178,6 +178,15 @@
         (is (screen #"The evaluation was interrupted\nuser=> $"))
         (type "(+ 3 3)\r")
         (is (screen #"(?m)^6\nuser=> $")))))
+  (testing "Ctrl-C interrupts the tests ,test runs"
+    (call-with-repl {}
+      (fn [type screen]
+        (type ",test neorepl.sample-slow\r")
+        (screen #":sleeping\n$")
+        (type "\u0003")
+        (is (screen #"The evaluation was interrupted\nuser=> $"))
+        (type "(+ 3 3)\r")
+        (is (screen #"(?m)^6\nuser=> $")))))
   (testing "Ctrl-C again stops waiting for an evaluation the server can't interrupt"
     (call-with-repl {}
       (fn [type screen]

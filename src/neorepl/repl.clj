@@ -52,11 +52,20 @@
                      (.interrupt thread)
                      thread))}))
 
+(declare edit run-tests)
+
 (def ^:private commands
   "The REPL's commands, the CIDER way: a comma, which Clojure reads as
-  whitespace, then a name. Most are the lookups in neorepl.lookups."
+  whitespace, then a name. Most are the lookups in neorepl.lookups, the
+  others :run with what command-output gets and their argument."
   (concat lookups/all
-          [{:name "edit" :arg "SYM" :help "Open where SYM is defined in your EDITOR"}
+          [{:name "test" :arg "NS..." :optional? true
+            :help "Run the tests in NS, or NS/TEST, or the project's"
+            :run #(run-tests %1 (some-> %2 (str/split #"\s+")))}
+           {:name "retest" :help "Rerun the tests that didn't pass"
+            :run (fn [state _] (run-tests state :failed))}
+           {:name "edit" :arg "SYM" :help "Open where SYM is defined in your EDITOR"
+            :run #(edit %1 %2)}
            {:name "help" :help "List the commands"}
            {:name "quit" :help "Leave the REPL"}]))
 
@@ -131,6 +140,14 @@
                 {}
                 (out (str "The editor exited with status " status)))))))
 
+(defn- run-tests
+  "Runs the tests names names, as features/run-tests takes them, the way the
+  REPL :evaluates code. Returns what to print, as command-output does."
+  [{:keys [client session evaluate]} names]
+  (if-let [report (:report (evaluate #(features/run-tests client session names %)))]
+    (out (render/test-report-text report))
+    {}))
+
 (defn- reenter
   "Puts session back in the namespace called ns, as tools.namespace's refresh
   does: reloading code can make a namespace anew, and the session would go
@@ -143,8 +160,9 @@
 (defn- command-output
   "Runs the command called name with arg, and returns what to print, as a
   response for the REPL's printer, or :quit. state has the :client, the
-  :session and the :ns, for the lookups, and the :editor-command and a
-  function to run it with the terminal :suspended, for ,edit."
+  :session and the :ns, for the lookups, the :editor-command and a function
+  to run it with the terminal :suspended, for ,edit, and a function that
+  :evaluates the way the REPL does, for ,test."
   [{:keys [client] :as state} name arg]
   (let [{arg-name :arg :keys [code? args? optional?] :as command} (command name)]
     (cond
@@ -154,8 +172,8 @@
       (nil? command) (out (str "No command called ," name ", ,help lists them"))
       (and arg-name (nil? arg) (not optional?)) (out (str "Usage: ," name " " arg-name))
       :else (try
-              (if (= "edit" name)
-                (edit state arg)
+              (if-let [run (:run command)]
+                (run state arg)
                 (let [{:keys [text none]} (lookups/run name client state (if args? (some-> arg (str/split #"\s+")) arg))]
                   (when (= "reload" name)
                     (reenter client (:session state) (:ns state)))
@@ -191,7 +209,34 @@
                           (when-not (or (and stopped (= stopped id))
                                         (and id (shutdown/exiting?)))
                             (print-response %)))
-        late (agent nil :error-mode :continue)]
+        late (agent nil :error-mode :continue)
+        ;; Evaluates with (run opts), opts being evaluation/evaluate's, and
+        ;; returns the result after printing its message.
+        evaluate (fn [run]
+                   (reset! interrupted nil)
+                   (let [{:keys [status message] :as result}
+                         (try
+                           (run {:on-send #(reset! running {:id %1 :interrupt %2})
+                                 ;; It's not dying after all, so what it says
+                                 ;; from then on is worth seeing.
+                                 :on-interrupt-failed
+                                 #(do (reset! interrupted nil)
+                                      (print-message "The server can't interrupt the evaluation, Ctrl-C again stops waiting for it"))
+                                 :on-response print-response
+                                 ;; A Ctrl-C that came before the server
+                                 ;; asked for a line is for the read too.
+                                 :read-line #(if @interrupted :interrupted (read-line))
+                                 :collect? false})
+                           (finally
+                             (reset! running nil)))]
+                     ;; The Ctrl-C that stopped the wait marked it interrupted again.
+                     (when (= "stopped" status)
+                       (reset! interrupted nil))
+                     ;; There's no point in reading more input then.
+                     (when (= "disconnected" status)
+                       (throw (ex-info message {:type ::nrepl/disconnected})))
+                     (some-> message print-message)
+                     result))]
     ;; Late output comes on the client's reader thread, which mustn't wait
     ;; for the terminal: it has the responses lookups are waiting for.
     (nrepl/on-unclaimed! client #(send-off late (fn [_] (print-response %))))
@@ -204,7 +249,8 @@
             output (when name
                      (reset! command-thread (Thread/currentThread))
                      (try
-                       (command-output (assoc io :client client :session session :ns ns) name arg)
+                       (command-output (assoc io :client client :session session :ns ns :evaluate evaluate)
+                                       name arg)
                        (finally
                          (reset! command-thread nil)
                          ;; In case Ctrl-C came after the command was done.
@@ -215,29 +261,7 @@
           output (do (print-response output)
                      (recur ns more))
           :else
-          (let [_ (reset! interrupted nil)
-                {:keys [status message] :as result}
-                (evaluation/evaluate client
-                                     (eval-msg session code (width))
-                                     {:on-send #(reset! running {:id %1 :interrupt %2})
-                                      ;; It's not dying after all, so what it says
-                                      ;; from then on is worth seeing.
-                                      :on-interrupt-failed
-                                      #(do (reset! interrupted nil)
-                                           (print-message "The server can't interrupt the evaluation, Ctrl-C again stops waiting for it"))
-                                      :on-response print-response
-                                      ;; A Ctrl-C that came before the server
-                                      ;; asked for a line is for the read too.
-                                      :read-line #(if @interrupted :interrupted (read-line))
-                                      :collect? false})]
-            (reset! running nil)
-            ;; The Ctrl-C that stopped the wait marked it interrupted again.
-            (when (= "stopped" status)
-              (reset! interrupted nil))
-            ;; There's no point in reading more input then.
-            (when (= "disconnected" status)
-              (throw (ex-info message {:type ::nrepl/disconnected})))
-            (some-> message print-message)
+          (let [result (evaluate #(evaluation/evaluate client (eval-msg session code (width)) %))]
             (recur (or (:ns result) ns) nil)))))))
 
 (defn- read-input
