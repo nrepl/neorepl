@@ -13,6 +13,10 @@
 
 (def ^:private refresh-fails? (atom false))
 
+(def ^:private test-requests
+  "The test ops wrap-fake-cider got, and their var-queries."
+  (atom []))
+
 (defn- wrap-fake-cider
   "Answers info, complete and apropos the way cider-nrepl does, with canned
   results, to tell its rung of the ladder from the others."
@@ -40,6 +44,27 @@
                                       :apropos-matches [{:name "clojure.core/map" :type "function"
                                                          :doc "Cider's map.\nMore."}])
       "macroexpand" (transport/respond-to msg :status "done" :expansion (str "Cider's " (:expander msg)))
+      ("test-var-query" "retest")
+      (do (swap! test-requests conj (select-keys msg [:op :var-query]))
+          (transport/respond-to msg :out "testing\n")
+          (transport/respond-to msg
+                                :summary {:ns 1 :var 2 :test 3 :pass 1 :fail 1 :error 1}
+                                :elapsed-time {:ms 5 :humanized "Completed in 5 ms"}
+                                :results {"neorepl.sample-suite"
+                                          {"passing" [{:type "pass" :index 0 :ns "neorepl.sample-suite"
+                                                       :var "passing" :context [] :message ""}]
+                                           "failing" [{:type "pass" :index 0 :ns "neorepl.sample-suite"
+                                                       :var "failing" :context [] :message ""}
+                                                      {:type "fail" :index 1 :ns "neorepl.sample-suite"
+                                                       :var "failing" :context "with a context"
+                                                       :message "adds up" :expected "3\n" :actual "2\n"
+                                                       :file "sample_suite.clj" :line 12}]
+                                           "erring" [{:type "error" :index 0 :ns "neorepl.sample-suite"
+                                                      :var "erring" :context [] :message ""
+                                                      :expected "(= 1 (throw (ex-info \"boom\" {})))\n"
+                                                      :error "clojure.lang.ExceptionInfo: boom {}"
+                                                      :file "sample_suite.clj" :line 15}]}})
+          (transport/respond-to msg :status "done"))
       "refresh" (if @refresh-fails?
                   ;; cider-nrepl prints the error, as the REPL would.
                   (do (transport/respond-to msg :reloading ["broken.ns"])
@@ -60,7 +85,7 @@
 
 (middleware/set-descriptor! #'wrap-fake-cider {:handles {"info" {} "complete" {} "apropos" {}
                                                          "macroexpand" {} "analyze-last-stacktrace" {}
-                                                         "refresh" {}}})
+                                                         "refresh" {} "test-var-query" {} "retest" {}}})
 
 (def ^:private user
   {:ns "user"})
@@ -161,6 +186,41 @@
     (testing "what changed, which takes cider-nrepl"
       (is (thrown-with-msg? clojure.lang.ExceptionInfo #"takes cider-nrepl" (features/reload client []))))))
 
+(deftest run-tests-test
+  (with-client [client {:port *port*}]
+    (let [session (nrepl/clone-session client)
+          run #(features/run-tests client session % {})
+          sample-file? #(str/ends-with? (str/replace (str %) "\\" "/") "test/neorepl/sample_suite.clj")]
+      (testing "namespaces, through clojure.test without the test ops"
+        (let [{:keys [status out report]} (run ["neorepl.sample-suite"])
+              {:keys [summary failures]} report]
+          (is (= "failed" status))
+          (is (= "passing prints\n" (test-server/lf out)))
+          (is (= {:ns 1 :var 3 :test 3 :pass 1 :fail 1 :error 1} summary))
+          (is (= [{:type "error" :ns "neorepl.sample-suite" :var "erring"
+                   :expected "(= 1 (throw (ex-info \"boom\" {})))" :error "clojure.lang.ExceptionInfo: boom {}"}
+                  {:type "fail" :ns "neorepl.sample-suite" :var "failing" :context "with a context"
+                   :message "adds up" :expected "(= 3 (+ 1 1))" :actual "(not (= 3 2))" :line 12}]
+                 (map #(dissoc % :file (when (= "error" (:type %)) :line)) failures)))
+          (testing "with the files the tests are in"
+            (is (every? (comp sample-file? :file) failures)))))
+      (testing "a fixture failing outside the tests"
+        (is (= [{:type "error" :ns "neorepl.sample-fixture" :error "clojure.lang.ExceptionInfo: no database {}"}]
+               (map #(select-keys % [:type :ns :var :error]) (:failures (:report (run ["neorepl.sample-fixture"])))))))
+      (testing "tests"
+        (is (= {:ns 1 :var 1 :test 1 :pass 1 :fail 0 :error 0}
+               (:summary (:report (run ["neorepl.sample-suite/passing"]))))))
+      (testing "the session's *1 stays put"
+        (nrepl/request client {:op "eval" :session session :code ":before"})
+        (run ["neorepl.sample-suite/passing"])
+        (is (= [":before"] (keep :value (nrepl/request client {:op "eval" :session session :code "*1"})))))
+      (are [names message] (thrown-with-msg? clojure.lang.ExceptionInfo message (run names))
+        ["neorepl.sample-suite/nope"] #"No test called neorepl.sample-suite/nope"
+        ["neorepl.sample-suite" "neorepl.sample-suite/passing"] #"not both"
+        ["no.such-suite"] #"no/such_suite"
+        [] #"Running every test takes cider-nrepl"
+        :failed #"Rerunning the tests that failed takes cider-nrepl"))))
+
 (deftest error-test
   (with-client [client {:port *port*}]
     (testing "errors aren't the same as finding nothing"
@@ -201,6 +261,33 @@
                                   (features/reload client [])))
             (finally
               (reset! refresh-fails? false)))
+          (testing "tests"
+            (reset! test-requests [])
+            (let [session (nrepl/clone-session client)
+                  out (atom [])
+                  {:keys [status report]} (features/run-tests client session ["neorepl.sample-suite"]
+                                                              {:on-response #(some->> (:out %) (swap! out conj))})]
+              (is (= "failed" status))
+              (is (= ["testing\n"] @out))
+              (is (= {:summary {:ns 1 :var 2 :test 3 :pass 1 :fail 1 :error 1}
+                      :failures [{:type "error" :ns "neorepl.sample-suite" :var "erring"
+                                  :expected "(= 1 (throw (ex-info \"boom\" {})))"
+                                  :error "clojure.lang.ExceptionInfo: boom {}"
+                                  :file "sample_suite.clj" :line 15}
+                                 {:type "fail" :ns "neorepl.sample-suite" :var "failing" :context "with a context"
+                                  :message "adds up" :expected "3" :actual "2"
+                                  :file "sample_suite.clj" :line 12}]
+                      :elapsed-ms 5}
+                     report))
+              (features/run-tests client session ["neorepl.sample-suite/passing" "neorepl.sample-suite/failing"] {})
+              (features/run-tests client session [] {})
+              (features/run-tests client session :failed {})
+              (is (= [{:op "test-var-query" :var-query {:ns-query {:exactly ["neorepl.sample-suite"]}}}
+                      {:op "test-var-query" :var-query {:exactly ["neorepl.sample-suite/passing"
+                                                                  "neorepl.sample-suite/failing"]}}
+                      {:op "test-var-query" :var-query {:ns-query {:project? "true" :load-project-ns? "true"}}}
+                      {:op "retest"}]
+                     @test-requests))))
           (is (= [{:class "clojure.lang.ExceptionInfo" :message "boom" :data "{:k 1}"
                    :stacktrace [{:name "user/f" :file "x.clj" :line 1}]}
                   ;; cider-nrepl sends nil as an empty list.

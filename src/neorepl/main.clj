@@ -267,26 +267,38 @@ when it times out.")
 (defn- no-session [name]
   {:status "no-session" :message (str "No session called " name)})
 
-(defn- report-evaluation
-  "Evaluates msg on the server options point at, in the session they name,
-  with evaluate-options on top of the ones they give, prints the result in
-  the format they ask for and returns the exit status."
-  [msg {:keys [session timeout max-output format] :as options} {:keys [dir sessions-file]} evaluate-options]
+(defn- report-run
+  "Runs (run client session opts) on the server options point at, in the
+  session they name, where opts are evaluation/evaluate's, prints the result
+  in the format they ask for, with (text result) after the output for text,
+  if it says anything, and returns the exit status."
+  [run {:keys [session timeout max-output format] :as options} {:keys [dir sessions-file]} text]
   (with-client options dir
     (fn [client]
-      (let [{:keys [status message truncated err] :as result}
-            (evaluation/evaluate client
-                      (assoc msg :session (sessions/ensure! sessions-file client session))
-                      (merge {:timeout timeout
-                              :max-output max-output
-                              :on-response (if (= "text" format) (evaluation/text-printer) (fn [_]))}
-                             evaluate-options))]
+      (let [{:keys [status message truncated out err] :as result}
+            (run client
+                 (sessions/ensure! sessions-file client session)
+                 {:timeout timeout
+                  :max-output max-output
+                  :on-response (if (= "text" format) (evaluation/text-printer) (fn [_]))})]
         (if (= "text" format)
           (do (end-err-line err)
               (when truncated (warn (str "Cut the output at " max-output " characters")))
+              (when-let [text (text result)]
+                (when-not (or (empty? out) (str/ends-with? out "\n"))
+                  (newline))
+                (println text))
               (some-> message warn))
           (emit format result))
         (case status "ok" 0 "timeout" 124 "disconnected" 3 1)))))
+
+(defn- report-evaluation
+  "Evaluates msg the way report-run runs things, with evaluate-options on top
+  of the ones options give."
+  [msg options ctx evaluate-options]
+  (report-run (fn [client session opts]
+                (evaluation/evaluate client (assoc msg :session session) (merge opts evaluate-options)))
+              options ctx (constantly nil)))
 
 (def ^:private eval-options
   (concat connection-options
@@ -702,6 +714,64 @@ usage errors and 3 when there's no server to talk to."
         (do (report format (no-session session))
             1)))))
 
+(def ^:private test-options
+  (concat connection-options evaluation-options common-options))
+
+(def ^:private test-exit-statuses
+  "Exit status: 0 when every test passes, 1 when one doesn't or the tests can't
+run, 2 on usage errors, 3 when there's no server to talk to or the connection
+to it drops and 124 when they time out.")
+
+(defn- report-tests
+  "Runs the tests names names, as features/run-tests takes them, the way
+  report-run runs things."
+  [names options ctx]
+  (report-run (fn [client session opts]
+                (let [{:keys [report] :as result} (features/run-tests client session names opts)]
+                  ;; The report's at the top in edn and json.
+                  (merge (dissoc result :report) report)))
+              options ctx #(when (:summary %) (render/test-report-text %))))
+
+(def ^:private test-help
+  (help-text
+   "Usage: neorepl test [options] [NS...]
+       neorepl test [options] NS/TEST..."
+   "Runs the tests in the namespaces NS, or the tests NS/TEST, and prints what
+didn't pass and how many did. It loads namespaces that aren't loaded yet,
+but not the changes to ones that are, which neorepl load and reload are for.
+Without arguments it runs every test in the project, which takes cider-nrepl
+or babashka on the server. --format edn and json have the counts and what
+each failure expected, got and where."
+   test-options
+   discovery-note
+   sessions-note
+   test-exit-statuses
+   "Examples:
+  neorepl test
+  neorepl test my.app-test my.app.db-test
+  neorepl test --format json my.app-test/start-test"))
+
+(defn- test-command [options args ctx]
+  (report-tests (vec args) options ctx))
+
+(def ^:private retest-help
+  (help-text
+   "Usage: neorepl retest [options]"
+   "Reruns the tests that didn't pass the last time tests ran on the server, by
+neorepl test, a REPL or an editor. It takes cider-nrepl or babashka on the
+server."
+   test-options
+   discovery-note
+   sessions-note
+   test-exit-statuses
+   "Examples:
+  neorepl retest
+  neorepl retest --format json"))
+
+(defn- retest-command [options args ctx]
+  (reject-args args)
+  (report-tests :failed options ctx))
+
 (def ^:private repl-options
   (concat connection-options
           [(-> session-option
@@ -833,6 +903,9 @@ with an error, and 2 on usage errors."
     :main (lookup-command "where")}
    {:name "reload" :summary "Reload code" :options reload-options :help reload-help
     :main reload-command}
+   {:name "test" :summary "Run tests" :options test-options :help test-help :main test-command}
+   {:name "retest" :summary "Rerun the tests that didn't pass" :options test-options :help retest-help
+    :main retest-command}
    {:name "pst" :summary "Print the last error's stack trace" :options pst-options :help pst-help
     :main pst-command}
    {:name "interrupt" :summary "Interrupt an evaluation" :options interrupt-options :help interrupt-help

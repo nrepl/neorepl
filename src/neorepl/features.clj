@@ -12,6 +12,7 @@
   isn't the same as finding nothing."
   (:require [clojure.edn :as edn]
             [clojure.string :as str]
+            [neorepl.evaluation :as evaluation]
             [neorepl.lexer :as lexer]
             [neorepl.nrepl :as nrepl]))
 
@@ -287,3 +288,199 @@
          output (str/join (keep #(or (:out %) (:err %)) responses))]
      (cond-> {:reloaded reloaded}
        (seq output) (assoc :output output)))))
+
+(defn- qualified?
+  "Whether name, a test's or a namespace's, is a test's: ns/name."
+  [name]
+  (str/includes? name "/"))
+
+(defn- unknown-tests
+  "Loads the namespaces that names, names of namespaces and of tests as
+  ns/name, are or are in, and returns the names of tests that aren't any.
+  Both test ops go quiet when asked for a test in a namespace that isn't
+  loaded, and cider-nrepl's runs every test it can find for one that isn't
+  there."
+  [client names opts]
+  (eval-data client {:ns "user"}
+             "(let [names (map symbol %s)]
+                (apply require (distinct (map (fn [n] (symbol (or (namespace n) (name n)))) names)))
+                (vec (for [n names
+                           :when (and (namespace n) (not (:test (meta (find-var n)))))]
+                       (str n))))"
+             [names] opts))
+
+(def ^:private run-tests-code
+  "Runs the tests in the namespaces that %s names, or the tests it names, the
+  way clojure.test does, and returns the report, the way test-var-query's
+  reads after test-results, printed. For servers without a test op."
+  "(do
+     (require 'clojure.test)
+     (let [names (map symbol %s)
+           counts (atom {:ns 0 :var 0 :test 0 :pass 0 :fail 0 :error 0})
+           failures (atom [])
+           ;; For what goes wrong outside a test, like a :once fixture.
+           current-ns (atom nil)
+           start (System/currentTimeMillis)
+           record (fn [{:keys [type message expected actual file line]}]
+                    (let [m (meta (first clojure.test/*testing-vars*))]
+                      (swap! counts (fn [c] (-> c (update type inc) (update :test inc))))
+                      (when-not (= :pass type)
+                        (swap! failures conj
+                               (cond-> {:type (name type)
+                                        :ns (some-> (or (:ns m) @current-ns) ns-name str)
+                                        :var (some-> (:name m) str)
+                                        :context (not-empty (clojure.test/testing-contexts-str))
+                                        :message (some-> message str)
+                                        :file file
+                                        :line line}
+                                 (some? expected) (assoc :expected (pr-str expected))
+                                 (= :fail type) (assoc :actual (pr-str actual))
+                                 (= :error type) (assoc :error (str actual)))))))
+           ;; clojure.test lets what a :once fixture throws through.
+           guarded (fn [ns f]
+                     (reset! current-ns ns)
+                     (try (f) (catch Throwable e (record {:type :error :actual e}))))]
+       (binding [clojure.test/report (fn [{:keys [type] :as m}]
+                                       (case type
+                                         (:pass :fail :error) (record m)
+                                         :begin-test-var (swap! counts update :var inc)
+                                         :begin-test-ns (do (reset! current-ns (:ns m))
+                                                            (swap! counts update :ns inc))
+                                         nil))]
+         (if (some namespace names)
+           (doseq [[ns vars] (group-by (fn [v] (:ns (meta v))) (map find-var names))]
+             (swap! counts update :ns inc)
+             (guarded ns (fn [] (clojure.test/test-vars vars))))
+           (doseq [n names]
+             (guarded (the-ns n) (fn [] (clojure.test/test-ns n))))))
+       (binding [*print-length* nil *print-level* nil *print-meta* false]
+         (pr-str {:summary @counts
+                  :failures (mapv (fn [f] (into {} (remove (comp nil? val)) f)) @failures)
+                  :elapsed-ms (- (System/currentTimeMillis) start)}))))")
+
+(defn- test-results
+  "What didn't pass in the :results of test-var-query or retest, which go
+  namespace, test and assertion, in that order."
+  [results]
+  (vec (for [[_ tests] (sort-by key results)
+             [_ assertions] (sort-by key tests)
+             {:keys [type line] :as assertion} (sort-by :index assertions)
+             :when (#{"fail" "error"} type)
+             :let [text #(some-> (get assertion %) blank->nil str str/trimr)]]
+         (into {} (remove (comp nil? val))
+               {:type type
+                :ns (text :ns)
+                :var (text :var)
+                :context (text :context)
+                :message (text :message)
+                :expected (text :expected)
+                :actual (text :actual)
+                :error (text :error)
+                :file (text :file)
+                :line line}))))
+
+(defn- locate
+  "failures with the :file each one's test is in, for those whose :file is
+  that file's name, as cider-nrepl and clojure.test give it, or missing, as
+  babashka has it. Others, like an assertion in a helper elsewhere, keep
+  theirs, which goes with their :line."
+  [client session failures]
+  (let [tests (distinct (keep (fn [{:keys [ns var]}] (when (and ns var) [ns var])) failures))
+        ;; Independent lookups, so all at once.
+        files (zipmap tests (pmap (fn [[ns var]]
+                                    (try
+                                      (:file (info client (str ns "/" var) {:ns ns :session session}))
+                                      (catch clojure.lang.ExceptionInfo _ nil)))
+                                  tests))]
+    (mapv (fn [{:keys [ns var] :as failure}]
+            (let [file (get files [ns var])
+                  given (source-file (:file failure))]
+              (if (and file (or (nil? given) (= given (.getName (java.io.File. ^String file)))))
+                (assoc failure :file file)
+                failure)))
+          failures)))
+
+(defn- op-report
+  "The report in a test-var-query or retest response."
+  [{:keys [summary results elapsed-time]}]
+  {:summary (merge {:ns 0 :var 0 :test 0 :pass 0 :fail 0 :error 0}
+                   (select-keys summary [:ns :var :test :pass :fail :error]))
+   :failures (test-results results)
+   :elapsed-ms (:ms elapsed-time)})
+
+(defn- eval-report
+  "The report in the value of run-tests-code's evaluation."
+  [value]
+  (-> (edn/read-string (edn/read-string value))
+      ;; In the order test-var-query has them.
+      (update :failures #(vec (sort-by (juxt :ns :var) %)))))
+
+(defn- test-msg
+  "The message that runs the tests run-tests takes names for, in session, or
+  in copy, a copy of it, through clojure.test, when there's one."
+  [session copy names]
+  (cond
+    (= :failed names) {:op "retest" :session session}
+    copy {:op "eval" :session copy :code (format run-tests-code (pr-str (vec names)))}
+    :else {:op "test-var-query"
+           :session session
+           :var-query (cond
+                        (some qualified? names) {:exactly (vec names)}
+                        (seq names) {:ns-query {:exactly (vec names)}}
+                        ;; bencode has no booleans.
+                        :else {:ns-query {:project? "true" :load-project-ns? "true"}})}))
+
+(defn run-tests
+  "Runs tests in session: those in the namespaces names names, or the tests
+  it names, as ns/name, every test in the project when it's empty and the
+  ones that didn't pass last time when it's :failed. Returns what
+  evaluation/evaluate does, whose opts it takes, and, when the tests ran to
+  the end, the :report: the :summary, counting the :ns, the tests as :var,
+  the assertions as :test and how many :pass, :fail and :error, the
+  :failures, maps with their :type (fail or error), :ns, :var, :context,
+  :message, :expected, :actual or :error, :file and :line, and the
+  :elapsed-ms. Its :status is failed when a test didn't pass."
+  [client session names {:keys [timeout] :as opts}]
+  (let [failed? (= :failed names)
+        ops? (supports? client (if failed? "retest" "test-var-query"))]
+    (when (and (not failed?) (some qualified? names) (not-every? qualified? names))
+      (throw (ex-info "Give namespaces or tests to run, not both" {:type ::failed})))
+    (when-not ops?
+      (cond
+        failed? (throw (ex-info "Rerunning the tests that failed takes cider-nrepl or babashka on the server"
+                                {:type ::failed}))
+        (empty? names) (throw (ex-info "Running every test takes cider-nrepl or babashka on the server; name the namespaces to test"
+                                       {:type ::failed}))))
+    (when (and (not failed?) (seq names))
+      (when-let [unknown (seq (unknown-tests client names {:timeout-ms (some-> timeout (* 1000) long)}))]
+        (throw (ex-info (str "No test called " (str/join ", " unknown)) {:type ::failed}))))
+    (let [;; The eval ones run in a copy of the session, so its *1 stays put.
+          copy (when-not ops? (nrepl/clone-session client session))
+          report (atom nil)
+          on-response (:on-response opts (fn [_]))]
+      (try
+        (let [{:keys [status] :as result}
+              (-> (evaluation/evaluate
+                   client
+                   (test-msg session copy names)
+                   (-> opts
+                       ;; It would cut the report short, which is the eval's value.
+                       (cond-> copy (dissoc :max-output))
+                       (assoc :on-response (fn [response]
+                                             (cond
+                                               (:summary response) (reset! report (op-report response))
+                                               (and copy (:value response)) (reset! report (eval-report (:value response))))
+                                             (on-response (cond-> response copy (dissoc :value)))))))
+                  (dissoc :values :ns))
+              {{:keys [fail error]} :summary :as report} @report]
+          (cond
+            ;; Only a run that ended by itself, since clojure.test reports
+            ;; an interrupted test as an error and carries on.
+            (not= "ok" status) result
+            report (cond-> (assoc result :report (update report :failures #(locate client session %)))
+                     (pos? (+ fail error)) (assoc :status "failed"))
+            :else (throw (ex-info "The server didn't run the tests" {:type ::failed}))))
+        (finally
+          (when copy
+            ;; There's nothing to close when the connection is gone.
+            (try (nrepl/close-session client copy) (catch Exception _ nil))))))))

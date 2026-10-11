@@ -28,8 +28,9 @@ highlighted, values get pretty printed and the history is kept per project.
 TAB completes, the arglists of the function you're calling show up after
 the cursor and C-x C-d shows the documentation of what's at the cursor.
 Commands start with a comma, the CIDER way: `,doc`, `,source`, `,apropos`,
-`,macroexpand`, `,pst` for the last error's stack trace, `,reload`, `,edit`
-to open a definition in your `$EDITOR`, and `,help` for the rest.
+`,macroexpand`, `,pst` for the last error's stack trace, `,reload`,
+`,test`, `,edit` to open a definition in your `$EDITOR`, and `,help` for the
+rest.
 Without a terminal, say in a pipe or Emacs' `M-x shell`, it works like
 `clojure.main`'s REPL instead.
 
@@ -100,6 +101,18 @@ server has it:
 neorepl doc map
 neorepl source --ns my.app my.app/start
 neorepl pst --format json
+```
+
+`neorepl test` runs tests, in the namespaces you name, the tests you name or,
+without either, the whole project's, and prints what didn't pass and where.
+`neorepl retest` reruns the ones that didn't. They're `,test` and `,retest`
+in the REPL. cider-nrepl or babashka on the server runs them, and so does
+plain `clojure.test`, given the namespaces:
+
+```shell
+neorepl test
+neorepl test my.app-test my.app.db-test
+neorepl test --format json my.app-test/start-test
 ```
 
 `neorepl check` finds unbalanced parens, brackets and braces, the most
