@@ -126,22 +126,33 @@ src/my/app.clj:12:1: Unclosed (
 
 ## How does it compare?
 
-neorepl isn't the only terminal REPL that talks nREPL these days:
+neorepl isn't the only terminal REPL that talks nREPL these days. The
+Clojure team's [clojure-cli.repl](https://github.com/clojure/clojure-cli.repl)
+and babashka's `bb repl --connect` are both nREPL clients too, but they're
+after different things. neorepl's goals are a CIDER-like REPL in the
+terminal, a CLI that serves coding agents as well as people, and working
+with any nREPL server out there. Here's how the three stack up in practice
+(as of October 2026):
 
-- The Clojure team's [clojure-cli.repl](https://github.com/clojure/clojure-cli.repl)
-  runs an nREPL server of its own on the project's classpath and a JLine
-  client in a second JVM. It has structural editing, evaluation of the form
-  at the cursor, Clojure and Java docs and a `datafy`/`nav` inspector. The
-  docs and the inspector are ops of its server, and it needs Clojure 1.12+.
-- `bb repl --connect` puts babashka's console REPL in front of any nREPL
-  server, with completion, eldoc, doc lookup and Ctrl-C. bb's own server
-  also bundles cider-nrepl's inspector, test runner and stacktrace ops.
+| | neorepl | clojure-cli.repl | `bb repl --connect` |
+|---|---|---|---|
+| Runs on | JVM or babashka | JVM, Clojure 1.12+ | babashka |
+| Servers | any nREPL server | its own; other servers only evaluate | any nREPL server |
+| Starts a server for you | Leiningen, deps.edn, bb and shadow-cljs projects, with cider-nrepl | deps.edn projects | no |
+| Completion, arglists as you type | yes | no | yes |
+| Docs | yes, and source, apropos, macroexpansion | yes, with Java docs | yes |
+| Structural editing, eval at the cursor | no | yes | no |
+| Inspector | coming | yes | no |
+| Test runner | yes | no | no |
+| ClojureScript | shadow-cljs, piggieback, figwheel-main | no | evaluation only |
+| CLI for scripts and agents | yes: eval, docs, tests and more, with JSON output | no | no |
 
-neorepl follows CIDER instead. It sends the ops CIDER sends, so it gets the
-most out of a server with cider-nrepl (or babashka's take on it) and falls
-back to nREPL's built-in ops and plain evaluation without one. It doesn't
-add middleware of its own. On top of that come jack-in, ClojureScript
-sessions and a CLI for scripts and coding agents.
+In short, clojure-cli.repl is the one to try if you live in deps.edn and want
+the fanciest line editing, and `bb repl --connect` is a lightweight way to
+poke at a running server. neorepl follows CIDER: it sends the ops CIDER
+sends, so it gets the most out of a server with cider-nrepl (or babashka's
+take on it) and falls back to nREPL's built-in ops and plain evaluation
+without one. It doesn't add middleware of its own.
 
 ## Development
 
