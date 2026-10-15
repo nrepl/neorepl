@@ -28,9 +28,9 @@ highlighted, values get pretty printed and the history is kept per project.
 TAB completes, the arglists of the function you're calling show up after
 the cursor and C-x C-d shows the documentation of what's at the cursor.
 Commands start with a comma, the CIDER way: `,doc`, `,source`, `,apropos`,
-`,macroexpand`, `,pst` for the last error's stack trace, `,reload`,
-`,test`, `,inspect`, `,edit` to open a definition in your `$EDITOR`, and
-`,help` for the rest.
+`,macroexpand`, `,pst` for the last error's stack trace, `,stacktrace` to
+browse it, `,reload`, `,test`, `,inspect`, `,edit` to open a definition in
+your `$EDITOR`, and `,help` for the rest.
 Without a terminal, say in a pipe or Emacs' `M-x shell`, it works like
 `clojure.main`'s REPL instead.
 
@@ -128,6 +128,11 @@ neorepl inspect '(System/getProperties)'
 neorepl inspect --push 3
 neorepl inspect --pop
 ```
+
+`,stacktrace` shows the last error full-screen the same way: Enter on a
+frame opens its source in your `$EDITOR` at that line, and `a` brings back
+the frames `,pst` leaves out, the ones of the REPL's own machinery and the
+repeats of the same function.
 
 `neorepl check` finds unbalanced parens, brackets and braces, the most
 common way for an edit (or a coding agent) to break a Clojure file. It

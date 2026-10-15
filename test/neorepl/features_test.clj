@@ -77,8 +77,13 @@
                       (transport/respond-to msg :status ["ok" "done"])))
       "analyze-last-stacktrace" (do (transport/respond-to msg :class "clojure.lang.ExceptionInfo" :message "boom"
                                                           :data "{:k 1}" :phase "execution"
-                                                          :stacktrace [{:name "user/f" :file "x.clj" :line 1
-                                                                        :file-url []}])
+                                                          :stacktrace [{:name "user$f/invoke" :var "user/f" :file "x.clj" :line 1
+                                                                        :file-url []}
+                                                                       {:name "my.app$g/invoke" :var "my.app/g" :file "app.clj" :line 5
+                                                                        :file-url "file:/src/my/app.clj"}
+                                                                       ;; As babashka's server has them.
+                                                                       {:name "user/g" :ns "user" :fn "g/fn"
+                                                                        :file "y.clj" :line 2}])
                                     (transport/respond-to msg :class "java.lang.Exception" :message []
                                                           :stacktrace [])
                                     (transport/respond-to msg :status "done"))
@@ -173,12 +178,29 @@
         (is (= {:class "java.lang.ArithmeticException" :message "inner"}
                (select-keys inner [:class :message])))
         (is (seq (:stacktrace inner)))
+        ;; On babashka, the frames are its interpreter's.
+        (when-not (System/getProperty "babashka.version")
+          (testing "with the vars of Clojure's frames"
+            (is (= "user/boom" (:var (first (:stacktrace outer)))))
+          (is (= "user/boom" (:var (first (:stacktrace inner)))))
+          (is (nil? (:var (first (filter #(str/starts-with? (:name %) "clojure.lang.Compiler/") (:stacktrace inner))))))))
         (testing "with frames that follow on in the same function flagged dup"
           (let [shown (remove #(some #{"dup" "tooling"} (:flags %)) (:stacktrace inner))
                 fn-of #(first (str/split (:name %) #"/"))]
             (is (every? (fn [[a b]] (not= (fn-of a) (fn-of b))) (partition 2 1 shown))))))
       (testing "leaves the session's *1 alone"
         (is (= ["#'user/boom"] (keep :value (nrepl/request client {:op "eval" :session session :code "*1"}))))))))
+
+(deftest frame-var-test
+  (are [frame expected] (= expected (#'features/frame-var frame))
+    {:var "user/f" :name "user$f/invoke"} "user/f"
+    {:ns "user" :name "user/f"} "user/f"
+    {:ns "user"} nil
+    {:name "my_app.core$f$fn__123/invoke"} "my-app.core/f"
+    {:name "user$eval123/invokeStatic"} "user/eval123"
+    {:name "java.util.concurrent.ThreadPoolExecutor$Worker/run"} nil
+    {:name "clojure.lang.Compiler/eval"} nil
+    {} nil))
 
 (deftest reload-test
   (with-client [client {:port *port*}]
@@ -290,7 +312,10 @@
                       {:op "retest"}]
                      @test-requests))))
           (is (= [{:class "clojure.lang.ExceptionInfo" :message "boom" :data "{:k 1}"
-                   :stacktrace [{:name "user/f" :file "x.clj" :line 1}]}
+                   :stacktrace [{:name "user$f/invoke" :file "x.clj" :line 1 :var "user/f"}
+                                {:name "my.app$g/invoke" :file "app.clj" :line 5 :var "my.app/g"
+                                 :path (str (java.io.File. (java.net.URI. "file:/src/my/app.clj")))}
+                                {:name "user/g" :file "y.clj" :line 2 :var "user/g"}]}
                   ;; cider-nrepl sends nil as an empty list.
                   {:class "java.lang.Exception" :message nil :data nil :stacktrace []}]
                  (features/last-error client (nrepl/clone-session client))))))

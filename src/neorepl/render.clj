@@ -27,25 +27,46 @@
   (str/join "\n" (cli/columns (for [{:keys [name doc]} matches]
                                 [name (str (some-> doc str/split-lines first))]))))
 
-(defn- frame-text [{:keys [name file line]}]
-  (str "    at " name " ("
+(defn frame-text
+  "A frame of a stack trace, from last-error, as Java prints it, after at."
+  [{:keys [name file line]}]
+  (str name " ("
        (cond
          (and file line) (str file ":" line)
          file file
          :else "Unknown Source")
        ")"))
 
+(defn cause-text
+  "The class and the message of cause, from last-error, the nth one of an
+  error's, as Java prints them."
+  [n {:keys [class message]}]
+  (str (when (pos? n) "Caused by: ") class (some->> message (str ": "))))
+
+(defn data-lines
+  "The ex-data of a cause, from last-error, as the lines Java would print
+  after its message, indented."
+  [data]
+  (some->> data str/trim str/split-lines (map #(str "  " %))))
+
+(defn hidden-frame?
+  "Whether a frame of a stack trace, from last-error, is one of the tools
+  around the code, or one more of the function before it, which error-text
+  leaves out."
+  [{:keys [flags]}]
+  (some #{"tooling" "dup"} flags))
+
 (defn error-text
   "An error from last-error as text, the way Java prints stack traces, minus
   the frames of the tools around the code and the duplicates."
   [causes]
   (str/join "\n"
-            (for [[i {:keys [class message data stacktrace]}] (map-indexed vector causes)
-                  line (concat [(str (when (pos? i) "Caused by: ") class (some->> message (str ": ")))]
-                               (some->> data str/trim str/split-lines (map #(str "  " %)))
-                               (for [{:keys [flags] :as frame} stacktrace
-                                     :when (not-any? #{"tooling" "dup"} flags)]
-                                 (frame-text frame)))]
+            (for [[i {:keys [data stacktrace] :as cause}] (map-indexed vector causes)
+                  line (concat [(cause-text i cause)]
+                               (data-lines data)
+                               (for [frame stacktrace
+                                     :when (not (hidden-frame? frame))]
+                                 (str "    at " (frame-text frame))))]
               line)))
 
 (defn location-text

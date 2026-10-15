@@ -11,6 +11,7 @@
   :timeout-ms. They throw ::failed when the server reports an error, which
   isn't the same as finding nothing."
   (:require [clojure.edn :as edn]
+            [clojure.main :as main]
             [clojure.string :as str]
             [neorepl.evaluation :as evaluation]
             [neorepl.lexer :as lexer]
@@ -208,12 +209,26 @@
                  (cond-> frame (= (fn-of previous) (fn-of frame)) (update :flags (fnil conj []) "dup")))
                frames (rest frames)))))
 
+(defn- frame-var
+  "The var of frame's function, from analyze-last-stacktrace or *e, if it's
+  Clojure's: cider-nrepl says, babashka's server names the frame after it,
+  and the others name it after the class, user$f$fn__123 for user/f, which
+  is a namespace's, lower case, rather than a Java class's, like
+  ThreadPoolExecutor$Worker."
+  [{:keys [var ns name]}]
+  (let [ns-and-name #(some->> % (re-find #"^[^/]+/[^/]+"))]
+    (cond
+      var var
+      ns (ns-and-name name)
+      (re-find #"^(?:[^$/]*\.)?[a-z_][^.$/]*\$" (str name)) (ns-and-name (main/demunge (first (str/split name #"/")))))))
+
 (defn last-error
   "The last error in session, as its causes, outermost first: maps with the
   :class, the :message, ex-data as :data text and the :stacktrace, frames with
-  a :name, :file and :line, and :flags saying what kind of frame it is, like
-  tooling for the frames running the code rather than of it. Nil when
-  nothing's gone wrong yet."
+  a :name, :file and :line, the :var of the function, for Clojure's frames,
+  the full :path of the file, when the server says, and :flags saying what
+  kind of frame it is, like tooling for the frames running the code rather
+  than of it. Nil when nothing's gone wrong yet."
   ([client session] (last-error client session {}))
   ([client session opts]
    (some->>
@@ -256,7 +271,15 @@
             {:class class
              :message (blank->nil message)
              :data (blank->nil data)
-             :stacktrace (dups (mapv #(select-keys % [:name :file :line :flags]) stacktrace))}))
+             :stacktrace (dups (mapv (fn [{:keys [file-url] :as frame}]
+                                       (let [var (frame-var frame)
+                                             ;; cider-nrepl's, for the exact file the line's in.
+                                             path (when (and (string? file-url) (str/starts-with? file-url "file:"))
+                                                    (source-file file-url))]
+                                         (cond-> (select-keys frame [:name :file :line :flags])
+                                           var (assoc :var var)
+                                           path (assoc :path path))))
+                                     stacktrace))}))
     not-empty)))
 
 (defn reload

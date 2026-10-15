@@ -2,6 +2,7 @@
   "The REPL, with a line editor on a terminal and without one elsewhere."
   (:require [clojure.java.io :as io]
             [clojure.string :as str]
+            [neorepl.browser :as browser]
             [neorepl.cli :as cli]
             [neorepl.editor :as editor]
             [neorepl.evaluation :as evaluation]
@@ -11,7 +12,8 @@
             [neorepl.lexer :as lexer]
             [neorepl.nrepl :as nrepl]
             [neorepl.render :as render]
-            [neorepl.shutdown :as shutdown])
+            [neorepl.shutdown :as shutdown]
+            [neorepl.stacktrace :as stacktrace])
   (:import (java.security MessageDigest)
            (sun.misc Signal SignalHandler)))
 
@@ -53,7 +55,7 @@
                      (.interrupt thread)
                      thread))}))
 
-(declare edit inspect run-tests)
+(declare edit inspect run-tests browse-error)
 
 (def ^:private commands
   "The REPL's commands, the CIDER way: a comma, which Clojure reads as
@@ -68,6 +70,8 @@
            {:name "inspect" :arg "CODE" :optional? true :code-arg? true
             :help "Inspect the value of CODE, or the last value"
             :run #(inspect %1 %2)}
+           {:name "stacktrace" :help "Browse the last error's stack trace and open its frames"
+            :run (fn [state _] (browse-error state))}
            {:name "edit" :arg "SYM" :help "Open where SYM is defined in your EDITOR"
             :run #(edit %1 %2)}
            {:name "help" :help "List the commands"}
@@ -121,28 +125,56 @@
       (concat (str/split (str/trim editor-command) #"\s+") args)
       (concat ["sh" "-c" (str editor-command " \"$@\"") "sh"] args))))
 
+(defn- open
+  "Opens file at line with the :editor-command, with the terminal :suspended
+  for it. Returns what to print, as command-output does."
+  [{:keys [editor-command suspended]} file line]
+  (cond
+    (str/blank? editor-command) (out "Set EDITOR, or VISUAL, to the editor to open")
+    (not (.isFile (io/file file))) (out (str "Can't open " file))
+    :else (let [command (editor-command-line editor-command file line)
+                status (suspended #(let [editor (-> (ProcessBuilder. ^java.util.List command) .inheritIO .start)]
+                                     (try
+                                       (.waitFor editor)
+                                       ;; Ctrl-C stops waiting, for an editor with a
+                                       ;; window of its own that doesn't take it.
+                                       (catch InterruptedException e
+                                         (.destroy editor)
+                                         (throw e)))))]
+            (if (zero? status)
+              {}
+              (out (str "The editor exited with status " status))))))
+
 (defn- edit
-  "Opens the definition of sym with the :editor-command, with the terminal
-  :suspended for it. Returns what to print, as command-output does."
-  [{:keys [client editor-command suspended] :as state} sym]
-  (let [{:keys [found none]} (lookups/run "where" client state sym)
-        {:keys [file line]} found]
+  "Opens the definition of sym in the editor, as open does."
+  [{:keys [client] :as state} sym]
+  (let [{:keys [found none]} (lookups/run "where" client state sym)]
+    (if none
+      (out none)
+      (open state (:file found) (:line found)))))
+
+(defn- open-frame
+  "Opens the source of frame, from features/last-error, at its line, as open
+  does: its :path, or the file its :var is in."
+  [{:keys [client] :as state} {:keys [path var line] :as frame}]
+  (if-let [found (if path
+                   {:file path}
+                   (when var (:found (lookups/run "where" client state var))))]
+    (open state (:file found) (or line (:line found)))
+    (out (str "No source to open for " (render/frame-text frame)))))
+
+(defn- browse-error
+  "Shows the last error, as ,pst finds it, letting the user :browse it and
+  open the frame they pick, or prints it when there's no browsing. Returns
+  what to print, as command-output does."
+  [{:keys [client browse] :as state}]
+  (let [{:keys [found text none]} (lookups/run "pst" client state nil)]
     (cond
       none (out none)
-      (str/blank? editor-command) (out "Set EDITOR, or VISUAL, to the editor to open")
-      (not (.isFile (io/file file))) (out (str "Can't open " file))
-      :else (let [command (editor-command-line editor-command file line)
-                  status (suspended #(let [editor (-> (ProcessBuilder. ^java.util.List command) .inheritIO .start)]
-                                       (try
-                                         (.waitFor editor)
-                                         ;; Ctrl-C stops waiting, for an editor with a
-                                         ;; window of its own that doesn't take it.
-                                         (catch InterruptedException e
-                                           (.destroy editor)
-                                           (throw e)))))]
-              (if (zero? status)
-                {}
-                (out (str "The editor exited with status " status)))))))
+      browse (if-let [frame (stacktrace/browse browse found)]
+               (open-frame state frame)
+               {})
+      :else (out text))))
 
 (defn- run-tests
   "Runs the tests names names, as features/run-tests takes them, the way the
@@ -159,7 +191,7 @@
   [{:keys [client session evaluate browse]} code]
   (if-let [lines (:lines (evaluate #(features/inspect client session (or code "*1") %)))]
     (if browse
-      (do (browse lines)
+      (do (inspector/browse browse client session lines)
           {})
       (out (render/inspector-text lines)))
     {}))
@@ -179,7 +211,8 @@
   :session and the :ns, for the lookups, the :editor-command and a function
   to run it with the terminal :suspended, for ,edit, a function that
   :evaluates the way the REPL does, for ,test and ,inspect, and one to
-  :browse what ,inspect finds, if the REPL can."
+  :browse what ,inspect and ,stacktrace find, as browser/browse does, partly
+  applied to the editor, if the REPL can."
   [{:keys [client] :as state} name arg]
   (let [{arg-name :arg :keys [code? args? optional?] :as command} (command name)]
     (cond
@@ -412,7 +445,7 @@
                                    (editor/print-text editor :notice (str % "\n")))
                :editor-command editor-command
                :suspended #(editor/suspended editor %)
-               :browse #(inspector/browse editor client session %)})))
+               :browse (partial browser/browse editor)})))
 
 (defn- history-file
   "The history for the project in dir: a file in history-dir named after a
