@@ -4,8 +4,10 @@
   (:require [clojure.java.io :as io]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing use-fixtures]]
+            [neorepl.features :as features]
             [neorepl.main :as main]
             [neorepl.nrepl :as nrepl]
+            [neorepl.repl :as repl]
             [neorepl.test-server :as test-server :refer [*port* call-with-temp-dir lf with-client]])
   (:import (java.io ByteArrayInputStream ByteArrayOutputStream PipedInputStream PipedOutputStream)))
 
@@ -296,3 +298,43 @@
     (testing "on a screen of its own, which goes away after"
       (is (str/includes? out "\u001b[?1049h"))
       (is (str/includes? out "\u001b[?1049l")))))
+
+(deftest stacktrace-test
+  (testing "the last error, on a screen of its own"
+    (call-with-repl {}
+      (fn [type screen]
+        (type "(/ 1 0)\r")
+        (screen #"Divide by zero.*\nuser=> $")
+        (type ",stacktrace\r")
+        (is (screen #"ArithmeticException: Divide by zero(?s).*q quit"))
+        (type "q")
+        (is (screen #"user=> $")))))
+  ;; The editor's a shell script, and the frames on babashka are its
+  ;; interpreter's. The fake terminal can't take an editor, since pausing
+  ;; it for one ends its input.
+  (when-not (or (test-server/windows?) (System/getProperty "babashka.version"))
+    (testing "opening a frame's source"
+      (call-with-temp-dir
+       (fn [dir]
+         (let [file (test-server/spit-file dir "st/demo.clj" "(ns st.demo)\n\n(defn f []\n  (/ 1 0))\n")
+               edited (io/file dir "edited")
+               editor (doto (test-server/spit-file dir "vi" (str "#!/bin/sh\necho \"$@\" > '" edited "'\n"))
+                        (.setExecutable true))]
+           (with-client [client {:port *port*}]
+             (let [session (nrepl/clone-session client)
+                   state {:client client :session session :ns "user" :editor-command (str editor)
+                          :suspended #(%)}
+                   [{:keys [stacktrace]}] (do (nrepl/request client {:op "eval" :session session
+                                                                    :code (str "(load-file " (pr-str (str file)) ") (st.demo/f)")})
+                                              (features/last-error client session))
+                   open #(#'repl/open-frame state (first (filter % stacktrace)))]
+               (testing "at the frame's line"
+                 (is (= {} (open #(= "st.demo/f" (:var %)))))
+                 (is (= (str "+4 " (.getAbsolutePath file) "\n") (slurp edited))))
+               (testing "or at the frame's own path, when the server says"
+                 (is (= {} (#'repl/open-frame state {:path (str file) :line 2})))
+                 (is (= (str "+2 " file "\n") (slurp edited))))
+               (testing "which a Java frame hasn't"
+                 (is (= {:out "No source to open for clojure.lang.Numbers/divide (Numbers.java:190)\n"}
+                        (update (open #(str/starts-with? (:name %) "clojure.lang.Numbers/")) :out
+                                str/replace #"\d+\)" "190)"))))))))))))

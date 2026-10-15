@@ -546,6 +546,8 @@
       (is (str/starts-with? (repl ",source when\n") "user=> (defmacro when\n"))
       (is (= "user=> (if x (do y))\nuser=> \n" (repl ",macroexpand (when x\n  y)\n")))
       (is (str/includes? (repl "(/ 1 0)\n,pst\n") "user=> java.lang.ArithmeticException: Divide by zero\n"))
+      (is (str/includes? (repl "(/ 1 0)\n,stacktrace\n") "user=> java.lang.ArithmeticException: Divide by zero\n"))
+      (is (= "user=> No error yet\nuser=> \n" (repl ",stacktrace\n")))
       (is (= "user=> passing prints\nRan 1 test containing 1 assertion.\n0 failures, 0 errors.\nuser=> \n"
              (repl ",test neorepl.sample-suite/passing\n")))
       (is (= "user=> Rerunning the tests that failed takes cider-nrepl or babashka on the server\nuser=> \n"
