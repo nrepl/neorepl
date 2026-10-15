@@ -509,15 +509,24 @@
   in copy, a copy of it, through clojure.test, when there's one."
   [session copy names]
   (cond
-    (= :failed names) {:op "retest" :session session}
+    ;; cider-nrepl streams test-events with it, for progress.
+    (= :failed names) {:op "retest" :session session :stream "true"}
     copy {:op "eval" :session copy :code (format run-tests-code (pr-str (vec names)) causes-code)}
     :else {:op "test-var-query"
            :session session
+           :stream "true"
            :var-query (cond
                         (some qualified? names) {:exactly (vec names)}
                         (seq names) {:ns-query {:exactly (vec names)}}
                         ;; bencode has no booleans.
                         :else {:ns-query {:project? "true" :load-project-ns? "true"}})}))
+
+(defn- progress
+  "response, with a test-event cider-nrepl streams, as the progress
+  clojure.test prints: output saying which namespace's tests start."
+  [{:keys [test-event] :as response}]
+  (cond-> (dissoc response :test-event)
+    (= "begin-ns" (:type test-event)) (assoc :out (str "Testing " (:ns test-event) "\n"))))
 
 (defn- evaluate-for
   "Evaluates msg the way evaluation/evaluate does, whose opts it takes, for
@@ -541,7 +550,9 @@
   :failures, maps with their :type (fail or error), :ns, :var, :context,
   :message, :expected, :actual or :error and the error's :causes, as
   last-error has them, if the server says, :file and :line, and the
-  :elapsed-ms. Its :status is failed when a test didn't pass."
+  :elapsed-ms. Its :status is failed when a test didn't pass. The
+  :on-response gets a Testing line for each namespace too, as output, when
+  the server says, as cider-nrepl does."
   [client session names {:keys [timeout] :as opts}]
   (let [failed? (= :failed names)
         ops? (supports? client (if failed? "retest" "test-var-query"))]
@@ -563,8 +574,10 @@
         (let [{:keys [status] :as result}
               (-> (evaluate-for client
                                 (test-msg session copy names)
-                                ;; It would cut the report short, which is the eval's value.
-                                (cond-> opts copy (dissoc :max-output))
+                                (cond-> opts
+                                  ;; It would cut the report short, which is the eval's value.
+                                  copy (dissoc :max-output)
+                                  (:on-response opts) (update :on-response comp progress))
                                 #(cond
                                    (:summary %) (reset! report (op-report %))
                                    (and copy (:value %)) (reset! report (eval-report (:value %)))))

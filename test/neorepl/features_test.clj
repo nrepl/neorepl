@@ -46,8 +46,13 @@
                                                          :doc "Cider's map.\nMore."}])
       "macroexpand" (transport/respond-to msg :status "done" :expansion (str "Cider's " (:expander msg)))
       ("test-var-query" "retest")
-      (do (swap! test-requests conj (select-keys msg [:op :var-query]))
+      (do (swap! test-requests conj (select-keys msg [:op :var-query :stream]))
+          (when (= "true" (:stream msg))
+            (transport/respond-to msg :test-event {:type "begin-ns" :ns "neorepl.sample-suite"}))
           (transport/respond-to msg :out "testing\n")
+          (when (= "true" (:stream msg))
+            (transport/respond-to msg :test-event {:type "end-ns" :ns "neorepl.sample-suite"
+                                                   :elapsed-time {:ms 5 :humanized "Completed in 5 ms"}}))
           (transport/respond-to msg
                                 :summary {:ns 1 :var 2 :test 3 :pass 1 :fail 1 :error 1}
                                 :elapsed-time {:ms 5 :humanized "Completed in 5 ms"}
@@ -313,7 +318,8 @@
                   {:keys [status report]} (features/run-tests client session ["neorepl.sample-suite"]
                                                               {:on-response #(some->> (:out %) (swap! out conj))})]
               (is (= "failed" status))
-              (is (= ["testing\n"] @out))
+              (testing "with each namespace's Testing line, from the events it streams"
+                (is (= ["Testing neorepl.sample-suite\n" "testing\n"] @out)))
               (is (= {:summary {:ns 1 :var 2 :test 3 :pass 1 :fail 1 :error 1}
                       :failures [{:type "error" :ns "neorepl.sample-suite" :var "erring"
                                   :expected "(= 1 (throw (ex-info \"boom\" {})))"
@@ -331,11 +337,13 @@
               (features/run-tests client session ["neorepl.sample-suite/passing" "neorepl.sample-suite/failing"] {})
               (features/run-tests client session [] {})
               (features/run-tests client session :failed {})
-              (is (= [{:op "test-var-query" :var-query {:ns-query {:exactly ["neorepl.sample-suite"]}}}
+              (is (= [{:op "test-var-query" :var-query {:ns-query {:exactly ["neorepl.sample-suite"]}} :stream "true"}
                       {:op "test-var-query" :var-query {:exactly ["neorepl.sample-suite/passing"
-                                                                  "neorepl.sample-suite/failing"]}}
-                      {:op "test-var-query" :var-query {:ns-query {:project? "true" :load-project-ns? "true"}}}
-                      {:op "retest"}]
+                                                                  "neorepl.sample-suite/failing"]}
+                       :stream "true"}
+                      {:op "test-var-query" :var-query {:ns-query {:project? "true" :load-project-ns? "true"}}
+                       :stream "true"}
+                      {:op "retest" :stream "true"}]
                      (remove (comp #{"test-stacktrace"} :op) @test-requests)))
               (testing "with the stack trace of each error, by its index"
                 (is (= {:op "test-stacktrace" :ns "neorepl.sample-suite" :var "erring" :index 0}
