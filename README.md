@@ -117,6 +117,10 @@ neorepl test my.app-test my.app.db-test
 neorepl test --format json my.app-test/start-test
 ```
 
+In a session in ClojureScript they run the ClojureScript tests, which takes
+cider-nrepl and piggieback for now: on shadow-cljs cider-nrepl can't run
+them yet.
+
 `,inspect` shows a value, or the last one without code, in cider-nrepl's
 inspector, full-screen: the arrow keys (or `j` and `k`) move between the
 values in it, Enter digs into one, Backspace goes back, `[` and `]` page

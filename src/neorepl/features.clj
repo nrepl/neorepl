@@ -342,18 +342,34 @@
 
 (defn- unknown-tests
   "Loads the namespaces that names, names of namespaces and of tests as
-  ns/name, are or are in, and returns the names of tests that aren't any.
-  Both test ops go quiet when asked for a test in a namespace that isn't
-  loaded, and cider-nrepl's runs every test it can find for one that isn't
-  there."
-  [client names opts]
-  (eval-data client {:ns "user"}
-             "(let [names (map symbol %s)]
-                (apply require (distinct (map (fn [n] (symbol (or (namespace n) (name n)))) names)))
-                (vec (for [n names
-                           :when (and (namespace n) (not (:test (meta (find-var n)))))]
-                       (str n))))"
-             [names] opts))
+  ns/name, are or are in, in session, and returns the names of tests that
+  aren't any. Both test ops go quiet when asked for a test in a namespace
+  that isn't loaded, and cider-nrepl's runs every test it can find for one
+  that isn't there. The code works in Clojure and ClojureScript alike, which
+  only requires namespaces named by quoted symbols, so names have to be
+  symbols."
+  [client session names opts]
+  (when-let [bad (seq (remove #(let [s (try (edn/read-string %) (catch Exception _ nil))]
+                                 (and (symbol? s) (= % (str s))))
+                              names))]
+    (throw (ex-info (str "Not the name of a namespace or a test: " (str/join ", " bad)) {:type ::failed})))
+  (let [symbols (map symbol names)
+        nss (distinct (map #(symbol (or (namespace %) (name %))) symbols))
+        tests (filter namespace symbols)]
+    ;; Evaluations of their own: ClojureScript's require has to be a form
+    ;; of its own, and piggieback evaluates only the first form of the code.
+    (ask client {:op "eval" :session session
+                 :code (str "(require " (str/join " " (map #(str "'" %) nss)) ")")}
+         opts)
+    (when (seq tests)
+      (some->> (ask client {:op "eval" :session session
+                            :code (str "(vec (remove nil? ["
+                                       (str/join " " (for [t tests]
+                                                       (format "(when-not (:test (meta (resolve '%s))) %s)" t (pr-str (str t)))))
+                                       "]))")}
+                    opts)
+               (some :value)
+               edn/read-string))))
 
 (def ^:private run-tests-code
   "Runs the tests in the namespaces that %s names, or the tests it names, the
@@ -426,7 +442,8 @@
                 :message (text :message)
                 :expected (text :expected)
                 :actual (text :actual)
-                :error (text :error)
+                ;; ClojureScript's is a map, with the stack too.
+                :error (if (map? (:error assertion)) (some-> assertion :error :message blank->nil) (text :error))
                 :file (text :file)
                 :line line
                 ;; For test-stacktrace.
@@ -564,23 +581,25 @@
                                 {:type ::failed}))
         (empty? names) (throw (ex-info "Running every test takes cider-nrepl or babashka on the server; name the namespaces to test"
                                        {:type ::failed}))))
-    (when (and (not failed?) (seq names))
-      (when-let [unknown (seq (unknown-tests client names {:timeout-ms (some-> timeout (* 1000) long)}))]
-        (throw (ex-info (str "No test called " (str/join ", " unknown)) {:type ::failed}))))
-    (let [;; The eval ones run in a copy of the session, so its *1 stays put.
-          copy (when-not ops? (nrepl/clone-session client session))
+    (let [check? (and (not failed?) (seq names))
+          ;; The check and the eval ones run in a copy of the session, in its
+          ;; language, so its *1 stays put.
+          copy (when check? (nrepl/clone-session client session))
           report (atom nil)]
       (try
+        (when check?
+          (when-let [unknown (seq (unknown-tests client copy names {:timeout-ms (some-> timeout (* 1000) long)}))]
+            (throw (ex-info (str "No test called " (str/join ", " unknown)) {:type ::failed}))))
         (let [{:keys [status] :as result}
               (-> (evaluate-for client
-                                (test-msg session copy names)
+                                (test-msg session (when-not ops? copy) names)
                                 (cond-> opts
                                   ;; It would cut the report short, which is the eval's value.
-                                  copy (dissoc :max-output)
+                                  (not ops?) (dissoc :max-output)
                                   (:on-response opts) (update :on-response comp progress))
                                 #(cond
                                    (:summary %) (reset! report (op-report %))
-                                   (and copy (:value %)) (reset! report (eval-report (:value %)))))
+                                   (and (not ops?) (:value %)) (reset! report (eval-report (:value %)))))
                   (dissoc :ns))
               {{:keys [fail error]} :summary :as report} @report]
           (cond
