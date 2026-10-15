@@ -88,7 +88,9 @@ Runtime deps: `org.clojure/clojure`, `nrepl/nrepl`, `org.jline/jline` 4.x. That'
 - Gotcha: both servers go quiet on a `test-var-query` for a test in a namespace that isn't loaded, with no response at all, and on bb the session stays busy for good. cider-nrepl also runs every test it finds for a test that isn't there, since the query's `:exactly` comes out empty. So neorepl requires the namespaces and checks the tests exist, in an evaluation of its own, before it asks.
 - Gotcha: bb's `test-var-query` ignores `:project?` and `:load-project-ns?`, so `neorepl test` without arguments runs the tests of every namespace that's loaded, whether it's the project's or not.
 - Gotcha: what cider-nrepl's tests print doesn't come with the test op's responses. It stays in the session's output buffer past `done` and goes out when something flushes it, like the next test run, under an earlier message's id and over that message's connection, which for `neorepl test` is a connection that's gone. So the CLI never shows it and the REPL shows it late, if at all. bb sends it with the test op's responses.
-- JLine classes bb exposes: `TerminalBuilder`, `LineReaderBuilder`, `LineReader`, `LineReaderImpl`, `Parser`, `ParsedLine`, `Completer`, `Candidate`, `Highlighter`, `Widget`, `Reference`, `KeyMap`, `BindingReader`, `Display`, `AttributedString(Builder)`, `AttributedStyle`, `Size`, `InfoCmp$Capability`, `EOFError`, `UserInterruptException`, `EndOfFileException`. Missing: `org.jline.utils.Status` (handy for an eldoc status line), `DefaultParser`, `DefaultHistory`, `DumbTerminal`. Only `Status` is a real loss.
+- Inspector (2026-10-15, cider-nrepl 0.63.1 and bb 1.13.225). Both start it with an `eval` carrying `inspect "true"`, whose `:value` is the view rather than the printed value, and answer `inspect-push` (`:idx`), `inspect-pop`, `inspect-next-page` and the like with the new view, the same way: a printed list of strings, `(:newline)` and `(:value text index)`. The inspector is per session, so `neorepl inspect` can go on where the last call left off. The eval still sets `*1`. bb has no `inspect-last-exception`.
+- Gotcha: when the code fails, cider-nrepl's inspecting eval only says `inspect-eval-error`, never `eval-error`, so neorepl reads that as the evaluation failing. bb says both.
+- JLine classes bb exposes: `TerminalBuilder`, `LineReaderBuilder`, `LineReader`, `LineReaderImpl`, `Parser`, `ParsedLine`, `Completer`, `Candidate`, `Highlighter`, `Widget`, `Reference`, `KeyMap`, `BindingReader`, `Display`, `AttributedString(Builder)`, `AttributedStyle`, `Size`, `Attributes` (and `Attributes$LocalFlag`), `InfoCmp$Capability`, `EOFError`, `UserInterruptException`, `EndOfFileException`. Missing: `org.jline.utils.Status` (handy for an eldoc status line), `DefaultParser`, `DefaultHistory`, `DumbTerminal`. Only `Status` is a real loss.
 
 ### How it runs
 
@@ -216,7 +218,7 @@ Each one is a release people can use. The first three stages below all went into
 
 0.2, tests and inspection
 - Test runner with summaries, rerun failures, jump to a failure. Done: `neorepl test` and `retest`, `,test` and `,retest`, with each failure's file and line. Still to do: the stack trace of a test's error (`test-stacktrace`), progress as the tests run (cider-nrepl's `stream`), ClojureScript tests (cider-nrepl runs them in a ClojureScript session, but neorepl requires the namespaces on the Clojure side first).
-- Full-screen inspector and stacktrace browser.
+- Full-screen inspector and stacktrace browser. Done: `,inspect` in the REPL, full-screen, and `neorepl inspect`, both on cider-nrepl's `inspect-*` ops, which babashka's server has too. Still to do: the stacktrace browser, `test-stacktrace` with it, `inspect-def-current-value` (needs a prompt in the full-screen view), a page size that fits the screen.
 
 0.3, agents, round two
 - MCP server, the skill, docs for common agent setups.
