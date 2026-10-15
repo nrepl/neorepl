@@ -222,6 +222,56 @@
       ns (ns-and-name name)
       (re-find #"^(?:[^$/]*\.)?[a-z_][^.$/]*\$" (str name)) (ns-and-name (main/demunge (first (str/split name #"/")))))))
 
+(def ^:private causes-code
+  "A function, as code for the server, of a Throwable to its causes, the way
+  analyze-last-stacktrace has them, roughly, with the whole stack trace on the
+  last one and where it was thrown on the others. For servers without it.
+  It goes through format, in templates, so it can't have a % of its own."
+  "(fn [e]
+     (let [frame (fn [[class method file line]]
+                   {:name (str class \"/\" method) :file file :line line})
+           cause (fn [{:keys [type message data at]}]
+                   {:class (str type)
+                    :message message
+                    :data (binding [*print-length* 20 *print-level* 5]
+                            (some-> data pr-str))
+                    :stacktrace (if at [(frame at)] [])})
+           {:keys [via trace]} (Throwable->map e)]
+       (conj (mapv cause (pop via))
+             (assoc (cause (peek via)) :stacktrace (mapv frame trace)))))")
+
+(defn- tooling?
+  "Whether frame, from causes-code, is one of what runs the code rather than
+  of the code itself, which servers with analyze-last-stacktrace flag."
+  [{:keys [name]}]
+  (re-find #"^(clojure\.lang\.Compiler|clojure\.main|nrepl\..+|java\.lang\.Thread)/" (str name)))
+
+(defn- stacktrace-causes
+  "The causes in the responses to msg, an analyze-last-stacktrace or
+  test-stacktrace, which answer with one each."
+  [client msg opts]
+  (filter :class (ask client msg opts)))
+
+(defn- normalize-causes
+  "causes, as analyze-last-stacktrace and test-stacktrace have them, or
+  causes-code, in the shape last-error returns them."
+  [causes]
+  (mapv (fn [{:keys [class message data stacktrace]}]
+          {:class class
+           :message (blank->nil message)
+           :data (blank->nil data)
+           :stacktrace (dups (mapv (fn [{:keys [file-url flags] :as frame}]
+                                     (let [var (frame-var frame)
+                                           ;; cider-nrepl's, for the exact file the line's in.
+                                           path (when (and (string? file-url) (str/starts-with? file-url "file:"))
+                                                  (source-file file-url))]
+                                       (cond-> (select-keys frame [:name :file :line :flags])
+                                         (and (nil? flags) (tooling? frame)) (assoc :flags ["tooling"])
+                                         var (assoc :var var)
+                                         path (assoc :path path))))
+                                   stacktrace))})
+        causes))
+
 (defn last-error
   "The last error in session, as its causes, outermost first: maps with the
   :class, the :message, ex-data as :data text and the :stacktrace, frames with
@@ -233,53 +283,26 @@
   ([client session opts]
    (some->>
     (if (supports? client "analyze-last-stacktrace")
-      (->> (ask client {:op "analyze-last-stacktrace" :session session} opts)
-           (filter :class))
+      (stacktrace-causes client {:op "analyze-last-stacktrace" :session session} opts)
       ;; *e is in the session, so the code looking at it has to run there,
       ;; in a copy, so the session's *1 stays put.
       (let [copy (try
                    (nrepl/clone-session client session)
                    (catch clojure.lang.ExceptionInfo e
-                     (throw (ex-info "The server couldn't copy the session" {:type ::failed} e))))
-            ;; What runs the code rather than the code itself.
-            tooling? #(re-find #"^(clojure\.lang\.Compiler|clojure\.main|nrepl\..+|java\.lang\.Thread)/" (:name %))]
+                     (throw (ex-info "The server couldn't copy the session" {:type ::failed} e))))]
         (try
           (some->> (eval-data client {:session copy}
                               ;; Printed here, with print settings of its own:
                               ;; the copy has the session's, which could cut it short.
-                              "(when-let [e *e]
-                                 (binding [*print-length* nil *print-level* nil *print-meta* false]
-                                   (let [frame (fn [[class method file line]]
-                                                 {:name (str class \"/\" method) :file file :line line})
-                                         cause (fn [{:keys [type message data at]}]
-                                                 {:class (str type)
-                                                  :message message
-                                                  :data (binding [*print-length* 20 *print-level* 5]
-                                                          (some-> data pr-str))
-                                                  :stacktrace (if at [(frame at)] [])})
-                                         {:keys [via trace]} (Throwable->map e)]
-                                     (pr-str (conj (mapv cause (pop via))
-                                                   (assoc (cause (peek via)) :stacktrace (mapv frame trace)))))))"
+                              (format "(when-let [e *e]
+                                         (binding [*print-length* nil *print-level* nil *print-meta* false]
+                                           (pr-str (%s e))))"
+                                      causes-code)
                               [] opts)
-                   edn/read-string
-                   (map (fn [cause]
-                          (update cause :stacktrace
-                                  (partial mapv #(cond-> % (tooling? %) (assoc :flags ["tooling"])))))))
+                   edn/read-string)
           (finally
             (nrepl/close-session client copy)))))
-    (mapv (fn [{:keys [class message data stacktrace]}]
-            {:class class
-             :message (blank->nil message)
-             :data (blank->nil data)
-             :stacktrace (dups (mapv (fn [{:keys [file-url] :as frame}]
-                                       (let [var (frame-var frame)
-                                             ;; cider-nrepl's, for the exact file the line's in.
-                                             path (when (and (string? file-url) (str/starts-with? file-url "file:"))
-                                                    (source-file file-url))]
-                                         (cond-> (select-keys frame [:name :file :line :flags])
-                                           var (assoc :var var)
-                                           path (assoc :path path))))
-                                     stacktrace))}))
+    normalize-causes
     not-empty)))
 
 (defn reload
@@ -335,10 +358,13 @@
 (def ^:private run-tests-code
   "Runs the tests in the namespaces that %s names, or the tests it names, the
   way clojure.test does, and returns the report, the way test-var-query's
-  reads after test-results, printed. For servers without a test op."
+  reads after test-results, printed, with the :causes of errors, as the
+  function the second %s is, causes-code, has them. For servers without a
+  test op."
   "(do
      (require 'clojure.test)
      (let [names (map symbol %s)
+           causes %s
            counts (atom {:ns 0 :var 0 :test 0 :pass 0 :fail 0 :error 0})
            failures (atom [])
            ;; For what goes wrong outside a test, like a :once fixture.
@@ -358,7 +384,9 @@
                                         :line line}
                                  (some? expected) (assoc :expected (pr-str expected))
                                  (= :fail type) (assoc :actual (pr-str actual))
-                                 (= :error type) (assoc :error (str actual)))))))
+                                 (= :error type) (assoc :error (str actual))
+                                 (and (= :error type) (instance? Throwable actual))
+                                 (assoc :causes (binding [*print-meta* false] (causes actual))))))))
            ;; clojure.test lets what a :once fixture throws through.
            guarded (fn [ns f]
                      (reset! current-ns ns)
@@ -400,7 +428,9 @@
                 :actual (text :actual)
                 :error (text :error)
                 :file (text :file)
-                :line line}))))
+                :line line
+                ;; For test-stacktrace.
+                :index (when (= "error" type) (:index assertion))}))))
 
 (defn- locate
   "failures with the :file each one's test is in, for those whose :file is
@@ -423,6 +453,42 @@
                 failure)))
           failures)))
 
+(defn- test-runner-frame?
+  "Whether frame, from normalize-causes, is one of the test runner's, which
+  the frames of a test's error go on into."
+  [{:keys [name]}]
+  (re-find #"^(clojure\.test|orchard\.test|cider\.nrepl\.middleware\.test|babashka\.impl\.clojure\.test)[$/]"
+           (str name)))
+
+(defn- above-test-runner
+  "The frames of stacktrace above the test runner's, or all of them when
+  they start there, as for an error in the runner itself, like a broken
+  fixture."
+  [stacktrace]
+  (let [above (into [] (take-while (complement test-runner-frame?)) stacktrace)]
+    (if (seq above) above stacktrace)))
+
+(defn- with-causes
+  "failures with the :causes of the errors, the way last-error has them,
+  without the test runner's frames: as run-tests-code has them, or from
+  test-stacktrace, by their :index, with opts as nrepl/request takes them."
+  [client session opts failures]
+  (let [stacktrace? (supports? client "test-stacktrace")]
+    ;; Independent requests, so all at once.
+    (vec (pmap (fn [{:keys [ns var index causes] :as failure}]
+                 (let [causes (or causes
+                                  ;; Only errors have an index.
+                                  (when (and stacktrace? ns var index)
+                                    (try
+                                      (stacktrace-causes client {:op "test-stacktrace" :session session
+                                                                 :ns ns :var var :index index}
+                                                         opts)
+                                      (catch clojure.lang.ExceptionInfo _ nil))))]
+                   (cond-> (dissoc failure :index :causes)
+                     (seq causes) (assoc :causes (mapv #(update % :stacktrace above-test-runner)
+                                                       (normalize-causes causes))))))
+               failures))))
+
 (defn- op-report
   "The report in a test-var-query or retest response."
   [{:keys [summary results elapsed-time]}]
@@ -444,7 +510,7 @@
   [session copy names]
   (cond
     (= :failed names) {:op "retest" :session session}
-    copy {:op "eval" :session copy :code (format run-tests-code (pr-str (vec names)))}
+    copy {:op "eval" :session copy :code (format run-tests-code (pr-str (vec names)) causes-code)}
     :else {:op "test-var-query"
            :session session
            :var-query (cond
@@ -473,7 +539,8 @@
   the end, the :report: the :summary, counting the :ns, the tests as :var,
   the assertions as :test and how many :pass, :fail and :error, the
   :failures, maps with their :type (fail or error), :ns, :var, :context,
-  :message, :expected, :actual or :error, :file and :line, and the
+  :message, :expected, :actual or :error and the error's :causes, as
+  last-error has them, if the server says, :file and :line, and the
   :elapsed-ms. Its :status is failed when a test didn't pass."
   [client session names {:keys [timeout] :as opts}]
   (let [failed? (= :failed names)
@@ -507,7 +574,10 @@
             ;; Only a run that ended by itself, since clojure.test reports
             ;; an interrupted test as an error and carries on.
             (not= "ok" status) result
-            report (cond-> (assoc result :report (update report :failures #(locate client session %)))
+            report (cond-> (assoc result :report (update report :failures #(->> (locate client session %)
+                                                                                  (with-causes client session
+                                                                                    (cond-> {}
+                                                                                      timeout (assoc :timeout-ms (long (* 1000 timeout))))))))
                      (pos? (+ fail error)) (assoc :status "failed"))
             :else (throw (ex-info "The server didn't run the tests" {:type ::failed}))))
         (finally
