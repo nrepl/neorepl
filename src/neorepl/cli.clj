@@ -7,7 +7,9 @@
   its long name as a keyword."
   (:require [clojure.string :as str]))
 
-(defn- option-key [{:keys [long]}]
+(defn option-key
+  "The key of the option spec in parse's :options."
+  [{:keys [long]}]
   (keyword (subs long 2)))
 
 (defn parse

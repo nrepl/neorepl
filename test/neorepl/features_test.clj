@@ -4,6 +4,7 @@
             [clojure.test :refer [are deftest is testing use-fixtures]]
             [neorepl.features :as features]
             [neorepl.nrepl :as nrepl]
+            [neorepl.render :as render]
             [neorepl.test-server :as test-server :refer [*port* with-client]]
             [nrepl.middleware :as middleware]
             [nrepl.server :as server]
@@ -295,3 +296,42 @@
                  (features/last-error client (nrepl/clone-session client))))))
       (finally
         (server/stop-server srv)))))
+
+(deftest inspect-test
+  (with-client [client {:port *port*}]
+    (let [session (nrepl/clone-session client)
+          text #(render/inspector-text (:lines %))]
+      (testing "a value, with what the code printed"
+        (let [{:keys [status out] :as result} (features/inspect client session "(println :hi) {:a [1 2]}" {})]
+          (is (= "ok" status))
+          (is (= ":hi\n" (test-server/lf out)))
+          (is (= "Class: [0]clojure.lang.PersistentArrayMap\nCount: 1\n\n--- Contents:\n  [1]:a = [2][1 2]"
+                 (text result)))))
+      (testing "moving around in it"
+        (is (str/starts-with? (text (features/inspector client session {:op "inspect-push" :idx 2}))
+                              "Class: [0]clojure.lang.PersistentVector\nCount: 2\n"))
+        (is (str/starts-with? (text (features/inspector client session {:op "inspect-pop"}))
+                              "Class: [0]clojure.lang.PersistentArrayMap\n")))
+      (testing "code that fails, the way cider-nrepl says it does"
+        (let [{:keys [status lines]} (features/inspect client session "(/ 1 0)" {})]
+          (is (= "eval-error" status))
+          (is (nil? lines))))
+      (testing "without an inspector on the server"
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo #"takes cider-nrepl or babashka"
+                              (features/inspect (without client "inspect-push") session "1" {})))
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo #"takes cider-nrepl or babashka"
+                              (features/inspector (without client "inspect-push") session {:op "inspect-pop"})))))))
+
+(deftest inspector-lines-test
+  (testing "values that span lines are on each of them"
+    (is (= [[{:text "Value: "} {:text "{:a 1," :index 1}]
+            [{:text " :b 2}" :index 1 :continued true} {:text " and so on"}]
+            [{:text "--- Path:" :heading? true}]]
+           (#'features/inspector-lines
+            "(\"Value: \" (:value \"{:a 1,\\n :b 2}\" 1) \" and so on\" (:newline) \"--- Path:\" (:newline))"))))
+  (testing "what else might be in there"
+    (is (= [[{:text "42"} {:text "x"} {:text "ab"}]]
+           (#'features/inspector-lines "(42 x (\"a\" \"b\"))"))))
+  (testing "what isn't a view"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"The server's inspector said 42"
+                          (#'features/inspector-lines "42")))))

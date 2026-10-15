@@ -86,3 +86,11 @@
                                "No tests ran."
                                (str "Ran " (counted var "test") " containing " (counted test "assertion") ".\n"
                                     (counted fail "failure") ", " (counted error "error") "."))])))
+
+(defn inspector-text
+  "The inspector's view, as features/inspector has it, as text, with each
+  value to inspect further marked with the index to push it by, as [1]."
+  [lines]
+  (str/join "\n" (for [line lines]
+                   (str/trimr (str/join (for [{:keys [text index continued]} line]
+                                          (str (when-not continued (some->> index (format "[%d]"))) text)))))))

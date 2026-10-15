@@ -506,6 +506,39 @@
            (run-command "retest")))
     (is (= 2 (:status (run-command "retest" "neorepl.sample-suite"))))))
 
+(deftest inspect-test
+  (let [inspect (partial run-command "inspect" "-s" "inspecting")]
+    (testing "a value, then what's in it"
+      (is (= {:status 0 :out "hi\nClass: [0]clojure.lang.PersistentArrayMap\nCount: 1\n\n--- Contents:\n  [1]:a = [2][1 2]\n" :err ""}
+             (inspect "(do (println \"hi\") {:a [1 2]})")))
+      (is (= {:status 0 :out "Class: [0]clojure.lang.PersistentVector\nCount: 2\n\n--- Contents:\n  0. [1]1\n  1. [2]2\n" :err ""}
+             (inspect "--push" "2")))
+      (is (str/starts-with? (:out (inspect "--pop")) "Class: [0]clojure.lang.PersistentArrayMap\n"))
+      (testing "and what's being inspected"
+        (is (str/starts-with? (:out (inspect)) "Class: [0]clojure.lang.PersistentArrayMap\n")))
+      (testing "within --timeout"
+        (is (= 0 (:status (inspect "--timeout" "5" "--next-page")))))
+      (testing "past --timeout"
+        (let [{:keys [status err]} (inspect "--timeout" "0.2" "--push" "99")]
+          (is (= 124 status))
+          (is (str/includes? err "inspect-push")))))
+    (testing "json"
+      (is (= {:status 0 :out "{\"status\":\"ok\",\"text\":\"Class: [0]clojure.lang.PersistentVector\\nCount: 2\\n\\n--- Contents:\\n  0. [1]1\\n  1. [2]2\"}\n" :err ""}
+             (inspect "--format" "json" "--push" "2")))
+      (is (str/includes? (:out (inspect "--format" "json" "[1]")) "\"text\":\"Class: [0]clojure.lang.PersistentVector")))
+    (testing "code that fails"
+      (let [{:keys [status out err]} (inspect "(/ 1 0)")]
+        (is (= 1 status))
+        (is (= "" out))
+        (is (str/includes? err "Divide by zero"))))
+    (testing "a session that isn't there"
+      (is (= {:status 1 :out "" :err "neorepl: No session called nope\n"}
+             (run-command "inspect" "-s" "nope" "--pop"))))
+    (testing "usage"
+      (is (= 2 (:status (inspect "--pop" "1"))))
+      (is (= 2 (:status (inspect "--pop" "--next-page"))))
+      (is (= 2 (:status (inspect "--push" "x")))))))
+
 (deftest repl-commands-test
   (let [repl #(:out (run-in *dir* % "repl" "-p" (str *port*)))]
     (testing "commands"
@@ -516,7 +549,11 @@
       (is (= "user=> passing prints\nRan 1 test containing 1 assertion.\n0 failures, 0 errors.\nuser=> \n"
              (repl ",test neorepl.sample-suite/passing\n")))
       (is (= "user=> Rerunning the tests that failed takes cider-nrepl or babashka on the server\nuser=> \n"
-             (repl ",retest\n"))))
+             (repl ",retest\n")))
+      (is (= "user=> Class: [0]clojure.lang.PersistentVector\nCount: 1\n\n--- Contents:\n  0. [1]1\nuser=> \n"
+             (repl ",inspect [1]\n")))
+      (is (= "user=> 2\nuser=> Class: [0]java.lang.Long\n\n--- Contents:\nValue: [1]2\nuser=> \n"
+             (repl "2\n,inspect\n"))))
     (testing "a command's trouble doesn't end the REPL"
       (is (str/ends-with? (repl "(set! *print-length* 2)\n(throw (ex-info \"boom\" {:xs (range 10)}))\n,pst\n(+ 1 2)\n")
                           "user=> 3\nuser=> \n")))
@@ -696,6 +733,7 @@
     ["reload" "--help"] "Usage: neorepl reload"
     ["test" "--help"] "Usage: neorepl test"
     ["retest" "--help"] "Usage: neorepl retest"
+    ["inspect" "--help"] "Usage: neorepl inspect"
     ["server" "--help"] "Usage: neorepl server"))
 
 (deftest version-test

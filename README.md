@@ -29,8 +29,8 @@ TAB completes, the arglists of the function you're calling show up after
 the cursor and C-x C-d shows the documentation of what's at the cursor.
 Commands start with a comma, the CIDER way: `,doc`, `,source`, `,apropos`,
 `,macroexpand`, `,pst` for the last error's stack trace, `,reload`,
-`,test`, `,edit` to open a definition in your `$EDITOR`, and `,help` for the
-rest.
+`,test`, `,inspect`, `,edit` to open a definition in your `$EDITOR`, and
+`,help` for the rest.
 Without a terminal, say in a pipe or Emacs' `M-x shell`, it works like
 `clojure.main`'s REPL instead.
 
@@ -115,6 +115,20 @@ neorepl test my.app-test my.app.db-test
 neorepl test --format json my.app-test/start-test
 ```
 
+`,inspect` shows a value, or the last one without code, in cider-nrepl's
+inspector, full-screen: the arrow keys (or `j` and `k`) move between the
+values in it, Enter digs into one, Backspace goes back, `[` and `]` page
+through big collections, `v` shows the object's fields and `q` takes you back
+to the REPL. `neorepl inspect` does the same for scripts and agents, one step
+at a time, since the inspector stays in the session. Both take cider-nrepl or
+babashka on the server:
+
+```shell
+neorepl inspect '(System/getProperties)'
+neorepl inspect --push 3
+neorepl inspect --pop
+```
+
 `neorepl check` finds unbalanced parens, brackets and braces, the most
 common way for an edit (or a coding agent) to break a Clojure file. It
 doesn't need a server:
@@ -142,7 +156,7 @@ with any nREPL server out there. Here's how the three stack up in practice
 | Completion, arglists as you type | yes | no | yes |
 | Docs | yes, and source, apropos, macroexpansion | yes, with Java docs | yes |
 | Structural editing, eval at the cursor | no | yes | no |
-| Inspector | coming | yes | no |
+| Inspector | yes | yes | no |
 | Test runner | yes | no | no |
 | ClojureScript | shadow-cljs, piggieback, figwheel-main | no | evaluation only |
 | CLI for scripts and agents | yes: eval, docs, tests and more, with JSON output | no | no |

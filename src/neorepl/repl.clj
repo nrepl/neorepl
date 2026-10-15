@@ -6,6 +6,7 @@
             [neorepl.editor :as editor]
             [neorepl.evaluation :as evaluation]
             [neorepl.features :as features]
+            [neorepl.inspector :as inspector]
             [neorepl.lookups :as lookups]
             [neorepl.lexer :as lexer]
             [neorepl.nrepl :as nrepl]
@@ -52,7 +53,7 @@
                      (.interrupt thread)
                      thread))}))
 
-(declare edit run-tests)
+(declare edit inspect run-tests)
 
 (def ^:private commands
   "The REPL's commands, the CIDER way: a comma, which Clojure reads as
@@ -64,6 +65,9 @@
             :run #(run-tests %1 (some-> %2 (str/split #"\s+")))}
            {:name "retest" :help "Rerun the tests that didn't pass"
             :run (fn [state _] (run-tests state :failed))}
+           {:name "inspect" :arg "CODE" :optional? true :code-arg? true
+            :help "Inspect the value of CODE, or the last value"
+            :run #(inspect %1 %2)}
            {:name "edit" :arg "SYM" :help "Open where SYM is defined in your EDITOR"
             :run #(edit %1 %2)}
            {:name "help" :help "List the commands"}
@@ -148,6 +152,18 @@
     (out (render/test-report-text report))
     {}))
 
+(defn- inspect
+  "Inspects the value of code, or *1 without it, evaluating it the way the
+  REPL :evaluates code, and lets the user :browse it, or prints it when
+  there's no browsing. Returns what to print, as command-output does."
+  [{:keys [client session evaluate browse]} code]
+  (if-let [lines (:lines (evaluate #(features/inspect client session (or code "*1") %)))]
+    (if browse
+      (do (browse lines)
+          {})
+      (out (render/inspector-text lines)))
+    {}))
+
 (defn- reenter
   "Puts session back in the namespace called ns, as tools.namespace's refresh
   does: reloading code can make a namespace anew, and the session would go
@@ -161,8 +177,9 @@
   "Runs the command called name with arg, and returns what to print, as a
   response for the REPL's printer, or :quit. state has the :client, the
   :session and the :ns, for the lookups, the :editor-command and a function
-  to run it with the terminal :suspended, for ,edit, and a function that
-  :evaluates the way the REPL does, for ,test."
+  to run it with the terminal :suspended, for ,edit, a function that
+  :evaluates the way the REPL does, for ,test and ,inspect, and one to
+  :browse what ,inspect finds, if the REPL can."
   [{:keys [client] :as state} name arg]
   (let [{arg-name :arg :keys [code? args? optional?] :as command} (command name)]
     (cond
@@ -394,7 +411,8 @@
                :print-message #(do (editor/fresh-line editor)
                                    (editor/print-text editor :notice (str % "\n")))
                :editor-command editor-command
-               :suspended #(editor/suspended editor %)})))
+               :suspended #(editor/suspended editor %)
+               :browse #(inspector/browse editor client session %)})))
 
 (defn- history-file
   "The history for the project in dir: a file in history-dir named after a
