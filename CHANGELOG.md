@@ -4,6 +4,7 @@
 
 ### Features
 
+- [#7](https://github.com/nrepl/neorepl/pull/7): `neorepl test` and `,test` say which namespace they're testing as the tests run, with cider-nrepl 0.63 or later.
 - [#6](https://github.com/nrepl/neorepl/pull/6): `neorepl test` and `,test` show the stack trace of each test error.
 - [#5](https://github.com/nrepl/neorepl/pull/5): `,stacktrace` in the REPL shows the last error full-screen and opens the source of the frame you pick in your `$EDITOR`.
 - [#4](https://github.com/nrepl/neorepl/pull/4): `neorepl inspect`, and `,inspect` in the REPL, show values in cider-nrepl or babashka's inspector, full-screen in the REPL.
