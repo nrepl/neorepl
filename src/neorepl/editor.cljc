@@ -7,20 +7,22 @@
   (:import (java.util List)
            #?@(:bb []
                :clj [(org.jline.reader CompletingParsedLine)])
-           (org.jline.keymap KeyMap)
+           (org.jline.keymap BindingReader KeyMap)
            (org.jline.reader Candidate Completer EOFError EndOfFileException Highlighter
                              LineReader LineReader$Option LineReader$SuggestionType
                              LineReaderBuilder ParsedLine Parser Parser$ParseContext Reference
                              UserInterruptException Widget)
-           (org.jline.terminal Size Terminal Terminal$Signal Terminal$SignalHandler
-                               TerminalBuilder)
-           (org.jline.utils AttributedString AttributedStringBuilder AttributedStyle)))
+           (org.jline.terminal Attributes Attributes$LocalFlag Size Terminal Terminal$Signal
+                               Terminal$SignalHandler TerminalBuilder)
+           (org.jline.utils AttributedString AttributedStringBuilder AttributedStyle Display
+                            InfoCmp$Capability)))
 
 (defn- fg ^AttributedStyle [color]
   (.foreground AttributedStyle/DEFAULT (int color)))
 
 (def ^:private colors
-  "Styles for lexer token types, and for :err output and :notice messages."
+  "Styles for lexer token types, for :err output and :notice messages, and
+  for the :headings of full-screen views."
   (let [faint (.faint AttributedStyle/DEFAULT)
         green (fg AttributedStyle/GREEN)
         magenta (fg AttributedStyle/MAGENTA)
@@ -38,7 +40,8 @@
      :reader-macro yellow
      :macro-char yellow
      :err (fg AttributedStyle/RED)
-     :notice faint}))
+     :notice faint
+     :heading (.bold AttributedStyle/DEFAULT)}))
 
 (def ^:private specials
   "Symbols highlighted as :special: the special forms and the defining and
@@ -362,3 +365,121 @@
     (finally
       (.setVariable reader LineReader/DISABLE_HISTORY false)
       (reset! raw? false))))
+
+(defn- puts [^Terminal terminal capability]
+  (.puts terminal capability (object-array 0)))
+
+(def ^:private keys-by-capability
+  {:up InfoCmp$Capability/key_up
+   :down InfoCmp$Capability/key_down
+   :left InfoCmp$Capability/key_left
+   :right InfoCmp$Capability/key_right
+   :home InfoCmp$Capability/key_home
+   :end InfoCmp$Capability/key_end
+   :page-up InfoCmp$Capability/key_ppage
+   :page-down InfoCmp$Capability/key_npage
+   :backtab InfoCmp$Capability/key_btab})
+
+(def ^:private key-sequences
+  "What the keys send, for when the terminal's description leaves them out,
+  in both the normal and the application cursor modes."
+  {:up ["\u001b[A" "\u001bOA"]
+   :down ["\u001b[B" "\u001bOB"]
+   :right ["\u001b[C" "\u001bOC"]
+   :left ["\u001b[D" "\u001bOD"]
+   :home ["\u001b[H" "\u001bOH" "\u001b[1~"]
+   :end ["\u001b[F" "\u001bOF" "\u001b[4~"]
+   :page-up ["\u001b[5~"]
+   :page-down ["\u001b[6~"]
+   :backtab ["\u001b[Z"]
+   :enter ["\r" "\n"]
+   :backspace [(KeyMap/del) "\b"]
+   :tab ["\t"]
+   :escape ["\u001b"]
+   :ctrl-c [(str (KeyMap/ctrl \C))]})
+
+(defn- key-map
+  "Reads keys as keywords, like :up and :enter, and the printable characters
+  as one-character strings. Everything else is :other."
+  ^KeyMap [terminal]
+  (let [keymap (KeyMap.)]
+    (doseq [c (range 32 127)]
+      (.bind keymap (str (char c)) ^CharSequence (str (char c))))
+    (doseq [[k sequences] key-sequences
+            sequence sequences]
+      (.bind keymap k ^CharSequence sequence))
+    (doseq [[k capability] keys-by-capability
+            :let [sequence (KeyMap/key terminal capability)]
+            :when (seq sequence)]
+      (.bind keymap k ^CharSequence sequence))
+    (.setNomatch keymap :other)
+    ;; How long a lone Esc waits to be sure it's not the start of a key.
+    (.setAmbiguousTimeout keymap 100)
+    keymap))
+
+(defn- screen-line
+  "segments as an AttributedString cut at width columns."
+  [styles width segments]
+  (let [sb (AttributedStringBuilder.)]
+    (doseq [{k :style :keys [text code? selected?]} segments]
+      (cond
+        ;; Even without colors.
+        selected? (.styled sb (.inverse AttributedStyle/DEFAULT) ^CharSequence text)
+        code? (.append sb (highlight styles text))
+        :else (.styled sb (style styles k) ^CharSequence text)))
+    (.columnSubSequence (.toAttributedString sb) 0 width)))
+
+(defn full-screen
+  "Takes the whole terminal for a view, the way less does, until (handle key)
+  returns :done. (draw width height) says what the view shows: up to height
+  lines of segments, maps with the :text and its :style, as for print-text,
+  or with :code? to highlight it as code, or :selected? to show it reversed.
+  handle gets each key typed, as one of :up, :down, :left,
+  :right, :home, :end, :page-up, :page-down, :tab, :backtab, :enter,
+  :backspace, :escape, :ctrl-c, a printable character as a string or
+  :other. Output waits till the view's done."
+  [{:keys [^Terminal terminal styles lock] :as editor} draw handle]
+  (locking lock
+    (let [attributes (.enterRawMode terminal)
+          display (Display. terminal true)
+          drawing (Object.)
+          ;; Display takes the cursor to be at the top left of a blank
+          ;; screen, which a resize, or entering the alternate screen, doesn't
+          ;; leave it.
+          clear? (atom true)
+          redraw #(locking drawing
+                    (let [width (width editor)
+                          height (max 1 (.getHeight terminal))]
+                      (when (compare-and-set! clear? true false)
+                        (.clear display))
+                      (.resize display height width)
+                      (.update display
+                               ^List (mapv (partial screen-line styles width) (take height (draw width height)))
+                               0
+                               true)))
+          previous (.handle terminal Terminal$Signal/WINCH (reify Terminal$SignalHandler
+                                                              (handle [_ _]
+                                                                (reset! clear? true)
+                                                                (redraw))))]
+      (try
+        ;; Ctrl-C is a key like the others here.
+        (.setAttributes terminal (doto (Attributes. (.getAttributes terminal))
+                                   (.setLocalFlag Attributes$LocalFlag/ISIG false)))
+        (puts terminal InfoCmp$Capability/enter_ca_mode)
+        (puts terminal InfoCmp$Capability/keypad_xmit)
+        (puts terminal InfoCmp$Capability/cursor_invisible)
+        (let [reader (BindingReader. (.reader terminal))
+              keymap (key-map terminal)]
+          (loop []
+            (redraw)
+            (let [key (.readBinding reader keymap)]
+              ;; Nil when the input ends.
+              (when-not (or (nil? key) (= :done (handle key)))
+                (recur)))))
+        (finally
+          (puts terminal InfoCmp$Capability/cursor_normal)
+          (puts terminal InfoCmp$Capability/keypad_local)
+          (puts terminal InfoCmp$Capability/exit_ca_mode)
+          (.flush terminal)
+          (.setAttributes terminal attributes)
+          (.handle terminal Terminal$Signal/WINCH previous))))))

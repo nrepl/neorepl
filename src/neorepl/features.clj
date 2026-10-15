@@ -430,6 +430,18 @@
                         ;; bencode has no booleans.
                         :else {:ns-query {:project? "true" :load-project-ns? "true"}})}))
 
+(defn- evaluate-for
+  "Evaluates msg the way evaluation/evaluate does, whose opts it takes, for
+  what (capture response) makes of its responses rather than to show its
+  values: they go on to :on-response without their :value, and the result
+  has no :values."
+  [client msg opts capture]
+  (let [on-response (:on-response opts (fn [_]))]
+    (-> (evaluation/evaluate client msg (assoc opts :on-response (fn [response]
+                                                                   (capture response)
+                                                                   (on-response (dissoc response :value)))))
+        (dissoc :values))))
+
 (defn run-tests
   "Runs tests in session: those in the namespaces names names, or the tests
   it names, as ns/name, every test in the project when it's empty and the
@@ -456,22 +468,17 @@
         (throw (ex-info (str "No test called " (str/join ", " unknown)) {:type ::failed}))))
     (let [;; The eval ones run in a copy of the session, so its *1 stays put.
           copy (when-not ops? (nrepl/clone-session client session))
-          report (atom nil)
-          on-response (:on-response opts (fn [_]))]
+          report (atom nil)]
       (try
         (let [{:keys [status] :as result}
-              (-> (evaluation/evaluate
-                   client
-                   (test-msg session copy names)
-                   (-> opts
-                       ;; It would cut the report short, which is the eval's value.
-                       (cond-> copy (dissoc :max-output))
-                       (assoc :on-response (fn [response]
-                                             (cond
-                                               (:summary response) (reset! report (op-report response))
-                                               (and copy (:value response)) (reset! report (eval-report (:value response))))
-                                             (on-response (cond-> response copy (dissoc :value)))))))
-                  (dissoc :values :ns))
+              (-> (evaluate-for client
+                                (test-msg session copy names)
+                                ;; It would cut the report short, which is the eval's value.
+                                (cond-> opts copy (dissoc :max-output))
+                                #(cond
+                                   (:summary %) (reset! report (op-report %))
+                                   (and copy (:value %)) (reset! report (eval-report (:value %)))))
+                  (dissoc :ns))
               {{:keys [fail error]} :summary :as report} @report]
           (cond
             ;; Only a run that ended by itself, since clojure.test reports
@@ -484,3 +491,84 @@
           (when copy
             ;; There's nothing to close when the connection is gone.
             (try (nrepl/close-session client copy) (catch Exception _ nil))))))))
+
+(defn- inspector-lines
+  "What cider-nrepl's inspector renders, a list of strings, (:newline) and
+  (:value text index), as lines: vectors of segments, maps with the :text and,
+  for a value to inspect further, its :index, or :heading? for a section's
+  heading. A value that spans lines is a segment on each, those after the
+  first marked :continued."
+  [rendered]
+  (let [parts (edn/read-string rendered)
+        _ (when-not (sequential? parts)
+            (throw (ex-info (str "The server's inspector said " rendered) {:type ::failed})))
+        segments (for [part parts
+                       segment (cond
+                                 (string? part) [(cond-> {:text part}
+                                                   (str/starts-with? part "---") (assoc :heading? true))]
+                                 (= '(:newline) part) [:newline]
+                                 (and (sequential? part) (= :value (first part)))
+                                 [{:text (str (second part)) :index (nth part 2 nil)}]
+                                 ;; Whatever else it might come up with.
+                                 (sequential? part) [{:text (str/join (filter string? part))}]
+                                 :else [{:text (str part)}])]
+                   segment)]
+    (loop [lines []
+           line []
+           [segment & more :as segments] segments]
+      (cond
+        (empty? segments) (cond-> lines (seq line) (conj line))
+        (= :newline segment) (recur (conj lines line) [] more)
+        ;; Pretty printed values span lines, which are lines of the view too.
+        (str/includes? (:text segment) "\n")
+        (let [[first-line & others] (str/split (:text segment) #"\n" -1)
+              piece #(assoc segment :text % :continued true)]
+          (recur (into (conj lines (conj line (assoc segment :text first-line)))
+                       (map (comp vector piece))
+                       (butlast others))
+                 [(piece (last others))]
+                 more))
+        :else (recur lines (conj line segment) more)))))
+
+(defn- check-inspector [client]
+  (when-not (supports? client "inspect-push")
+    (throw (ex-info "Inspecting values takes cider-nrepl or babashka on the server" {:type ::failed}))))
+
+(defn inspect
+  "Evaluates code in session and starts inspecting its value, or the last
+  form's when there are several, the way evaluation/evaluate evaluates, whose
+  result it returns, whose opts it takes, and, when the evaluation worked,
+  the :lines of the inspector's view, as inspector takes them. The inspector
+  lives in the session on the server, which inspector moves around in."
+  [client session code opts]
+  (check-inspector client)
+  (let [;; The last value's view, or ::failed.
+        view (atom nil)
+        {:keys [status] :as result}
+        (evaluate-for client
+                      {:op "eval" :session session :code code :inspect "true"}
+                      ;; It would cut the view short, which is the value.
+                      (dissoc opts :max-output)
+                      #(cond
+                         (:value %) (reset! view (:value %))
+                         ;; cider-nrepl's way of saying eval-error.
+                         (nrepl/status? % "inspect-eval-error") (reset! view ::failed)))]
+    (cond
+      (not= "ok" status) result
+      (= ::failed @view) (assoc result :status "eval-error")
+      @view (assoc result :lines (inspector-lines @view))
+      :else (throw (ex-info "The server didn't inspect the value" {:type ::failed})))))
+
+(defn inspector
+  "Does what (:op msg), an inspect-push or the like, says to the inspector in
+  session and returns the :lines of the view it ends up with, and the
+  :status ok: vectors of segments, maps with the :text and, for values to
+  inspect further, the :index that inspect-push takes, or :heading? for the
+  heading of a section, like --- Contents:."
+  ([client session msg] (inspector client session msg {}))
+  ([client session msg opts]
+   (check-inspector client)
+   (let [responses (ask client (assoc msg :session session) opts)]
+     (if-let [value (some :value responses)]
+       {:status "ok" :lines (inspector-lines value)}
+       (throw (ex-info (str "The server couldn't do " (:op msg)) {:type ::failed}))))))

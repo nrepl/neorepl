@@ -1,9 +1,11 @@
 (ns neorepl.test-server
   "An nREPL server and temporary directories for the tests that need them."
-  (:require [clojure.java.io :as io]
+  (:require [clojure.edn :as edn]
+            [clojure.java.io :as io]
             [clojure.string :as str]
             [neorepl.nrepl :as nrepl]
             [nrepl.middleware :as middleware]
+            [nrepl.middleware.print :as print]
             [nrepl.server :as server]
             [nrepl.transport :as transport])
   (:import (java.io File)
@@ -71,13 +73,86 @@
 
 (middleware/set-descriptor! #'wrap-stuck {:expects #{"eval" "interrupt" "stdin"}})
 
+(def ^:private inspected
+  "What wrap-fake-inspector inspects, per session: the values it went
+  through, the last one being the one on show."
+  (atom {}))
+
+(defn- inspector-view
+  "How cider-nrepl's inspector would show value, roughly, and the values it
+  marks, by index."
+  [value]
+  (let [marked (atom [])
+        mark #(list :value (pr-str (peek (swap! marked conj %))) (dec (count @marked)))
+        class-name (mark (symbol (.getName (class value))))
+        rows (cond
+               (map? value) (mapv (fn [[k v]] ["  " (mark k) " = " (mark v)]) value)
+               (coll? value) (vec (map-indexed #(vector "  " (str %1 ". ") (mark %2)) value))
+               :else [["Value: " (mark value)]])
+        view (concat ["Class: " class-name '(:newline)]
+                     (when (coll? value) ["Count: " (str (count value)) '(:newline)])
+                     ['(:newline) "--- Contents:" '(:newline)]
+                     (mapcat #(concat % ['(:newline)]) rows))]
+    [(pr-str view) @marked]))
+
+(defn- show
+  "Responds to msg with what's on show in its session's inspector."
+  [{:keys [session] :as msg}]
+  (transport/respond-to msg :status "done" :value (first (inspector-view (peek (get @inspected session))))))
+
+(def ^:private inspect-ops
+  #{"inspect-push" "inspect-pop" "inspect-refresh" "inspect-next-page" "inspect-prev-page"
+    "inspect-toggle-view-mode" "inspect-toggle-pretty-print"})
+
+(defn wrap-fake-inspector
+  "Inspects values the way cider-nrepl does, roughly, for evaluations with
+  :inspect and the inspect ops neorepl sends, saying inspect-eval-error
+  rather than eval-error, as it does, and never answering an inspect-push
+  to an index it doesn't have. Values are data the reader can take back
+  from how they're printed."
+  [handler]
+  (fn [{:keys [op session inspect idx transport] :as msg}]
+    (case op
+      "eval" (if inspect
+               (handler (assoc msg :transport
+                               (reify transport/Transport
+                                 (recv [_] (transport/recv transport))
+                                 (recv [_ timeout] (transport/recv transport timeout))
+                                 (send [this {:keys [value status] :as response}]
+                                   (transport/send
+                                    transport
+                                    (cond
+                                      value (let [value (edn/read-string value)]
+                                              (swap! inspected assoc session [value])
+                                              (assoc response :value (first (inspector-view value))))
+                                      ;; cider-nrepl says eval-error this way.
+                                      status (assoc response :status (map #(if (= "eval-error" (name %)) "inspect-eval-error" %)
+                                                                          status))
+                                      :else response))
+                                   this))))
+               (handler msg))
+      ;; An index it doesn't have gets no answer, as from a stuck server.
+      "inspect-push" (when-some [value (get (second (inspector-view (peek (get @inspected session)))) idx)]
+                       (swap! inspected update session conj value)
+                       (show msg))
+      "inspect-pop" (do (swap! inspected update session #(cond-> % (< 1 (count %)) pop))
+                        (show msg))
+      (if (inspect-ops op)
+        ;; The rest show what's on show.
+        (show msg)
+        (handler msg)))))
+
+(middleware/set-descriptor! #'wrap-fake-inspector
+                            {:expects #{"eval" #'print/wrap-print}
+                             :handles (zipmap inspect-ops (repeat {}))})
+
 (defn fixture
   "A :once fixture that runs the tests with an nREPL server listening on
-  *port*, with wrap-stuck unless opts, which go to
+  *port*, with wrap-stuck and wrap-fake-inspector unless opts, which go to
   nrepl.server/start-server, give it a :handler."
   [& opts]
   (fn [f]
-    (let [srv (apply server/start-server :port 0 :handler (server/default-handler #'wrap-stuck) opts)]
+    (let [srv (apply server/start-server :port 0 :handler (server/default-handler #'wrap-stuck #'wrap-fake-inspector) opts)]
       (try
         (binding [*port* (:port srv)]
           (f))

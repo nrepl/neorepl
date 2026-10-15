@@ -77,3 +77,11 @@
                               :stacktrace [{:name "user/g" :file "x.clj"}
                                            {:name "user/g" :file "x.clj" :line 2 :flags ["dup"]}
                                            {:name "java.lang.Object/wait"}]}]))))
+
+(deftest inspector-text-test
+  (is (= "Class: [0]clojure.lang.PersistentVector\n\n--- Contents:\n  0. [1]{:a 1,\n :b 2}"
+         (render/inspector-text [[{:text "Class: "} {:text "clojure.lang.PersistentVector" :index 0}]
+                                 []
+                                 [{:text "--- Contents:"}]
+                                 [{:text "  0. "} {:text "{:a 1," :index 1}]
+                                 [{:text " :b 2}" :index 1 :continued true} {:text "  "}]]))))

@@ -278,3 +278,21 @@
       (testing "and code pasted after a command runs after it"
         (type "\u001b[200~,doc inc\n(+ 40 2)\u001b[201~\r")
         (is (screen #"clojure\.core/inc\n(?s).*\n42\nuser=> $"))))))
+
+(deftest inspect-test
+  (let [{:keys [out]}
+        (call-with-repl {}
+          (fn [type screen]
+            (type ",inspect {:a [1 2]}\r")
+            (is (screen #"--- Contents:(?s).*q quit"))
+            (testing "digging into the value selected"
+              (type "j\r")
+              (is (screen #"0\. 1\s+1\. 2")))
+            (testing "and back to the REPL, which carries on"
+              (type "q")
+              (is (screen #"user=> $"))
+              (type "(+ 1 2)\r")
+              (is (screen #"(?m)^3\nuser=> $")))))]
+    (testing "on a screen of its own, which goes away after"
+      (is (str/includes? out "\u001b[?1049h"))
+      (is (str/includes? out "\u001b[?1049l")))))

@@ -32,10 +32,14 @@
   (let [port (Long/parseLong s)]
     (when (< 0 port 65536) port)))
 
-(defn- parse-count [s]
+(defn- parse-index [s]
   (when (re-matches #"\d{1,9}" s)
-    (let [n (Long/parseLong s)]
-      (when (pos? n) n))))
+    (Long/parseLong s)))
+
+(defn- parse-count [s]
+  (when-let [n (parse-index s)]
+    (when (pos? n) n)))
+
 
 (defn- parse-seconds [s]
   ;; Nine digits are plenty, and the milliseconds can't overflow.
@@ -55,10 +59,13 @@
   {:short "-s" :long "--session" :arg "NAME" :parse not-empty :default "default"
    :doc "Use the session called NAME (default: default)"})
 
+(def ^:private timeout-option
+  {:long "--timeout" :arg "SECS" :parse parse-seconds
+   :doc "Interrupt the evaluation after SECS seconds"})
+
 (def ^:private evaluation-options
   [session-option
-   {:long "--timeout" :arg "SECS" :parse parse-seconds
-    :doc "Interrupt the evaluation after SECS seconds"}
+   timeout-option
    {:long "--max-output" :arg "CHARS" :parse parse-count
     :doc "Cut each value, stdout and stderr at CHARS characters"}])
 
@@ -266,6 +273,18 @@ when it times out.")
 
 (defn- no-session [name]
   {:status "no-session" :message (str "No session called " name)})
+
+(defn- with-named-session
+  "Calls (f client id) with a client connected the way options say and the
+  id of the session their :session names, and returns what it does, the exit
+  status. When there's no such session it says so and returns 1."
+  [{:keys [session format] :as options} {:keys [dir sessions-file]} f]
+  (with-client options dir
+    (fn [client]
+      (if-let [id (get (sessions/named sessions-file client) session)]
+        (f client id)
+        (do (report format (no-session session))
+            1)))))
 
 (defn- report-run
   "Runs (run client session opts) on the server options point at, in the
@@ -705,14 +724,10 @@ usage errors and 3 when there's no server to talk to."
   neorepl pst
   neorepl pst --session agent --format json"))
 
-(defn- pst-command [{:keys [session format] :as options} args {:keys [dir sessions-file]}]
+(defn- pst-command [{:keys [session format] :as options} args ctx]
   (reject-args args)
-  (with-client options dir
-    (fn [client]
-      (if-let [id (get (sessions/named sessions-file client) session)]
-        (report-lookup format "pst" client {:session id :session-name session} nil)
-        (do (report format (no-session session))
-            1)))))
+  (with-named-session options ctx
+    #(report-lookup format "pst" %1 {:session %2 :session-name session} nil)))
 
 (def ^:private test-options
   (concat connection-options evaluation-options common-options))
@@ -771,6 +786,87 @@ server."
 (defn- retest-command [options args ctx]
   (reject-args args)
   (report-tests :failed options ctx))
+
+(def ^:private inspector-actions
+  "The options that move the inspector around, and the ops they send, with
+  --push's value as the :idx."
+  [[{:long "--push" :arg "N" :parse parse-index
+     :doc "Inspect the value marked [N] in what's being inspected"}
+    "inspect-push"]
+   [{:long "--pop" :doc "Go back to what was being inspected before"} "inspect-pop"]
+   [{:long "--next-page" :doc "Show the next page of a big collection"} "inspect-next-page"]
+   [{:long "--prev-page" :doc "Show the previous page"} "inspect-prev-page"]
+   [{:long "--view" :doc "Switch to the next view mode, like the object's fields"}
+    "inspect-toggle-view-mode"]])
+
+(def ^:private inspect-options
+  (concat connection-options
+          [session-option timeout-option]
+          (map first inspector-actions)
+          common-options))
+
+(def ^:private inspect-help
+  (help-text
+   "Usage: neorepl inspect [options] CODE
+       neorepl inspect [options] -
+       neorepl inspect [options] [--push N | --pop | --next-page | --prev-page | --view]"
+   "Evaluates CODE, or standard input with -, and prints its value the way
+cider-nrepl's inspector shows it: the class, the contents, page by page for
+big collections, and so on. Each value in there that can be inspected further
+is marked with a number, as [3], which --push takes. The inspector stays in
+the session, so the next neorepl inspect can go on from there. Without CODE
+or an option it prints what's being inspected. It takes cider-nrepl or
+babashka on the server."
+   inspect-options
+   discovery-note
+   sessions-note
+   evaluation-exit-statuses
+   "Examples:
+  neorepl inspect '(System/getProperties)'
+  neorepl inspect --push 3
+  neorepl inspect --pop
+  neorepl inspect --format json '{:a [1 2 3]}'"))
+
+(defn- inspector-result
+  "result, as features/inspect and inspector have it, with the view as :text."
+  [{:keys [lines] :as result}]
+  (cond-> (dissoc result :lines)
+    lines (assoc :text (render/inspector-text lines))))
+
+(defn- inspect-command [{:keys [format timeout] :as options} args ctx]
+  (let [actions (keep (fn [[spec op]]
+                        (when-some [value (get options (cli/option-key spec))]
+                          (cond-> {:op op} (number? value) (assoc :idx value))))
+                      inspector-actions)]
+    (cond
+      (< 1 (count actions)) (throw (usage-error (str "Give one of "
+                                                     (str/join ", " (map (comp :long first) inspector-actions)))))
+      (and (seq actions) (seq args)) (throw (usage-error "Give either CODE or an option that moves the inspector, not both"))
+
+      (seq args)
+      (let [code (read-code nil args)]
+        (report-run (fn [client session opts]
+                      (inspector-result (features/inspect client session code
+                                                          (cond-> opts
+                                                            (= ["-"] args) (assoc :read-line (constantly nil))))))
+                    options ctx :text))
+
+      :else
+      (with-named-session options ctx
+        (fn [client id]
+          (try
+            (let [{:keys [text] :as result}
+                  (inspector-result (features/inspector client id (or (first actions) {:op "inspect-refresh"})
+                                                        (cond-> {}
+                                                          timeout (assoc :timeout-ms (long (* 1000 timeout))))))]
+              (if (= "text" format)
+                (println text)
+                (emit format result))
+              0)
+            (catch clojure.lang.ExceptionInfo e
+              (if (= ::nrepl/timeout (:type (ex-data e)))
+                (do (warn (ex-message e)) 124)
+                (throw e)))))))))
 
 (def ^:private repl-options
   (concat connection-options
@@ -906,6 +1002,8 @@ with an error, and 2 on usage errors."
    {:name "test" :summary "Run tests" :options test-options :help test-help :main test-command}
    {:name "retest" :summary "Rerun the tests that didn't pass" :options test-options :help retest-help
     :main retest-command}
+   {:name "inspect" :summary "Inspect a value" :options inspect-options :help inspect-help
+    :main inspect-command}
    {:name "pst" :summary "Print the last error's stack trace" :options pst-options :help pst-help
     :main pst-command}
    {:name "interrupt" :summary "Interrupt an evaluation" :options interrupt-options :help interrupt-help
