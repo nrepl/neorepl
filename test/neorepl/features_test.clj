@@ -75,6 +75,15 @@
                   (do (transport/respond-to msg :reloading ["changed.ns"])
                       (transport/respond-to msg :err "Reflection warning, changed/ns.clj:3:1\n")
                       (transport/respond-to msg :status ["ok" "done"])))
+      "test-stacktrace" (do (swap! test-requests conj (select-keys msg [:op :ns :var :index]))
+                            (transport/respond-to msg :class "clojure.lang.ExceptionInfo" :message "boom" :data "{}"
+                                                  :stacktrace [{:name "neorepl.sample_suite$fn__1/invokeStatic"
+                                                                :var "neorepl.sample-suite/fn" :file "sample_suite.clj"
+                                                                :line 15 :flags ["project" "clj"]}
+                                                               {:name "orchard.test$test_var/invokeStatic"
+                                                                :var "orchard.test/test-var" :file "test.clj"
+                                                                :line 362 :flags ["dependency" "clj"]}])
+                            (transport/respond-to msg :status "done"))
       "analyze-last-stacktrace" (do (transport/respond-to msg :class "clojure.lang.ExceptionInfo" :message "boom"
                                                           :data "{:k 1}" :phase "execution"
                                                           :stacktrace [{:name "user$f/invoke" :var "user/f" :file "x.clj" :line 1
@@ -90,7 +99,7 @@
       (handler msg))))
 
 (middleware/set-descriptor! #'wrap-fake-cider {:handles {"info" {} "complete" {} "apropos" {}
-                                                         "macroexpand" {} "analyze-last-stacktrace" {}
+                                                         "macroexpand" {} "analyze-last-stacktrace" {} "test-stacktrace" {}
                                                          "refresh" {} "test-var-query" {} "retest" {}}})
 
 (def ^:private user
@@ -202,6 +211,15 @@
     {:name "clojure.lang.Compiler/eval"} nil
     {} nil))
 
+(deftest above-test-runner-test
+  (testing "a test's frames, down to the runner's"
+    (is (= [{:name "my.app-test/fn"}]
+           (#'features/above-test-runner [{:name "my.app-test/fn"} {:name "clojure.test$test_var/invokeStatic"}
+                                          {:name "my.app-test/fixture"}]))))
+  (testing "or all of them, for an error in the runner"
+    (is (= [{:name "orchard.test$test_var/invoke"} {:name "nrepl.SessionThread/run"}]
+           (#'features/above-test-runner [{:name "orchard.test$test_var/invoke"} {:name "nrepl.SessionThread/run"}])))))
+
 (deftest reload-test
   (with-client [client {:port *port*}]
     (testing "the namespaces given"
@@ -224,9 +242,13 @@
                    :expected "(= 1 (throw (ex-info \"boom\" {})))" :error "clojure.lang.ExceptionInfo: boom {}"}
                   {:type "fail" :ns "neorepl.sample-suite" :var "failing" :context "with a context"
                    :message "adds up" :expected "(= 3 (+ 1 1))" :actual "(not (= 3 2))" :line 12}]
-                 (map #(dissoc % :file (when (= "error" (:type %)) :line)) failures)))
+                 (map #(dissoc % :file :causes (when (= "error" (:type %)) :line)) failures)))
           (testing "with the files the tests are in"
-            (is (every? (comp sample-file? :file) failures)))))
+            (is (every? (comp sample-file? :file) failures)))
+          (testing "and the error's stack trace"
+            (let [[{:keys [class message stacktrace]}] (:causes (first failures))]
+              (is (= ["clojure.lang.ExceptionInfo" "boom"] [class message]))
+              (is (seq stacktrace))))))
       (testing "a fixture failing outside the tests"
         (is (= [{:type "error" :ns "neorepl.sample-fixture" :error "clojure.lang.ExceptionInfo: no database {}"}]
                (map #(select-keys % [:type :ns :var :error]) (:failures (:report (run ["neorepl.sample-fixture"])))))))
@@ -296,6 +318,10 @@
                       :failures [{:type "error" :ns "neorepl.sample-suite" :var "erring"
                                   :expected "(= 1 (throw (ex-info \"boom\" {})))"
                                   :error "clojure.lang.ExceptionInfo: boom {}"
+                                  :causes [{:class "clojure.lang.ExceptionInfo" :message "boom" :data "{}"
+                                            :stacktrace [{:name "neorepl.sample_suite$fn__1/invokeStatic"
+                                                          :var "neorepl.sample-suite/fn" :file "sample_suite.clj"
+                                                          :line 15 :flags ["project" "clj"]}]}]
                                   :file "sample_suite.clj" :line 15}
                                  {:type "fail" :ns "neorepl.sample-suite" :var "failing" :context "with a context"
                                   :message "adds up" :expected "3" :actual "2"
@@ -310,7 +336,10 @@
                                                                   "neorepl.sample-suite/failing"]}}
                       {:op "test-var-query" :var-query {:ns-query {:project? "true" :load-project-ns? "true"}}}
                       {:op "retest"}]
-                     @test-requests))))
+                     (remove (comp #{"test-stacktrace"} :op) @test-requests)))
+              (testing "with the stack trace of each error, by its index"
+                (is (= {:op "test-stacktrace" :ns "neorepl.sample-suite" :var "erring" :index 0}
+                       (some #(when (= "test-stacktrace" (:op %)) %) @test-requests))))))
           (is (= [{:class "clojure.lang.ExceptionInfo" :message "boom" :data "{:k 1}"
                    :stacktrace [{:name "user$f/invoke" :file "x.clj" :line 1 :var "user/f"}
                                 {:name "my.app$g/invoke" :file "app.clj" :line 5 :var "my.app/g"

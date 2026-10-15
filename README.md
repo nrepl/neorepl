@@ -104,7 +104,8 @@ neorepl pst --format json
 ```
 
 `neorepl test` runs tests, in the namespaces you name, the tests you name or,
-without either, the whole project's, and prints what didn't pass and where.
+without either, the whole project's, and prints what didn't pass and where,
+with the stack trace of each error down to the test that hit it.
 `neorepl retest` reruns the ones that didn't. They're `,test` and `,retest`
 in the REPL. cider-nrepl or babashka on the server runs them, and so does
 plain `clojure.test`, given the namespaces:

@@ -51,6 +51,25 @@
                                                  :file "/x/app_test.clj" :line 3}
                                                 {:type "error" :ns "my.app-test" :var "throws"
                                                  :error "clojure.lang.ExceptionInfo: boom {}"}]}))))
+  (testing "an error's stack trace"
+    (is (= (str "ERROR in my.app-test/throws\n"
+                "   error: clojure.lang.ExceptionInfo: boom {}\n"
+                "            at my.app/f (app.clj:2)\n"
+                "            at my.app-test/fn (app_test.clj:5)\n"
+                "          Caused by: java.lang.ArithmeticException: Divide by zero\n"
+                "            at clojure.lang.Numbers/divide (Numbers.java:190)\n"
+                "\n"
+                "Ran 1 test containing 1 assertion.\n0 failures, 1 error.")
+           (render/test-report-text
+            {:summary {:ns 1 :var 1 :test 1 :pass 0 :fail 0 :error 1}
+             :failures [{:type "error" :ns "my.app-test" :var "throws"
+                         :error "clojure.lang.ExceptionInfo: boom {}"
+                         :causes [{:class "clojure.lang.ExceptionInfo" :message "boom" :data "{}"
+                                   :stacktrace [{:name "my.app/f" :file "app.clj" :line 2}
+                                                {:name "my.app/f" :file "app.clj" :line 1 :flags ["dup"]}
+                                                {:name "my.app-test/fn" :file "app_test.clj" :line 5}]}
+                                  {:class "java.lang.ArithmeticException" :message "Divide by zero"
+                                   :stacktrace [{:name "clojure.lang.Numbers/divide" :file "Numbers.java" :line 190}]}]}]}))))
   (testing "a fixture failing outside the tests"
     (is (= "ERROR in my.app-test\n   error: java.lang.Exception: no db\n\nRan 1 test containing 0 assertions.\n0 failures, 1 error."
            (render/test-report-text {:summary {:ns 1 :var 1 :test 0 :pass 0 :fail 0 :error 1}

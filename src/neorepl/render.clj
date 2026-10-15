@@ -56,18 +56,30 @@
   [{:keys [flags]}]
   (some #{"tooling" "dup"} flags))
 
+(defn- frame-lines
+  "The frames of stacktrace, from last-error, minus those of the tools
+  around the code and the duplicates, with at, its indentation included,
+  before each."
+  [stacktrace at]
+  (for [frame stacktrace
+        :when (not (hidden-frame? frame))]
+    (str at (frame-text frame))))
+
+(defn- causes-lines
+  "causes, from last-error, as the lines Java prints stack traces in, the
+  first being the nth cause, minus the frames frame-lines leaves out."
+  [causes at n]
+  (for [[i {:keys [data stacktrace] :as cause}] (map-indexed vector causes)
+        line (concat [(cause-text (+ n i) cause)]
+                     (data-lines data)
+                     (frame-lines stacktrace at))]
+    line))
+
 (defn error-text
   "An error from last-error as text, the way Java prints stack traces, minus
   the frames of the tools around the code and the duplicates."
   [causes]
-  (str/join "\n"
-            (for [[i {:keys [data stacktrace] :as cause}] (map-indexed vector causes)
-                  line (concat [(cause-text i cause)]
-                               (data-lines data)
-                               (for [frame stacktrace
-                                     :when (not (hidden-frame? frame))]
-                                 (str "    at " (frame-text frame))))]
-              line)))
+  (str/join "\n" (causes-lines causes "    at " 0)))
 
 (defn location-text
   "Where something is, its :file, :line and :column, the way compilers and
@@ -84,9 +96,17 @@
 (defn- counted [n word]
   (str n " " word (when-not (= 1 n) "s")))
 
+(defn- trace-text
+  "causes, a test error's, from a run-tests report, as the lines of its
+  stack trace that come after the error itself, which says what the first
+  cause is."
+  [[{:keys [stacktrace]} & more]]
+  (concat (frame-lines stacktrace "  at ")
+          (causes-lines more "  at " 1)))
+
 (defn- failure-text
   "A test that didn't pass, from a run-tests report, as clojure.test prints it."
-  [{:keys [type ns var context message expected actual error file line]}]
+  [{:keys [type ns var context message expected actual error causes file line]}]
   (str/join "\n" (remove nil? [(str (str/upper-case type)
                                      ;; Not in a test, when a fixture fails.
                                      (some->> (not-empty (str/join "/" (remove nil? [ns var]))) (str " in "))
@@ -95,7 +115,8 @@
                                 message
                                 (some->> expected (labeled "expected: "))
                                 (if (= "error" type)
-                                  (some->> error (labeled "   error: "))
+                                  (when error
+                                    (labeled "   error: " (str/join "\n" (cons error (trace-text causes)))))
                                   (some->> actual (labeled "  actual: ")))])))
 
 (defn test-report-text
