@@ -225,6 +225,16 @@
     (is (= [{:name "orchard.test$test_var/invoke"} {:name "nrepl.SessionThread/run"}]
            (#'features/above-test-runner [{:name "orchard.test$test_var/invoke"} {:name "nrepl.SessionThread/run"}])))))
 
+(deftest test-results-test
+  (testing "ClojureScript's errors, which come with the stack"
+    (is (= [{:type "error" :ns "app.core-test" :var "errs" :expected "(= 1 (throw (ex-info \"boom\" {})))"
+             :actual "#error {:message \"boom\", :data {}}" :error "boom" :line 6 :index 0}]
+           (#'features/test-results {:app.core-test {:errs [{:type "error" :index 0 :ns "app.core-test" :var "errs"
+                                                             :expected "(= 1 (throw (ex-info \"boom\" {})))"
+                                                             :actual "#error {:message \"boom\", :data {}}"
+                                                             :error {:message "boom" :stack "Error: boom\n    at x.js:1:2"}
+                                                             :line 6}]}})))))
+
 (deftest reload-test
   (with-client [client {:port *port*}]
     (testing "the namespaces given"
@@ -268,6 +278,9 @@
         ["neorepl.sample-suite/nope"] #"No test called neorepl.sample-suite/nope"
         ["neorepl.sample-suite" "neorepl.sample-suite/passing"] #"not both"
         ["no.such-suite"] #"no/such_suite"
+        ;; They go into the code as they are.
+        ["neorepl.sample-suite) (System/exit 1"] #"Not the name of a namespace or a test"
+        ["neorepl.sample-suite/passing 1"] #"Not the name of a namespace or a test"
         [] #"Running every test takes cider-nrepl"
         :failed #"Rerunning the tests that failed takes cider-nrepl"))))
 
