@@ -152,6 +152,17 @@ $ neorepl check src/my/app.clj
 src/my/app.clj:12:1: Unclosed (
 ```
 
+`--fix` repairs them the way parinfer's indent mode would, trusting the
+indentation over the delimiters: a line closes the forms opened at its
+column or right of it. It only touches the top-level forms that don't
+balance, writes the files back, and leaves alone the ones it can't tell how
+to repair, like a string that never ends:
+
+```shell
+$ neorepl check --fix src/my/app.clj
+src/my/app.clj:12:1: Unclosed (, repaired from the indentation
+```
+
 ### Coding agents
 
 Agents can drive the CLI like anyone else: every command takes `--format
@@ -166,7 +177,7 @@ claude mcp add neorepl -- neorepl mcp
 
 Its tools are `eval`, `load`, `doc`, `source`, `where`, `apropos`,
 `macroexpand`, `reload`, `test`, `retest`, `pst`, `interrupt`, `check` and
-`ports`, and they share the CLI's sessions, so `neorepl eval --session NAME`
+`ports`, with `check` taking a `fix` argument for `--fix`, and they share the CLI's sessions, so `neorepl eval --session NAME`
 and the `eval` tool with that session see the same state. That's fewer tools
 than the CLI has commands on purpose: an agent pays for every tool's
 description in its context on every turn, whether it uses it or not, while a

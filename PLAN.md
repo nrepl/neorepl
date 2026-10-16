@@ -241,7 +241,7 @@ Each one is a release people can use. The first three stages below all went into
 
 0.3, agents, round two
 - Done: JSON reading in `neorepl.json`, since MCP reads it, and `neorepl mcp` with the curated tools, see MCP above, checked with the MCP Inspector's CLI (0.17.2), which uses the official SDK.
-- `neorepl check --fix`: delimiter repair from the indentation, as a CLI option and the `check` tool's `fix`.
+- Done: `neorepl check --fix`, delimiter repair from the indentation, as a CLI option and the `check` tool's `fix`. It repairs the way parinfer's indent mode does, but only the top-level forms that don't balance: the file splits at the lines that start in column 0, and the shortest runs of those parts that balance stay as they are, so a valid form with a line in column 0 doesn't get split. It won't guess at an unterminated string, or at indentation with tabs, and checks the whole file balances before writing it back. Dropping a closer at the end of a random line of neorepl's own sources, or adding one, 1,320 times each: it restores the file 98.8% of the time, and the rest come back balanced but different, where the code was indented a column off from what its structure says, which indentation can't tell apart.
 - The agent skill, a `SKILL.md` teaching the CLI workflow (`check` before `load`, `eval --session`, `test`, `pst`), and an `AGENTS.md` snippet.
 - Docs for common setups: Claude Code (the skill, or `claude mcp add neorepl -- neorepl mcp`), Codex, Cursor and VS Code, Gemini CLI.
 - Left for a 0.2.x: `inspect-def-current-value` and the frames of ClojureScript errors.

@@ -13,6 +13,7 @@
             [neorepl.mcp :as mcp]
             [neorepl.nrepl :as nrepl]
             [neorepl.render :as render]
+            [neorepl.repair :as repair]
             [neorepl.sessions :as sessions]
             [neorepl.shutdown :as shutdown]
             [neorepl.xdg :as xdg])
@@ -487,7 +488,9 @@ does."
                 ports)
     (if (some :live ports) 0 3)))
 
-(def ^:private check-options common-options)
+(def ^:private check-options
+  (cons {:long "--fix" :doc "Repair the delimiters from the indentation, writing the files back"}
+        common-options))
 
 (def ^:private check-help
   (help-text
@@ -495,35 +498,50 @@ does."
        neorepl check [options] -"
    "Checks that the parens, brackets and braces in Clojure source balance and
 that its strings end, and reports the first problem in each file. Standard
-input stands in for a file as -. No server needed."
+input stands in for a file as -. No server needed.
+
+--fix repairs what doesn't balance the way parinfer's indent mode would, from
+the indentation: a line closes the forms opened at its column or right of it.
+It only touches the top-level forms that don't balance, and leaves a file
+alone, saying why, when it can't tell how to repair it, as with a string that
+never ends. With -, it prints the repaired code."
    check-options
-   "Exit status: 0 when everything balances, 1 when something doesn't or a file
-can't be read and 2 on usage errors."
+   "Exit status: 0 when everything balances, after --fix's repairs, 1 when
+something doesn't or a file can't be read and 2 on usage errors."
    "Examples:
   neorepl check src/my/app.clj
+  neorepl check --fix src/my/app.clj
   neorepl check --format json $(git ls-files '*.clj')"))
 
 (defn- check-file
   "The first delimiter problem in the file at path, or standard input for -,
-  as lexer/file-problem has it."
-  [path]
-  (if (= "-" path)
-    (some->> (lexer/delimiter-problem (slurp *in*)) (into {:file "<stdin>"}))
-    (lexer/file-problem path)))
+  as lexer/file-problem has it, repaired, as repair/fix-file does, if fix?.
+  Standard input, repaired, goes to out."
+  [path fix? ^java.io.Writer out]
+  (cond
+    (not= "-" path) (if fix? (repair/fix-file path) (lexer/file-problem path))
+    fix? (let [[text problem] (repair/fix-text (slurp *in*))]
+           (.write out ^String text)
+           (.flush out)
+           (some->> problem (into {:file "<stdin>"})))
+    :else (some->> (lexer/delimiter-problem (slurp *in*)) (into {:file "<stdin>"}))))
 
-(defn- check-command [{:keys [format]} args _]
+(defn- check-command [{:keys [format fix]} args _]
   (when (empty? args)
     (throw (usage-error "Nothing to check")))
-  (let [problems (reduce (fn [problems problem]
-                           (when (= "text" format)
-                             (println (render/problem-text problem)))
-                           (conj problems problem))
-                         []
-                         ;; Lexed in parallel, reported in order.
-                         (remove nil? (pmap check-file args)))]
-    (when-not (= "text" format)
-      (emit format problems))
-    (if (seq problems) 1 0)))
+  (let [stdout *out*]
+    ;; Repaired code from standard input goes to standard output.
+    (binding [*out* (if (and fix (some #{"-"} args)) *err* *out*)]
+      (let [problems (reduce (fn [problems problem]
+                               (when (= "text" format)
+                                 (println (render/problem-text problem)))
+                               (conj problems problem))
+                             []
+                             ;; Lexed in parallel, reported in order.
+                             (remove nil? (pmap #(check-file % fix stdout) args)))]
+        (when-not (= "text" format)
+          (emit format problems))
+        (if (every? :fixed problems) 0 1)))))
 
 (def ^:private ns-option
   {:long "--ns" :arg "NS" :parse not-empty :default "user"
