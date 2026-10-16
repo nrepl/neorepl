@@ -108,6 +108,17 @@
     (nrepl/interrupt client session nil)
     :unknown-session))
 
+(defn interrupt-result
+  "How interrupting what runs in the session called name went, as a map with
+  the :status (interrupted, idle, no-session or error) and, unless it
+  worked, a :message."
+  [file client name]
+  (case (interrupt file client name)
+    :interrupted {:status "interrupted"}
+    :idle {:status "idle" :message (str "Nothing is running in session " name)}
+    :unknown-session {:status "no-session" :message (str "No session called " name)}
+    {:status "error" :message "The server couldn't interrupt the evaluation"}))
+
 (defn close!
   "Closes the session called name on client's server and drops it from file.
   Returns its id, or nil when there's no such session."

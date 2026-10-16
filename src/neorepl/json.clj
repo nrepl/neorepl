@@ -75,7 +75,7 @@
 
 (defn- read-number-at [^String s ^long i]
   (let [m (re-matcher #"-?(?:0|[1-9]\d*)(\.\d+)?([eE][+-]?\d+)?" s)]
-    (if (and (.find m i) (= i (.start m)))
+    (if (.lookingAt (.region m i (.length s)))
       (let [text (.group m)]
         [(if (or (.group m 1) (.group m 2))
            (Double/parseDouble text)

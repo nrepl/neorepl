@@ -1,0 +1,356 @@
+(ns neorepl.mcp
+  "neorepl as an MCP server on stdio: JSON-RPC 2.0, a message a line, with
+  tools over the same features as the CLI's commands, a curated few of them,
+  since every tool's description takes up the model's context. It keeps its
+  connections to nREPL servers open, and uses the CLI's named sessions, so
+  an agent can mix neorepl eval and the eval tool."
+  (:require [clojure.java.io :as io]
+            [clojure.string :as str]
+            [neorepl.discovery :as discovery]
+            [neorepl.evaluation :as evaluation]
+            [neorepl.features :as features]
+            [neorepl.json :as json]
+            [neorepl.lexer :as lexer]
+            [neorepl.lookups :as lookups]
+            [neorepl.nrepl :as nrepl]
+            [neorepl.render :as render]
+            [neorepl.sessions :as sessions])
+  (:import (java.io BufferedReader Writer)
+           (java.util.concurrent ExecutorService Executors TimeUnit)))
+
+(def ^:private protocol-versions
+  "The MCP versions neorepl speaks, the latest first."
+  ["2025-11-25" "2025-06-18" "2025-03-26" "2024-11-05"])
+
+;;; Connections
+
+(defn- client
+  "The connection to the server on port, or the one the server was started
+  for without a port, opening it if there's none yet. Calls that come at
+  once share the one they open, and a failed one is forgotten, so the next
+  call tries again."
+  [{:keys [clients connect]} port]
+  (let [d (get (swap! clients update port #(or % (delay (connect port)))) port)]
+    (try
+      @d
+      (catch Exception e
+        (swap! clients #(cond-> % (identical? d (get % port)) (dissoc port)))
+        (throw e)))))
+
+(defn- with-client
+  "Calls (f client) with the connection to the server on port. A connection
+  that dropped is forgotten, so the next call opens a new one, to the
+  server that's there by then."
+  [{:keys [clients] :as server} port f]
+  (let [c (client server port)]
+    (try
+      (f c)
+      (catch clojure.lang.ExceptionInfo e
+        (when (= ::nrepl/disconnected (:type (ex-data e)))
+          (swap! clients #(cond-> % (some-> (get % port) deref (identical? c)) (dissoc port)))
+          (try (nrepl/close c) (catch Exception _ nil)))
+        (throw e)))))
+
+;;; Tools
+
+(defn- result
+  "A tool's result: text for the model, data like --format json's, and
+  whether it's an error."
+  ([text data] (result text data false))
+  ([text data error?]
+   {:text text :data data :error? error?}))
+
+(defn- error
+  "A tool's result saying it failed, and why."
+  [message]
+  (result message {:status "error" :message message} true))
+
+(defn- evaluation-text
+  "What an evaluation printed and came to, as text."
+  [{:keys [out err values message truncated]} max-output]
+  (str/join "\n" (remove str/blank? [(some-> out str/trimr)
+                                     (some-> err str/trimr)
+                                     (str/join "\n" values)
+                                     (when truncated (str "(Cut at " max-output " characters)"))
+                                     message])))
+
+(defn- evaluate
+  "Runs (run client session opts) in the session args name, opts being
+  evaluation/evaluate's, the way neorepl eval runs things, and returns the
+  tool's result, with (text result) after the output, if it says
+  anything."
+  ([server args on-send run] (evaluate server args on-send run (constantly nil)))
+  ([{:keys [sessions-file timeout max-output] :as server} {:keys [session port] :as args} on-send run text]
+   (with-client server port
+     (fn [client]
+       (let [{:keys [status] :as r} (run client
+                                         (sessions/ensure! sessions-file client session)
+                                         {:timeout (or (:timeout args) timeout)
+                                          :max-output max-output
+                                          :on-send on-send})]
+         (result (str/join "\n" (remove str/blank? [(evaluation-text r max-output) (text r)]))
+                 r
+                 ;; Tests that don't pass are an answer, not the tool failing.
+                 (not (#{"ok" "failed"} status))))))))
+
+(defn- run-tests
+  "Runs the tests names names, as features/run-tests takes them, the way
+  evaluate runs things."
+  [server args on-send names]
+  (evaluate server args on-send
+            #(let [{:keys [report] :as r} (features/run-tests %1 %2 names %3)]
+               ;; The report's at the top, as in neorepl test's edn and json.
+               (merge (dissoc r :report) report))
+            #(when (:summary %) (render/test-report-text %))))
+
+(defn- lookup
+  "Does the lookup called name, see neorepl.lookups, on arg, in the context
+  (ctx client) makes, the :ns args name by default."
+  ([server args name arg] (lookup server args name arg (constantly {:ns (:ns args)})))
+  ([server {:keys [port]} name arg ctx]
+   (with-client server port
+     (fn [client]
+       (let [{:keys [found text none]} (lookups/run name client (ctx client) arg)]
+         (if found
+           (result text found)
+           (result none {:status "not-found" :message none})))))))
+
+(defn- check
+  "The first unbalanced delimiter in each of files, as neorepl check finds
+  them."
+  [files]
+  (let [problems (into [] (keep lexer/file-problem) files)]
+    (result (if (seq problems)
+              (str/join "\n" (map render/problem-text problems))
+              "Every delimiter balances")
+            {:problems problems})))
+
+(def ^:private port-arg
+  {:port {:type "integer"
+          :description "The nREPL server's port, for projects with several; the one neorepl mcp found by default"}})
+
+(def ^:private session-arg
+  {:session {:type "string"
+             :description "The named session, shared with neorepl's CLI (default: default)"}})
+
+(def ^:private ns-arg
+  {:ns {:type "string" :description "The namespace to resolve in (default: user)"}})
+
+(defn- schema
+  "An object schema with properties, required being the names of the ones
+  that are."
+  [properties & required]
+  (cond-> {:type "object" :properties properties}
+    (seq required) (assoc :required (vec required))))
+
+(defn- symbol-tool [name description]
+  {:name name
+   :description description
+   :inputSchema (schema (merge {:symbol {:type "string" :description "The symbol, qualified or as the ns sees it"}}
+                               ns-arg port-arg)
+                        "symbol")
+   :run (fn [server {:keys [symbol] :as args} _] (lookup server args name symbol))})
+
+(def tools
+  "The tools, as tools/list has them, and how each one :runs, given the
+  server, the arguments, with a :session and an :ns by default, and a
+  function to call with the message id and the interrupt function of an
+  evaluation, for cancelling it."
+  [{:name "eval"
+    :description "Evaluate Clojure code in a session that keeps *ns*, *1 and *e from call to call. Returns what it printed and its values; an exception's message and its class come in the error output, and pst shows the stack trace."
+    :inputSchema (schema (merge {:code {:type "string" :description "The code, one form or several"}
+                                 :timeout {:type "number" :description "Seconds before interrupting it"}}
+                                session-arg port-arg)
+                         "code")
+    :run (fn [server {:keys [code] :as args} on-send]
+           (evaluate server args on-send
+                     #(evaluation/evaluate %1 {:op "eval" :code code :session %2} %3)))}
+   {:name "load"
+    :description "Load a Clojure file into the session, so its errors carry the file's name and lines. Check it first."
+    :inputSchema (schema (merge {:file {:type "string" :description "The file's path"}} session-arg port-arg)
+                         "file")
+    :run (fn [server {:keys [file] :as args} on-send]
+           (let [f (io/file file)]
+             (if (.isFile f)
+               (evaluate server args on-send
+                         #(evaluation/evaluate %1 {:op "load-file" :session %2 :file (slurp f)
+                                                   :file-path (.getAbsolutePath f) :file-name (.getName f)}
+                                               %3))
+               (error (str "No such file: " file)))))}
+   (symbol-tool "doc" "Show a var's arglists and documentation.")
+   (symbol-tool "source" "Show a var's source.")
+   (symbol-tool "where" "Show the file and line a var is defined at.")
+   {:name "apropos"
+    :description "Find vars whose names match a regex, with the first line of their docs."
+    :inputSchema (schema (merge {:regex {:type "string"}} port-arg) "regex")
+    :run (fn [server {:keys [regex] :as args} _] (lookup server args "apropos" regex))}
+   {:name "macroexpand"
+    :description "Expand the macro a form calls, or every macro in it with all."
+    :inputSchema (schema (merge {:form {:type "string"}
+                                 :all {:type "boolean" :description "Expand every macro, not just the outermost"}}
+                                ns-arg port-arg)
+                         "form")
+    :run (fn [server {:keys [form all] :as args} _]
+           (lookup server args (if all "macroexpand-all" "macroexpand") form))}
+   {:name "reload"
+    :description "Reload namespaces after changing their files: the ones given, or with cider-nrepl, every one that changed."
+    :inputSchema (schema (merge {:namespaces {:type "array" :items {:type "string"}}} port-arg))
+    :run (fn [server {:keys [namespaces] :as args} _] (lookup server args "reload" (seq namespaces)))}
+   {:name "test"
+    :description "Run tests: the namespaces given, or tests as ns/name, or with cider-nrepl or babashka, the whole project's. Says what didn't pass, where and why."
+    :inputSchema (schema (merge {:names {:type "array" :items {:type "string"}}
+                                 :timeout {:type "number" :description "Seconds before interrupting them"}}
+                                session-arg port-arg))
+    :run (fn [server {:keys [names] :as args} on-send] (run-tests server args on-send (vec names)))}
+   {:name "retest"
+    :description "Rerun the tests that didn't pass last time. Takes cider-nrepl or babashka."
+    :inputSchema (schema (merge session-arg port-arg))
+    :run (fn [server args on-send] (run-tests server args on-send :failed))}
+   {:name "pst"
+    :description "Show the stack trace of the session's last error, minus the frames of the tooling."
+    :inputSchema (schema (merge session-arg port-arg))
+    :run (fn [{:keys [sessions-file] :as server} {:keys [session] :as args} _]
+           (lookup server args "pst" nil
+                   (fn [client] {:session (sessions/ensure! sessions-file client session) :session-name session})))}
+   {:name "interrupt"
+    :description "Interrupt what's running in a session, like an evaluation that's been left behind."
+    :inputSchema (schema (merge session-arg port-arg))
+    :run (fn [{:keys [sessions-file] :as server} {:keys [port session]} _]
+           (with-client server port
+             (fn [client]
+               (let [{:keys [status message] :as r} (sessions/interrupt-result sessions-file client session)]
+                 (result (or message "Interrupted") r (= "error" status))))))}
+   {:name "check"
+    :description "Check Clojure files for unbalanced parens, brackets, braces and strings, without a server. Run it after editing a file and before loading it."
+    :inputSchema (schema {:files {:type "array" :items {:type "string"}}} "files")
+    :run (fn [_ {:keys [files]} _] (check files))}
+   {:name "ports"
+    :description "List the nREPL servers this project's port files point at, and whether they answer."
+    :inputSchema (schema {})
+    :run (fn [{:keys [dir]} _ _]
+           (let [ports (discovery/probe dir)]
+             (result (if (seq ports)
+                       (str/join "\n" (for [{:keys [file port live]} ports]
+                                        (str file " " port (when-not live " (not answering)"))))
+                       "No port files")
+                     {:ports ports})))}])
+
+(def ^:private tools-by-name
+  (into {} (map (juxt :name identity)) tools))
+
+(defn- missing
+  "The required arguments of tool that args lack."
+  [{:keys [inputSchema]} args]
+  (remove #(some? (get args (keyword %))) (:required inputSchema)))
+
+(defn- call-tool
+  "Runs tool with arguments, as a tools/call result."
+  [{:keys [run] :as tool} arguments server on-send]
+  (let [args (merge {:session "default" :ns "user"} arguments)
+        {:keys [text data error?]}
+        (if-let [lacking (seq (missing tool args))]
+          (error (str "Missing " (str/join ", " lacking)))
+          (try
+            (run server args on-send)
+            (catch clojure.lang.ExceptionInfo e
+              (error (ex-message e)))))]
+    {:content [{:type "text" :text (if (str/blank? text) "(nothing)" text)}]
+     :structuredContent data
+     :isError (boolean error?)}))
+
+;;; The protocol
+
+(defn- send! [{:keys [^Writer out lock]} message]
+  (locking lock
+    (.write out (str (json/write-str (assoc message :jsonrpc "2.0")) "\n"))
+    (.flush out)))
+
+(defn- respond [server id result]
+  (send! server {:id id :result result}))
+
+(defn- fail [server id code message]
+  (send! server {:id id :error {:code code :message message}}))
+
+(defn- call
+  "Runs tool, for the tools/call with id, on a thread of its own, so the
+  requests after it get answered, a cancellation among them. It's :running
+  until it's done, with the interrupt function of its evaluation once
+  there's one."
+  [{:keys [running cancelled ^ExecutorService calls] :as server} id tool arguments]
+  (swap! running assoc id nil)
+  (.execute calls
+            (fn []
+              (try
+                (let [response (call-tool tool arguments server
+                                          (fn [_ interrupt]
+                                            (swap! running assoc id interrupt)
+                                            ;; Cancelled before it got this far.
+                                            (when (contains? @cancelled id)
+                                              (interrupt))))]
+                  (when-not (contains? @cancelled id)
+                    (respond server id response)))
+                (catch Throwable t
+                  (fail server id -32603 (str "neorepl failed: " t)))
+                (finally
+                  (swap! running dissoc id)
+                  (swap! cancelled disj id))))))
+
+(defn- cancel
+  "Interrupts the evaluation of the request with id, if it's still running,
+  and leaves the request unanswered, as MCP wants."
+  [{:keys [running cancelled]} id]
+  (when (contains? @running id)
+    (swap! cancelled conj id)
+    (some-> (get @running id) (apply []))))
+
+(defn- handle
+  "Does what message, a JSON-RPC request or notification, asks."
+  [server {:keys [id method params]}]
+  (case method
+    "initialize" (respond server id {:protocolVersion (or (some #{(:protocolVersion params)} protocol-versions)
+                                                          (first protocol-versions))
+                                     :capabilities {:tools {}}
+                                     :serverInfo {:name "neorepl" :version (:version server)}
+                                     :instructions "Evaluate Clojure, look things up, run tests and check files through the project's nREPL server. Sessions keep *ns*, *1 and *e between calls and are shared with the neorepl CLI."})
+    "ping" (respond server id {})
+    "tools/list" (respond server id {:tools (mapv #(dissoc % :run) tools)})
+    "tools/call" (if-let [tool (get tools-by-name (:name params))]
+                   (call server id tool (:arguments params))
+                   (fail server id -32602 (str "No tool called " (:name params))))
+    "notifications/cancelled" (cancel server (:requestId params))
+    ;; Other notifications, and responses to requests neorepl never sends.
+    (when (and id method)
+      (fail server id -32601 (str "No method called " method)))))
+
+(defn serve
+  "Serves MCP, reading messages from in and writing to out, until in ends.
+  opts has the :version to report, the :sessions-file, the :dir to look for
+  port files in, the default :timeout and :max-output of evaluations, and
+  (connect port) to open a connection to the server on port, or the
+  default one for nil."
+  [^BufferedReader in ^Writer out opts]
+  (let [server (assoc opts :out out :lock (Object.)
+                      :clients (atom {}) :running (atom {}) :cancelled (atom #{})
+                      :calls (Executors/newCachedThreadPool))]
+    (try
+      (doseq [line (line-seq in)
+              :when (not (str/blank? line))]
+        (let [message (try
+                        (json/read-str line)
+                        (catch clojure.lang.ExceptionInfo _
+                          (fail server nil -32700 "That's not JSON")
+                          nil))]
+          (when message
+            (try
+              (handle server message)
+              (catch Exception e
+                (when (:id message)
+                  (fail server (:id message) -32603 (str "neorepl failed: " (ex-message e)))))))))
+      ;; The calls still under way get answered before it ends.
+      (doto ^ExecutorService (:calls server)
+        (.shutdown)
+        (.awaitTermination Long/MAX_VALUE TimeUnit/MILLISECONDS))
+      (finally
+        (doseq [d (vals @(:clients server))
+                :when (realized? d)]
+          (try (nrepl/close @d) (catch Exception _ nil)))))))
