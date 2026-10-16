@@ -198,13 +198,16 @@
   "Inspects the value of code, or *1 without it, evaluating it the way the
   REPL :evaluates code, and lets the user :browse it, or prints it when
   there's no browsing. Returns what to print, as command-output does."
-  [{:keys [client session evaluate browse]} code]
-  (if-let [lines (:lines (evaluate #(features/inspect client session (or code "*1") %)))]
-    (if browse
-      (do (inspector/browse browse client session lines)
-          {})
-      (out (render/inspector-text lines)))
-    {}))
+  [{:keys [client session evaluate browse height]} code]
+  (let [height (when browse (height))
+        page-size (some-> height inspector/start-page-size)]
+    (if-let [lines (:lines (evaluate #(features/inspect client session (or code "*1")
+                                                        (assoc % :page-size page-size))))]
+      (if browse
+        (do (inspector/browse browse client session lines height)
+            {})
+        (out (render/inspector-text lines)))
+      {})))
 
 (defn- reenter
   "Puts session back in the namespace called ns, as tools.namespace's refresh
@@ -456,6 +459,7 @@
                                (do (interrupt) :interrupted)
                                line))
                :width #(editor/width editor)
+               :height #(editor/height editor)
                :print-response (printer editor)
                :print-message #(do (editor/fresh-line editor)
                                    (editor/print-text editor :notice (str % "\n")))

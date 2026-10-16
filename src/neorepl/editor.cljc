@@ -265,6 +265,12 @@
   (let [width (.getWidth terminal)]
     (if (pos? width) width 80)))
 
+(defn height
+  "The terminal's height in lines."
+  [{:keys [^Terminal terminal]}]
+  (let [height (.getHeight terminal)]
+    (if (pos? height) height 24)))
+
 (defn- emit
   "Prints s right away, or above the prompt while a line is being read.
   Printing above the prompt ends the text with a newline, so that only gets

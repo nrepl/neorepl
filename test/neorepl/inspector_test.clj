@@ -56,3 +56,24 @@
         (is (reduced? (inspector/handle view key (fn [_ _]))))))
     (testing "other keys do nothing"
       (is (= view (inspector/handle view "x" (fn [_ _])))))))
+
+(defn- view-lines
+  "n lines of a view, the last saying which page it is, if it has pages."
+  [n page]
+  (concat (repeat (dec n) [{:text "  1. "} {:text "1" :index 1}])
+          [[{:text (if page (str "  Page size: 10, showing page: " page) "Count: 3")}]]))
+
+(deftest fitted-page-size-test
+  (testing "on the first page, as many items as fill the screen, with a line to spare"
+    (is (= 4 (inspector/fitted-page-size (view-lines 28 "1 of 9") 23)))
+    (is (= 14 (inspector/fitted-page-size (view-lines 18 "1 of 9") 23))))
+  (testing "but never none"
+    (is (= 1 (inspector/fitted-page-size (view-lines 40 "1 of 9") 23))))
+  (testing "none for a first page that fills the screen"
+    (is (nil? (inspector/fitted-page-size (view-lines 22 "1 of 9") 23))))
+  (testing "nor for the pages after it, which a new page size would leave"
+    (is (nil? (inspector/fitted-page-size (view-lines 24 "2 of 9") 23)))
+    (is (nil? (inspector/fitted-page-size (view-lines 5 "9 of 9") 23))))
+  (testing "nor for a value without pages, which fewer items wouldn't shorten"
+    (is (nil? (inspector/fitted-page-size (view-lines 30 nil) 23)))
+    (is (nil? (inspector/fitted-page-size (view-lines 5 nil) 23)))))
