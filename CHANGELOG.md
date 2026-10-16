@@ -4,6 +4,7 @@
 
 ### Features
 
+- [#13](https://github.com/nrepl/neorepl/pull/13): `neorepl check --fix`, and the MCP `check` tool's `fix`, repair unbalanced delimiters from the indentation, as parinfer's indent mode does.
 - [#12](https://github.com/nrepl/neorepl/pull/12): `neorepl mcp` serves MCP on stdio for coding agents, with a curated set of tools that share the CLI's named sessions.
 
 ## 0.2.0 (2026-10-16)
