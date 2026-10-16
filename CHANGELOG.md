@@ -4,6 +4,7 @@
 
 ### Features
 
+- [#11](https://github.com/nrepl/neorepl/pull/11): `,stacktrace` inspects the selected cause, or its ex-data, with cider-nrepl.
 - [#10](https://github.com/nrepl/neorepl/pull/10): `,inspect` pages big collections a screenful at a time.
 - [#9](https://github.com/nrepl/neorepl/pull/9): `,stacktrace` in the REPL shows the errors of the last test run, until an evaluation fails.
 - [#8](https://github.com/nrepl/neorepl/pull/8): `neorepl test` and `,test` run ClojureScript tests in a session in ClojureScript, through cider-nrepl and piggieback.
