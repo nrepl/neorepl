@@ -548,6 +548,13 @@
       (is (str/includes? (repl "(/ 1 0)\n,pst\n") "user=> java.lang.ArithmeticException: Divide by zero\n"))
       (is (str/includes? (repl "(/ 1 0)\n,stacktrace\n") "user=> java.lang.ArithmeticException: Divide by zero\n"))
       (is (= "user=> No error yet\nuser=> \n" (repl ",stacktrace\n")))
+      (testing "or the last test run's errors, until an evaluation fails"
+        (let [out (repl ",test neorepl.sample-suite\n,stacktrace\n(/ 1 0)\n,stacktrace\n")]
+          (testing "only the errors, which have a stack trace"
+            (let [shown (second (str/split out #"1 failure, 1 error\.\n"))]
+              (is (re-find #"^user=> ERROR in neorepl\.sample-suite/erring .*\nexpected: .*\n   error: clojure\.lang\.ExceptionInfo: boom \{\}\n +at " shown))
+              (is (not (str/includes? shown "FAIL in")))))
+          (is (re-find #"user=> java\.lang\.ArithmeticException: Divide by zero\n" out))))
       (is (= "user=> passing prints\nRan 1 test containing 1 assertion.\n0 failures, 0 errors.\nuser=> \n"
              (repl ",test neorepl.sample-suite/passing\n")))
       (is (= "user=> Rerunning the tests that failed takes cider-nrepl or babashka on the server\nuser=> \n"
