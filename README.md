@@ -138,8 +138,10 @@ neorepl inspect --pop
 `,stacktrace` shows the last error full-screen the same way: Enter on a
 frame opens its source in your `$EDITOR` at that line, and `a` brings back
 the frames `,pst` leaves out, the ones of the REPL's own machinery and the
-repeats of the same function. After a `,test` with errors it shows those, each
-under the test it's from, until an evaluation fails.
+repeats of the same function. With cider-nrepl, `i` inspects the cause the
+frame's in and `d` its ex-data, and `q` brings you back. After a `,test`
+with errors it shows those, each under the test it's from, until an
+evaluation fails.
 
 `neorepl check` finds unbalanced parens, brackets and braces, the most
 common way for an edit (or a coding agent) to break a Clojure file. It

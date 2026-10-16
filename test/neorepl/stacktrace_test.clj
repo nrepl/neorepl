@@ -13,7 +13,7 @@
     :stacktrace [{:name "clojure.lang.Numbers/divide" :file "Numbers.java" :line 190}]}])
 
 (defn- press [view & keys]
-  (reduce stacktrace/handle view keys))
+  (reduce #(stacktrace/handle %1 %2 true) view keys))
 
 (deftest error-view-test
   (testing "the causes, their data and their frames, without the duplicates"
@@ -54,16 +54,29 @@
               "help"]
              (screen view 12))))
     (testing "picking a frame of the second"
-      (is (= {:name "clojure.lang.Numbers/divide" :file "Numbers.java" :line 190}
-             @(stacktrace/handle (press view :down :down) :enter))))))
+      (is (= {:frame {:name "clojure.lang.Numbers/divide" :file "Numbers.java" :line 190}}
+             @(stacktrace/handle (press view :down :down) :enter false))))))
 
 (deftest handle-test
   (let [view (stacktrace/error-view [{:causes causes}])]
     (testing "picking a frame to open"
-      (is (= {:name "user/g" :file "x.clj" :line 3 :var "user/g"}
-             @(stacktrace/handle (press view :down) :enter))))
+      (is (= {:frame {:name "user/g" :file "x.clj" :line 3 :var "user/g"}}
+             @(stacktrace/handle (press view :down) :enter false))))
+    (testing "the causes, when they can be inspected"
+      (testing "by the index of the one the frame's in"
+        (is (= {:inspect 1 :ex-data? false}
+               (dissoc @(stacktrace/handle (press view :down :down) "i" true) :view))))
+      (testing "or their data"
+        (is (= {:inspect 0 :ex-data? true}
+               (dissoc @(stacktrace/handle view "d" true) :view)))
+        (is (= "No data on this one" (:message (press view :down :down "d")))))
+      (testing "coming back to the same frame"
+        (let [{back :view} @(stacktrace/handle (press view :down "a") "i" true)]
+          (is (= "    at [user/g (x.clj:3)]" (nth (screen back 10) 4))))))
+    (testing "but not otherwise"
+      (is (= view (stacktrace/handle view "i" false))))
     (testing "done"
       (doseq [key ["q" :escape :ctrl-c]]
-        (is (nil? @(stacktrace/handle view key)))))
+        (is (nil? @(stacktrace/handle view key false)))))
     (testing "other keys do nothing"
-      (is (= view (stacktrace/handle view "x"))))))
+      (is (= view (stacktrace/handle view "x" false))))))

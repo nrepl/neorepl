@@ -80,6 +80,9 @@
                   (do (transport/respond-to msg :reloading ["changed.ns"])
                       (transport/respond-to msg :err "Reflection warning, changed/ns.clj:3:1\n")
                       (transport/respond-to msg :status ["ok" "done"])))
+      "inspect-last-exception" (do (swap! test-requests conj (select-keys msg [:op :index :ex-data :page-size]))
+                                   (transport/respond-to msg :status "done"
+                                                         :value (pr-str ["Class: " '(:value "clojure.lang.ExceptionInfo" 0)])))
       "test-stacktrace" (do (swap! test-requests conj (select-keys msg [:op :ns :var :index]))
                             (transport/respond-to msg :class "clojure.lang.ExceptionInfo" :message "boom" :data "{}"
                                                   :stacktrace [{:name "neorepl.sample_suite$fn__1/invokeStatic"
@@ -105,7 +108,8 @@
 
 (middleware/set-descriptor! #'wrap-fake-cider {:handles {"info" {} "complete" {} "apropos" {}
                                                          "macroexpand" {} "analyze-last-stacktrace" {} "test-stacktrace" {}
-                                                         "refresh" {} "test-var-query" {} "retest" {}}})
+                                                         "refresh" {} "test-var-query" {} "retest" {}
+                                                         "inspect-last-exception" {}}})
 
 (def ^:private user
   {:ns "user"})
@@ -293,7 +297,7 @@
         #(features/reload % ["no.such.ns"])))))
 
 (deftest cider-test
-  (let [srv (server/start-server :port 0 :handler (server/default-handler #'wrap-fake-cider))]
+  (let [srv (server/start-server :port 0 :handler (server/default-handler #'wrap-fake-cider #'test-server/wrap-fake-inspector))]
     (try
       (with-client [client {:port (:port srv)}]
         (testing "cider-nrepl's ops come first"
@@ -368,7 +372,13 @@
                                 {:name "user/g" :file "y.clj" :line 2 :var "user/g"}]}
                   ;; cider-nrepl sends nil as an empty list.
                   {:class "java.lang.Exception" :message nil :data nil :stacktrace []}]
-                 (features/last-error client (nrepl/clone-session client))))))
+                 (features/last-error client (nrepl/clone-session client))))
+          (testing "inspecting the error's causes"
+            (reset! test-requests [])
+            (is (features/inspects-errors? client))
+            (is (= [[{:text "Class: "} {:text "clojure.lang.ExceptionInfo" :index 0}]]
+                   (:lines (features/inspect-error client (nrepl/clone-session client) 1 true 10))))
+            (is (= [{:op "inspect-last-exception" :index 1 :ex-data "true" :page-size 10}] @test-requests)))))
       (finally
         (server/stop-server srv)))))
 

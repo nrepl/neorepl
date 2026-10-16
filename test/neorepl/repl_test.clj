@@ -316,6 +316,8 @@
         (screen #"Divide by zero.*\nuser=> $")
         (type ",stacktrace\r")
         (is (screen #"ArithmeticException: Divide by zero(?s).*q quit"))
+        (testing "without inspecting its causes, which takes cider-nrepl"
+          (is (not (re-find #"i inspect" (screen #"q quit")))))
         (type "q")
         (is (screen #"user=> $")))))
   (testing "or the last test run's, until an evaluation fails"

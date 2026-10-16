@@ -700,3 +700,16 @@
      (if-let [value (some :value responses)]
        {:status "ok" :lines (inspector-lines value)}
        (throw (ex-info (str "The server couldn't do " (:op msg)) {:type ::failed}))))))
+
+(defn inspects-errors?
+  "Whether the server can inspect the causes of the error last-error found."
+  [client]
+  (supports? client "inspect-last-exception"))
+
+(defn inspect-error
+  "Starts inspecting the cause at index of the error last-error found in
+  session, or its ex-data if ex-data?, with page-size items of a
+  collection a page, and returns what inspector does."
+  [client session index ex-data? page-size]
+  (inspector client session (cond-> {:op "inspect-last-exception" :index index :page-size page-size}
+                              ex-data? (assoc :ex-data "true"))))
