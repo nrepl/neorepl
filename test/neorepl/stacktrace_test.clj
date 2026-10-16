@@ -26,9 +26,9 @@
             "    at clojure.lang.Numbers/divide (Numbers.java:190)"
             ""
             "help"]
-           (screen (stacktrace/error-view causes) 9))))
+           (screen (stacktrace/error-view [{:causes causes}]) 9))))
   (testing "all the frames, keeping the selection"
-    (let [view (press (stacktrace/error-view causes) :down "a")]
+    (let [view (press (stacktrace/error-view [{:causes causes}]) :down "a")]
       (is (= ["    at user/f (x.clj:1)"
               "    at user/f (x.clj:2)"
               "    at [user/g (x.clj:3)]"]
@@ -36,8 +36,29 @@
       (testing "and back, onto the frame before a hidden one"
         (is (= "    at [user/f (x.clj:1)]" (nth (screen (press view :up "a") 10) 2)))))))
 
+(deftest errors-test
+  (let [view (stacktrace/error-view [{:heading "ERROR in my.app-test/a" :causes (subvec causes 0 1)}
+                                     {:heading "ERROR in my.app-test/b" :causes (subvec causes 1)}])]
+    (testing "several, each under its heading"
+      (is (= ["ERROR in my.app-test/a"
+              "clojure.lang.ExceptionInfo: boom"
+              "  {:k 1}"
+              "    at [user/f (x.clj:1)]"
+              "    at user/g (x.clj:3)"
+              ""
+              "ERROR in my.app-test/b"
+              "java.lang.ArithmeticException: Divide by zero"
+              "for real"
+              "    at clojure.lang.Numbers/divide (Numbers.java:190)"
+              ""
+              "help"]
+             (screen view 12))))
+    (testing "picking a frame of the second"
+      (is (= {:name "clojure.lang.Numbers/divide" :file "Numbers.java" :line 190}
+             @(stacktrace/handle (press view :down :down) :enter))))))
+
 (deftest handle-test
-  (let [view (stacktrace/error-view causes)]
+  (let [view (stacktrace/error-view [{:causes causes}])]
     (testing "picking a frame to open"
       (is (= {:name "user/g" :file "x.clj" :line 3 :var "user/g"}
              @(stacktrace/handle (press view :down) :enter))))

@@ -309,6 +309,21 @@
         (is (screen #"ArithmeticException: Divide by zero(?s).*q quit"))
         (type "q")
         (is (screen #"user=> $")))))
+  (testing "or the last test run's, until an evaluation fails"
+    (call-with-repl {}
+      (fn [type screen]
+        (type ",test neorepl.sample-suite\r")
+        (screen #"1 failure, 1 error\.\nuser=> $")
+        (type ",stacktrace\r")
+        (is (screen #",stacktrace\nERROR in neorepl\.sample-suite/erring(?s).*clojure\.lang\.ExceptionInfo: boom.*q quit"))
+        (type "q")
+        (screen #"user=> $")
+        (type "(/ 1 0)\r")
+        (screen #"Divide by zero.*\nuser=> $")
+        (type ",stacktrace\r")
+        (is (screen #",stacktrace\njava\.lang\.ArithmeticException: Divide by zero(?s).*q quit"))
+        (type "q")
+        (is (screen #"user=> $")))))
   ;; The editor's a shell script, and the frames on babashka are its
   ;; interpreter's. The fake terminal can't take an editor, since pausing
   ;; it for one ends its input.

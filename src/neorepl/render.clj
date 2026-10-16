@@ -104,13 +104,19 @@
   (concat (frame-lines stacktrace "  at ")
           (causes-lines more "  at " 1)))
 
-(defn- failure-text
+(defn failure-heading
+  "The first line of a test that didn't pass, from a run-tests report, as
+  clojure.test prints it: what it is and where."
+  [{:keys [type ns var file line]}]
+  (str (str/upper-case type)
+       ;; Not in a test, when a fixture fails.
+       (some->> (not-empty (str/join "/" (remove nil? [ns var]))) (str " in "))
+       (when file (str " (" (location-text {:file file :line line}) ")"))))
+
+(defn failure-text
   "A test that didn't pass, from a run-tests report, as clojure.test prints it."
-  [{:keys [type ns var context message expected actual error causes file line]}]
-  (str/join "\n" (remove nil? [(str (str/upper-case type)
-                                     ;; Not in a test, when a fixture fails.
-                                     (some->> (not-empty (str/join "/" (remove nil? [ns var]))) (str " in "))
-                                     (when file (str " (" (location-text {:file file :line line}) ")")))
+  [{:keys [type context message expected actual error causes] :as failure}]
+  (str/join "\n" (remove nil? [(failure-heading failure)
                                 context
                                 message
                                 (some->> expected (labeled "expected: "))

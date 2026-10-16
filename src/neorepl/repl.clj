@@ -70,7 +70,7 @@
            {:name "inspect" :arg "CODE" :optional? true :code-arg? true
             :help "Inspect the value of CODE, or the last value"
             :run #(inspect %1 %2)}
-           {:name "stacktrace" :help "Browse the last error's stack trace and open its frames"
+           {:name "stacktrace" :help "Browse the last error's stack trace, or the last test run's, and open its frames"
             :run (fn [state _] (browse-error state))}
            {:name "edit" :arg "SYM" :help "Open where SYM is defined in your EDITOR"
             :run #(edit %1 %2)}
@@ -164,24 +164,34 @@
     (out (str "No source to open for " (render/frame-text frame)))))
 
 (defn- browse-error
-  "Shows the last error, as ,pst finds it, letting the user :browse it and
-  open the frame they pick, or prints it when there's no browsing. Returns
-  what to print, as command-output does."
-  [{:keys [client browse] :as state}]
-  (let [{:keys [found text none]} (lookups/run "pst" client state nil)]
-    (cond
-      none (out none)
-      browse (if-let [frame (stacktrace/browse browse found)]
-               (open-frame state frame)
-               {})
-      :else (out text))))
+  "Shows the last error, letting the user :browse it and open the frame they
+  pick, or prints it when there's no browsing: the errors of the last test
+  run, its :test-errors, if it had any and no evaluation failed since, or
+  the error ,pst finds. Returns what to print, as command-output does."
+  [{:keys [client browse test-errors] :as state}]
+  (let [browse-errors #(if-let [frame (stacktrace/browse browse %)]
+                         (open-frame state frame)
+                         {})]
+    (if-let [failures @test-errors]
+      (if browse
+        (browse-errors (mapv (fn [failure] {:heading (render/failure-heading failure) :causes (:causes failure)})
+                             failures))
+        (out (str/join "\n\n" (map render/failure-text failures))))
+      (let [{:keys [found text none]} (lookups/run "pst" client state nil)]
+        (cond
+          none (out none)
+          browse (browse-errors [{:causes found}])
+          :else (out text))))))
 
 (defn- run-tests
   "Runs the tests names names, as features/run-tests takes them, the way the
-  REPL :evaluates code. Returns what to print, as command-output does."
-  [{:keys [client session evaluate]} names]
+  REPL :evaluates code, keeping the errors with a stack trace as the
+  :test-errors, for ,stacktrace. Returns what to print, as command-output
+  does."
+  [{:keys [client session evaluate test-errors]} names]
   (if-let [report (:report (evaluate #(features/run-tests client session names %)))]
-    (out (render/test-report-text report))
+    (do (reset! test-errors (not-empty (filterv :causes (:failures report))))
+        (out (render/test-report-text report)))
     {}))
 
 (defn- inspect
@@ -212,7 +222,8 @@
   to run it with the terminal :suspended, for ,edit, a function that
   :evaluates the way the REPL does, for ,test and ,inspect, and one to
   :browse what ,inspect and ,stacktrace find, as browser/browse does, partly
-  applied to the editor, if the REPL can."
+  applied to the editor, if the REPL can, and an atom with the last test
+  run's :test-errors."
   [{:keys [client] :as state} name arg]
   (let [{arg-name :arg :keys [code? args? optional?] :as command} (command name)]
     (cond
@@ -260,6 +271,8 @@
                                         (and id (shutdown/exiting?)))
                             (print-response %)))
         late (agent nil :error-mode :continue)
+        ;; The errors of the last test run, until an evaluation fails.
+        test-errors (atom nil)
         ;; Evaluates with (run opts), opts being evaluation/evaluate's, and
         ;; returns the result after printing its message.
         evaluate (fn [run]
@@ -282,6 +295,8 @@
                      ;; The Ctrl-C that stopped the wait marked it interrupted again.
                      (when (= "stopped" status)
                        (reset! interrupted nil))
+                     (when (= "eval-error" status)
+                       (reset! test-errors nil))
                      ;; There's no point in reading more input then.
                      (when (= "disconnected" status)
                        (throw (ex-info message {:type ::nrepl/disconnected})))
@@ -299,7 +314,8 @@
             output (when name
                      (reset! command-thread (Thread/currentThread))
                      (try
-                       (command-output (assoc io :client client :session session :ns ns :evaluate evaluate)
+                       (command-output (assoc io :client client :session session :ns ns :evaluate evaluate
+                                                  :test-errors test-errors)
                                        name arg)
                        (finally
                          (reset! command-thread nil)
