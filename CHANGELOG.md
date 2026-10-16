@@ -2,6 +2,10 @@
 
 ## main (unreleased)
 
+## 0.2.0 (2026-10-16)
+
+Tests and inspection.
+
 ### Features
 
 - [#11](https://github.com/nrepl/neorepl/pull/11): `,stacktrace` inspects the selected cause, or its ex-data, with cider-nrepl.
