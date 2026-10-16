@@ -4,6 +4,7 @@
 
 ### Features
 
+- [#10](https://github.com/nrepl/neorepl/pull/10): `,inspect` pages big collections a screenful at a time.
 - [#9](https://github.com/nrepl/neorepl/pull/9): `,stacktrace` in the REPL shows the errors of the last test run, until an evaluation fails.
 - [#8](https://github.com/nrepl/neorepl/pull/8): `neorepl test` and `,test` run ClojureScript tests in a session in ClojureScript, through cider-nrepl and piggieback.
 - [#7](https://github.com/nrepl/neorepl/pull/7): `neorepl test` and `,test` say which namespace they're testing as the tests run, with cider-nrepl 0.63 or later.
