@@ -154,7 +154,8 @@ neorepl ports                  servers for this directory
 neorepl sessions [close NAME]
 neorepl interrupt
 neorepl check FILE             delimiter check via the lexer
-neorepl mcp                    later
+neorepl check --fix FILE       delimiter repair from the indentation
+neorepl mcp                    MCP server on stdio
 ```
 
 What agents need beyond that:
@@ -167,6 +168,19 @@ What agents need beyond that:
 - `neorepl check` because unbalanced delimiters are the most common way agents break Clojure files, and the lexer gives us the check for free.
 - A shipped agent skill (SKILL.md) and an AGENTS.md snippet. `--help` stays short and example-driven, since agents read it.
 - MCP after that, as a thin JSON-RPC layer over the same feature functions. CLI first: agents drive CLIs fine, and a CLI costs no context until it's used.
+- Delimiter repair, since `check` only says where a file broke. `neorepl check --fix` closes and drops delimiters the way the indentation says they should go, as parinfer's indent mode does, and leaves files it can't repair confidently alone, saying why.
+
+### MCP
+
+`neorepl mcp` serves MCP on stdio: JSON-RPC 2.0, a message a line, tools only. It finds its nREPL server at startup the way the CLI does, and each tool takes a `port` for projects that run several. It's a long-lived process, unlike the CLI, so it keeps its connections open, reconnects when a server restarts, turns `notifications/cancelled` into an `interrupt` and gives every evaluation a default timeout. Results are text for the model plus `structuredContent` with the data `--format json` has, and a failed evaluation is an `isError` result rather than a protocol error. It shares the CLI's named sessions and sessions file, so an agent can mix `neorepl eval` and MCP calls and keep its `*ns*`, `*1` and `*e`.
+
+The tools are a curated set, not every command: `eval`, `load`, `doc`, `source`, `where`, `apropos`, `macroexpand`, `reload`, `test`, `retest`, `pst`, `interrupt`, `check` and `ports`. Every tool's description goes into the model's context on every turn, whether it's used or not, so a tool has to earn its place, where a CLI command costs nothing until it's run. So:
+- No `complete`: completion is for people typing; an agent knows the name it wants, or asks `apropos`.
+- No `inspect`: the inspector keeps its place in the session and pages through a value one step at a time, which takes several round trips an agent pays for in context. `eval` with `--max-output` covers most of what an agent wants to see. It can come later if agents turn out to need it.
+- No `sessions` or `server`: an MCP client starts the MCP server for a project, which isn't the job of the tools it calls. `neorepl server` starts the nREPL server that `neorepl mcp` connects to.
+- `check` takes a `fix` argument rather than being a tool of its own, so the model sees one tool for delimiters.
+The README says the same in a sentence, for people wondering why the CLI has more.
+
 
 Prior art to beat: Bruce Hauman's clojure-mcp-light (`clj-nrepl-eval`, session per server, port discovery) and clojure-mcp.
 
@@ -226,7 +240,12 @@ Each one is a release people can use. The first three stages below all went into
 - Full-screen inspector and stacktrace browser. Done: `,inspect` in the REPL, full-screen, and `neorepl inspect`, both on cider-nrepl's `inspect-*` ops, which babashka's server has too. Done too: `,stacktrace`, the last error full-screen, to open a frame's source in the editor, and the errors of the last test run the same way, until an evaluation fails. Done too: inspecting the last error's causes and their ex-data from `,stacktrace`, with cider-nrepl's `inspect-last-exception`, which takes the cause's index in the chain `analyze-last-stacktrace` found, and coming back to the frame after. babashka's server lacks the op, and a test error isn't the error that op analyzed, so those views leave the keys out. Done too: pages of collections that fill the screen, through the `:page-size` the inspecting eval and `inspect-refresh` take, on cider-nrepl and babashka alike. The inspector goes back to the first page when the page size changes, and the pages after it start with a `...` line, so neorepl sizes the first page, with a line to spare, and leaves the others alone, and values without pages too, which fewer items wouldn't shorten; a resized terminal gets its page size the next time the first page comes back. Still to do: `inspect-def-current-value` (needs a prompt in the full-screen view).
 
 0.3, agents, round two
-- MCP server, the skill, docs for common agent setups.
+- JSON reading in `neorepl.json`, which only writes JSON so far, since MCP reads it.
+- `neorepl mcp` with the curated tools, see MCP above.
+- `neorepl check --fix`: delimiter repair from the indentation, as a CLI option and the `check` tool's `fix`.
+- The agent skill, a `SKILL.md` teaching the CLI workflow (`check` before `load`, `eval --session`, `test`, `pst`), and an `AGENTS.md` snippet.
+- Docs for common setups: Claude Code (the skill, or `claude mcp add neorepl -- neorepl mcp`), Codex, Cursor and VS Code, Gemini CLI.
+- Left for a 0.2.x: `inspect-def-current-value` and the frames of ClojureScript errors.
 
 1.0
 - Docs site, installers (bbin, Clojure tool, Homebrew, uberjar; native-image only if bb turns out not to be enough), Windows polish, a CLI contract we promise to keep stable.
