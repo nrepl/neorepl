@@ -163,24 +163,48 @@
     (open state (:file found) (or line (:line found)))
     (out (str "No source to open for " (render/frame-text frame)))))
 
+(defn- inspect-cause
+  "Inspects the cause at index of the error last-error found, or its ex-data
+  if ex-data?, letting the user :browse it, and returns nil, or a message
+  saying why it couldn't."
+  [{:keys [client session browse height]} index ex-data?]
+  (try
+    (let [height (height)]
+      (inspector/browse browse client session
+                        (:lines (features/inspect-error client session index ex-data?
+                                                        (inspector/start-page-size height)))
+                        height)
+      nil)
+    (catch clojure.lang.ExceptionInfo e
+      (when (= ::nrepl/disconnected (:type (ex-data e)))
+        (throw e))
+      (ex-message e))))
+
 (defn- browse-error
-  "Shows the last error, letting the user :browse it and open the frame they
-  pick, or prints it when there's no browsing: the errors of the last test
-  run, its :test-errors, if it had any and no evaluation failed since, or
-  the error ,pst finds. Returns what to print, as command-output does."
+  "Shows the last error, letting the user :browse it, open the frame they
+  pick, and inspect its causes, or prints it when there's no browsing: the
+  errors of the last test run, its :test-errors, if it had any and no
+  evaluation failed since, or the error ,pst finds, whose causes the server
+  may be able to inspect. Returns what to print, as command-output does."
   [{:keys [client browse test-errors] :as state}]
-  (let [browse-errors #(if-let [frame (stacktrace/browse browse %)]
-                         (open-frame state frame)
-                         {})]
+  (let [browse-errors (fn [errors inspect?]
+                        (loop [view nil]
+                          (let [{:keys [frame inspect ex-data? view]}
+                                (stacktrace/browse browse errors {:inspect? inspect? :view view})]
+                            (cond
+                              frame (open-frame state frame)
+                              inspect (recur (assoc view :message (inspect-cause state inspect ex-data?)))
+                              :else {}))))]
     (if-let [failures @test-errors]
       (if browse
         (browse-errors (mapv (fn [failure] {:heading (render/failure-heading failure) :causes (:causes failure)})
-                             failures))
+                             failures)
+                       false)
         (out (str/join "\n\n" (map render/failure-text failures))))
       (let [{:keys [found text none]} (lookups/run "pst" client state nil)]
         (cond
           none (out none)
-          browse (browse-errors [{:causes found}])
+          browse (browse-errors [{:causes found}] (features/inspects-errors? client))
           :else (out text))))))
 
 (defn- run-tests

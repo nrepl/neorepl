@@ -1,12 +1,16 @@
 (ns neorepl.stacktrace
   "The REPL's stack trace browser: errors full-screen, their causes and
-  their frames, to move between and pick one to open in an editor."
+  their frames, to move between and pick one to open in an editor, or a
+  cause to inspect."
   (:require [clojure.string :as str]
             [neorepl.browser :as browser]
             [neorepl.render :as render]))
 
 (def ^:private help
   "↑↓ move  Enter edit  a all frames  q quit")
+
+(def ^:private inspect-help
+  "↑↓ move  Enter edit  i inspect  d data  a all frames  q quit")
 
 (defn- cause-lines
   "causes, as features/last-error has them, as lines for browser/view: each
@@ -52,21 +56,33 @@
      (cond-> view i (assoc :selected i)))))
 
 (defn handle
-  "view after key, as editor/full-screen has keys, or (reduced frame), the
-  frame to open, or (reduced nil) when the user's done."
-  [{:keys [errors all?] :as view} key]
-  (or (browser/moved view key)
-      (case key
-        :enter (if-let [[_ [e i j]] (browser/selected-value view)]
-                 (reduced (get-in errors [e :causes i :stacktrace j]))
-                 view)
-        "a" (error-view errors (not all?) view)
-        ("q" :escape :ctrl-c) (reduced nil)
-        view)))
+  "view after key, as editor/full-screen has keys, or (reduced x), x being
+  what the user picked: the :frame to open, the cause, by its index, to
+  :inspect, or its ex-data if :ex-data?, with the :view to come back to,
+  if inspect?, or nil when they're done."
+  [{:keys [errors all?] :as view} key inspect?]
+  (let [view (dissoc view :message)
+        [_ [e i j]] (browser/selected-value view)]
+    (or (browser/moved view key)
+        (case key
+          :enter (if j
+                   (reduced {:frame (get-in errors [e :causes i :stacktrace j])})
+                   view)
+          ("i" "d") (cond
+                      (not (and inspect? i)) view
+                      (and (= "d" key) (nil? (get-in errors [e :causes i :data])))
+                      (assoc view :message "No data on this one")
+                      :else (reduced {:inspect i :ex-data? (= "d" key) :view view}))
+          "a" (error-view errors (not all?) view)
+          ("q" :escape :ctrl-c) (reduced nil)
+          view))))
 
 (defn browse
   "Shows errors, as error-view takes them, full-screen with browse, a
-  browser/browse partly applied to the editor, and returns the frame the
-  user picked to open, or nil."
-  [browse errors]
-  (browse (error-view errors) help handle))
+  browser/browse partly applied to the editor, and returns what the user
+  picked, as handle has it. It starts at view, one handle gave back, if
+  there's one, and their causes can be inspected if inspect?."
+  [browse errors {:keys [inspect? view]}]
+  (browse (or view (error-view errors))
+          (if inspect? inspect-help help)
+          #(handle %1 %2 inspect?)))
