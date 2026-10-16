@@ -152,6 +152,32 @@ $ neorepl check src/my/app.clj
 src/my/app.clj:12:1: Unclosed (
 ```
 
+### Coding agents
+
+Agents can drive the CLI like anyone else: every command takes `--format
+json`, and named sessions keep `*ns*`, `*1` and `*e` from one call to the
+next. For agents that speak MCP, `neorepl mcp` serves the same features as
+MCP tools over standard input and output, through the server it finds the
+way the other commands do. With Claude Code:
+
+```shell
+claude mcp add neorepl -- neorepl mcp
+```
+
+Its tools are `eval`, `load`, `doc`, `source`, `where`, `apropos`,
+`macroexpand`, `reload`, `test`, `retest`, `pst`, `interrupt`, `check` and
+`ports`, and they share the CLI's sessions, so `neorepl eval --session NAME`
+and the `eval` tool with that session see the same state. That's fewer tools
+than the CLI has commands on purpose: an agent pays for every tool's
+description in its context on every turn, whether it uses it or not, while a
+command costs nothing until it runs. So completion, which is for people
+typing, and the inspector, which pages through a value a round trip at a
+time, are left out, as is managing sessions and servers, which is the job of
+whatever starts `neorepl mcp`. Evaluations get cut at 10,000 characters and
+interrupted after 60 seconds, unless `--max-output` and `--timeout` say
+otherwise, so a stray `(range)` or an endless loop can't take over the
+agent's context or the session.
+
 ## How does it compare?
 
 neorepl isn't the only terminal REPL that talks nREPL these days. The

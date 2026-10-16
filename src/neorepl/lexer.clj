@@ -279,3 +279,33 @@
         line-start (inc (.lastIndexOf before "\n"))]
     [(inc (count (filter #{\newline} before)))
      (inc (.codePointCount before (int line-start) (int index)))]))
+
+(defn delimiter-problem
+  "The first delimiter that doesn't balance in s, as a map with its :line,
+  :column and a :message, or nil."
+  [s]
+  (when-let [{:keys [error open close expected]} (delimiter-error (lex s))]
+    (let [at #(position s (:start %))
+          [line column] (at (or close open))
+          delimiter #(text s %)]
+      {:line line
+       :column column
+       :message (case error
+                  :unclosed (str "Unclosed " (delimiter open))
+                  :unmatched (str "Unmatched " (delimiter close))
+                  :mismatched (format "Mismatched %s: expected %s to close the %s at %s"
+                                      (delimiter close) expected (delimiter open) (str/join ":" (at open)))
+                  :open-string (if (str/starts-with? (delimiter open) "#")
+                                 "Unterminated regex"
+                                 "Unterminated string"))})))
+
+(defn file-problem
+  "The first delimiter problem in the file at path, as delimiter-problem has
+  it plus the :file. When the file can't be read, that's the problem, with
+  only a :message."
+  [path]
+  (let [text (try (slurp path) (catch java.io.IOException _ nil))]
+    (some->> (if text
+               (delimiter-problem text)
+               {:message (if (.exists (java.io.File. ^String path)) "Can't read the file" "No such file")})
+             (into {:file path}))))

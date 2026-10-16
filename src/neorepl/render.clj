@@ -93,6 +93,12 @@
   (let [indent (apply str (repeat (count label) " "))]
     (str label (str/join (str "\n" indent) (str/split-lines text)))))
 
+(defn problem-text
+  "A delimiter problem, from lexer/delimiter-problem, as a line saying where
+  and what."
+  [{:keys [message] :as problem}]
+  (str (location-text problem) ": " message))
+
 (defn- counted [n word]
   (str n " " word (when-not (= 1 n) "s")))
 

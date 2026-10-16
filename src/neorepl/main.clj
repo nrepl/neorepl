@@ -10,12 +10,13 @@
             [neorepl.json :as json]
             [neorepl.lexer :as lexer]
             [neorepl.lookups :as lookups]
+            [neorepl.mcp :as mcp]
             [neorepl.nrepl :as nrepl]
             [neorepl.render :as render]
             [neorepl.sessions :as sessions]
             [neorepl.shutdown :as shutdown]
             [neorepl.xdg :as xdg])
-  (:import (java.io File IOException)))
+  (:import (java.io BufferedReader File)))
 
 (defn- usage-error [msg]
   (ex-info msg {:type ::usage}))
@@ -417,12 +418,7 @@ interrupt, 2 on usage errors and 3 when there's no server to talk to."
   (reject-args args)
   (with-client options dir
     (fn [client]
-      (let [{:keys [status] :as result}
-            (case (sessions/interrupt sessions-file client session)
-              :interrupted {:status "interrupted"}
-              :idle {:status "idle" :message (str "Nothing is running in session " session)}
-              :unknown-session (no-session session)
-              {:status "error" :message "The server couldn't interrupt the evaluation"})]
+      (let [{:keys [status] :as result} (sessions/interrupt-result sessions-file client session)]
         (report format result)
         (if (= "interrupted" status) 0 1)))))
 
@@ -507,43 +503,20 @@ can't be read and 2 on usage errors."
   neorepl check src/my/app.clj
   neorepl check --format json $(git ls-files '*.clj')"))
 
-(defn- delimiter-problem
-  "The first delimiter that doesn't balance in text, as a map with its :line,
-  :column and a :message, or nil."
-  [text]
-  (when-let [{:keys [error open close expected]} (lexer/delimiter-error (lexer/lex text))]
-    (let [at #(lexer/position text (:start %))
-          [line column] (at (or close open))
-          delimiter #(lexer/text text %)]
-      {:line line
-       :column column
-       :message (case error
-                  :unclosed (str "Unclosed " (delimiter open))
-                  :unmatched (str "Unmatched " (delimiter close))
-                  :mismatched (format "Mismatched %s: expected %s to close the %s at %s"
-                                      (delimiter close) expected (delimiter open) (str/join ":" (at open)))
-                  :open-string (if (str/starts-with? (delimiter open) "#")
-                                 "Unterminated regex"
-                                 "Unterminated string"))})))
-
 (defn- check-file
   "The first delimiter problem in the file at path, or standard input for -,
-  as delimiter-problem has it plus the :file. When the file can't be read,
-  that's the problem, with only a :message."
+  as lexer/file-problem has it."
   [path]
-  (let [stdin? (= "-" path)
-        text (if stdin? (slurp *in*) (try (slurp path) (catch IOException _ nil)))]
-    (some->> (if text
-               (delimiter-problem text)
-               {:message (if (.exists (io/file path)) "Can't read the file" "No such file")})
-             (into {:file (if stdin? "<stdin>" path)}))))
+  (if (= "-" path)
+    (some->> (lexer/delimiter-problem (slurp *in*)) (into {:file "<stdin>"}))
+    (lexer/file-problem path)))
 
 (defn- check-command [{:keys [format]} args _]
   (when (empty? args)
     (throw (usage-error "Nothing to check")))
-  (let [problems (reduce (fn [problems {:keys [message] :as problem}]
+  (let [problems (reduce (fn [problems problem]
                            (when (= "text" format)
-                             (println (str (render/location-text problem) ": " message)))
+                             (println (render/problem-text problem)))
                            (conj problems problem))
                          []
                          ;; Lexed in parallel, reported in order.
@@ -978,6 +951,40 @@ with an error, and 2 on usage errors."
           (flush)
           (if (zero? (.waitFor process)) 0 1))))))
 
+(def ^:private mcp-options
+  (concat connection-options
+          [{:long "--timeout" :arg "SECS" :parse parse-seconds :default 60
+            :doc "Interrupt evaluations after SECS seconds, unless a call says otherwise (default: 60)"}
+           {:long "--max-output" :arg "CHARS" :parse parse-count :default 10000
+            :doc "Cut each value, stdout and stderr at CHARS characters (default: 10000)"}
+           help-option]))
+
+(def ^:private mcp-help
+  (help-text
+   "Usage: neorepl mcp [options]"
+   (str "Serves MCP on standard input and output, for coding agents: tools to
+evaluate code, load files, look up docs and source, run tests, show stack
+traces and check files for unbalanced delimiters, through the server it
+finds the way the other commands do. Each tool takes a port too, for projects
+with several servers. The tools share the CLI's named sessions, so neorepl
+eval --session NAME and the eval tool with that session see the same *ns*,
+*1 and *e. " sessions-note)
+   mcp-options
+   discovery-note
+   "Examples:
+  neorepl mcp
+  claude mcp add neorepl -- neorepl mcp"))
+
+(defn- mcp-command [options args {:keys [dir sessions-file]}]
+  (reject-args args)
+  (mcp/serve (BufferedReader. *in*) *out*
+             (assoc (select-keys options [:timeout :max-output])
+                    :version version
+                    :dir dir
+                    :sessions-file sessions-file
+                    :connect #(connect (if % {:port %} options) dir)))
+  0)
+
 (def ^:private commands
   [{:name "repl" :summary "Start a REPL (the default)" :options repl-options :help repl-help
     :main repl-command}
@@ -1013,7 +1020,9 @@ with an error, and 2 on usage errors."
    {:name "ports" :summary "List the servers for this directory" :options ports-options :help ports-help
     :main ports-command}
    {:name "check" :summary "Check files for unbalanced delimiters" :options check-options :help check-help
-    :main check-command}])
+    :main check-command}
+   {:name "mcp" :summary "Serve MCP, for coding agents" :options mcp-options :help mcp-help
+    :main mcp-command}])
 
 (def ^:private help
   (str "Usage: neorepl [COMMAND] [options]
