@@ -95,9 +95,12 @@
 
 (defn problem-text
   "A delimiter problem, from lexer/delimiter-problem, as a line saying where
-  and what."
-  [{:keys [message] :as problem}]
-  (str (location-text problem) ": " message))
+  and what, and whether repair/fix-file repaired it."
+  [{:keys [message fixed fix-error] :as problem}]
+  (str (location-text problem) ": " message
+       (cond
+         fixed ", repaired from the indentation"
+         fix-error (str ", left alone: " fix-error))))
 
 (defn- counted [n word]
   (str n " " word (when-not (= 1 n) "s")))

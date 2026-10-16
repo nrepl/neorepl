@@ -183,4 +183,8 @@
                 (:problems structuredContent)))
          (is (str/starts-with? (text {:result result}) (str bad ":2:1: Unclosed ("))))
        (send (tool-call 2 "check" {:files [good]}))
-       (is (= "Every delimiter balances" (text (receive))))))))
+       (is (= "Every delimiter balances" (text (receive))))
+       (testing "and repairing them"
+         (send (tool-call 3 "check" {:files [bad] :fix true}))
+         (is (= (str bad ":2:1: Unclosed (, repaired from the indentation") (text (receive))))
+         (is (= "(ns bad)\n(defn f [] 1)\n" (slurp bad))))))))

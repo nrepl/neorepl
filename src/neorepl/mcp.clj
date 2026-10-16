@@ -14,6 +14,7 @@
             [neorepl.lookups :as lookups]
             [neorepl.nrepl :as nrepl]
             [neorepl.render :as render]
+            [neorepl.repair :as repair]
             [neorepl.sessions :as sessions])
   (:import (java.io BufferedReader Writer)
            (java.util.concurrent ExecutorService Executors TimeUnit)))
@@ -117,9 +118,9 @@
 
 (defn- check
   "The first unbalanced delimiter in each of files, as neorepl check finds
-  them."
-  [files]
-  (let [problems (into [] (keep lexer/file-problem) files)]
+  them, repaired, as neorepl check --fix does, if fix?."
+  [files fix?]
+  (let [problems (into [] (keep (if fix? repair/fix-file lexer/file-problem)) files)]
     (result (if (seq problems)
               (str/join "\n" (map render/problem-text problems))
               "Every delimiter balances")
@@ -221,9 +222,11 @@
                (let [{:keys [status message] :as r} (sessions/interrupt-result sessions-file client session)]
                  (result (or message "Interrupted") r (= "error" status))))))}
    {:name "check"
-    :description "Check Clojure files for unbalanced parens, brackets, braces and strings, without a server. Run it after editing a file and before loading it."
-    :inputSchema (schema {:files {:type "array" :items {:type "string"}}} "files")
-    :run (fn [_ {:keys [files]} _] (check files))}
+    :description "Check Clojure files for unbalanced parens, brackets, braces and strings, without a server. Run it after editing a file and before loading it. With fix, it repairs them from the indentation, as parinfer would, and writes the files back, leaving alone the ones it can't tell how to repair."
+    :inputSchema (schema {:files {:type "array" :items {:type "string"}}
+                          :fix {:type "boolean" :description "Repair what doesn't balance, writing the files back"}}
+                         "files")
+    :run (fn [_ {:keys [files fix]} _] (check files fix))}
    {:name "ports"
     :description "List the nREPL servers this project's port files point at, and whether they answer."
     :inputSchema (schema {})

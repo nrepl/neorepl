@@ -666,7 +666,29 @@
     (testing "structured"
       (is (= [{:file unclosed :line 3 :column 1 :message "Unclosed ("}]
              (edn/read-string (:out (run-in *dir* "" "check" "--format" "edn" good unclosed)))))
-      (is (= "[]\n" (:out (run-in *dir* "" "check" "--format" "json" good)))))))
+      (is (= "[]\n" (:out (run-in *dir* "" "check" "--format" "json" good)))))
+    (testing "repairing them from the indentation"
+      (let [open-string (str (spit-file *dir* "check/open-string.clj" "(defn f []\n  (str \"abc)\n"))]
+        (is (= {:status 1
+                :out (str unclosed ":3:1: Unclosed (, repaired from the indentation\n"
+                          open-string ":2:8: Unterminated string, left alone: "
+                          "Can't tell where an unterminated string or regex should end\n")
+                :err ""}
+               (run-in *dir* "" "check" "--fix" good unclosed open-string)))
+        (testing "writing them back"
+          (is (= "(ns unclosed)\n\n(defn f [x]\n  (inc x))\n" (slurp unclosed)))
+          (is (= "(defn f []\n  (str \"abc)\n" (slurp open-string)))
+          (is (= {:status 0 :out "" :err ""} (run-in *dir* "" "check" unclosed))))
+        (testing "with what it did in the structured kind"
+          (is (= [{:file mismatched :line 1 :column 10
+                   :message "Mismatched ): expected ] to close the [ at 1:6" :fixed true}]
+                 (edn/read-string (:out (run-in *dir* "" "check" "--fix" "--format" "edn" mismatched)))))
+          (is (= "(let [x 1]\n  x)" (slurp mismatched))))
+        (testing "printing standard input repaired"
+          (is (= {:status 0 :out "(+ 1 2)" :err "<stdin>:1:8: Unmatched ), repaired from the indentation\n"}
+                 (run-in *dir* "(+ 1 2))" "check" "--fix" "-")))
+          (is (= {:status 0 :out "(+ 1 2)" :err ""}
+                 (run-in *dir* "(+ 1 2)" "check" "--fix" "-"))))))))
 
 (deftest errors-test
   (testing "usage errors"

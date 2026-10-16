@@ -107,7 +107,7 @@
   [s {:keys [start end]}]
   (subs s start end))
 
-(defn- closer
+(defn closer
   "The closing delimiter matching the opening delimiter token."
   [s token]
   (case (last (text s token)) \( ")" \[ "]" \{ "}"))
