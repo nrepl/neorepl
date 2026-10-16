@@ -78,27 +78,41 @@
   through, the last one being the one on show."
   (atom {}))
 
+(def page-sizes
+  "How many items of a collection each session's inspector shows a page."
+  (atom {}))
+
 (defn- inspector-view
-  "How cider-nrepl's inspector would show value, roughly, and the values it
-  marks, by index."
-  [value]
+  "How cider-nrepl's inspector would show value, roughly, with page-size
+  items of a collection, the first page, and the values it marks, by
+  index."
+  [value page-size]
   (let [marked (atom [])
         mark #(list :value (pr-str (peek (swap! marked conj %))) (dec (count @marked)))
         class-name (mark (symbol (.getName (class value))))
         rows (cond
                (map? value) (mapv (fn [[k v]] ["  " (mark k) " = " (mark v)]) value)
-               (coll? value) (vec (map-indexed #(vector "  " (str %1 ". ") (mark %2)) value))
+               (coll? value) (vec (map-indexed #(vector "  " (str %1 ". ") (mark %2)) (take page-size value)))
                :else [["Value: " (mark value)]])
+        pages (when (coll? value) (quot (+ (count value) (dec page-size)) page-size))
         view (concat ["Class: " class-name '(:newline)]
                      (when (coll? value) ["Count: " (str (count value)) '(:newline)])
                      ['(:newline) "--- Contents:" '(:newline)]
-                     (mapcat #(concat % ['(:newline)]) rows))]
+                     (mapcat #(concat % ['(:newline)]) rows)
+                     (when (and pages (< 1 pages))
+                       ['(:newline) "--- Page Info:" '(:newline)
+                        "  " (format "Page size: %d, showing page: 1 of %d" page-size pages) '(:newline)]))]
     [(pr-str view) @marked]))
+
+(defn- view-in
+  "What's on show in session's inspector, as inspector-view has it."
+  [session]
+  (inspector-view (peek (get @inspected session)) (get @page-sizes session 32)))
 
 (defn- show
   "Responds to msg with what's on show in its session's inspector."
   [{:keys [session] :as msg}]
-  (transport/respond-to msg :status "done" :value (first (inspector-view (peek (get @inspected session))))))
+  (transport/respond-to msg :status "done" :value (first (view-in session))))
 
 (def ^:private inspect-ops
   #{"inspect-push" "inspect-pop" "inspect-refresh" "inspect-next-page" "inspect-prev-page"
@@ -111,7 +125,9 @@
   to an index it doesn't have. Values are data the reader can take back
   from how they're printed."
   [handler]
-  (fn [{:keys [op session inspect idx transport] :as msg}]
+  (fn [{:keys [op session inspect idx transport page-size] :as msg}]
+    (when (and page-size (#{"eval" "inspect-refresh"} op))
+      (swap! page-sizes assoc session page-size))
     (case op
       "eval" (if inspect
                (handler (assoc msg :transport
@@ -124,7 +140,7 @@
                                     (cond
                                       value (let [value (edn/read-string value)]
                                               (swap! inspected assoc session [value])
-                                              (assoc response :value (first (inspector-view value))))
+                                              (assoc response :value (first (view-in session))))
                                       ;; cider-nrepl says eval-error this way.
                                       status (assoc response :status (map #(if (= "eval-error" (name %)) "inspect-eval-error" %)
                                                                           status))
@@ -132,7 +148,7 @@
                                    this))))
                (handler msg))
       ;; An index it doesn't have gets no answer, as from a stuck server.
-      "inspect-push" (when-some [value (get (second (inspector-view (peek (get @inspected session)))) idx)]
+      "inspect-push" (when-some [value (get (second (view-in session)) idx)]
                        (swap! inspected update session conj value)
                        (show msg))
       "inspect-pop" (do (swap! inspected update session #(cond-> % (< 1 (count %)) pop))

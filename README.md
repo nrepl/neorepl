@@ -124,7 +124,7 @@ them yet.
 `,inspect` shows a value, or the last one without code, in cider-nrepl's
 inspector, full-screen: the arrow keys (or `j` and `k`) move between the
 values in it, Enter digs into one, Backspace goes back, `[` and `]` page
-through big collections, `v` shows the object's fields and `q` takes you back
+through big collections, a screenful at a time, `v` shows the object's fields and `q` takes you back
 to the REPL. `neorepl inspect` does the same for scripts and agents, one step
 at a time, since the inspector stays in the session. Both take cider-nrepl or
 babashka on the server:

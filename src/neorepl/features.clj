@@ -664,16 +664,19 @@
   form's when there are several, the way evaluation/evaluate evaluates, whose
   result it returns, whose opts it takes, and, when the evaluation worked,
   the :lines of the inspector's view, as inspector takes them. The inspector
-  lives in the session on the server, which inspector moves around in."
-  [client session code opts]
+  lives in the session on the server, which inspector moves around in. A
+  :page-size in opts says how many items of a collection it shows at a
+  time."
+  [client session code {:keys [page-size] :as opts}]
   (check-inspector client)
   (let [;; The last value's view, or ::failed.
         view (atom nil)
         {:keys [status] :as result}
         (evaluate-for client
-                      {:op "eval" :session session :code code :inspect "true"}
+                      (cond-> {:op "eval" :session session :code code :inspect "true"}
+                        page-size (assoc :page-size page-size))
                       ;; It would cut the view short, which is the value.
-                      (dissoc opts :max-output)
+                      (dissoc opts :max-output :page-size)
                       #(cond
                          (:value %) (reset! view (:value %))
                          ;; cider-nrepl's way of saying eval-error.

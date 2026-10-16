@@ -297,7 +297,16 @@
               (is (screen #"(?m)^3\nuser=> $")))))]
     (testing "on a screen of its own, which goes away after"
       (is (str/includes? out "\u001b[?1049h"))
-      (is (str/includes? out "\u001b[?1049l")))))
+      (is (str/includes? out "\u001b[?1049l"))))
+  (testing "a page of a collection to fill the screen"
+    (call-with-repl {}
+      (fn [type screen]
+        (type ",inspect (range 100)\r")
+        ;; 24 lines, less the help, the 7 lines around the items and one
+        ;; for the ... the pages after the first start with.
+        (is (screen #"14\. 14(?s).*Page size: 15, showing page: 1 of 7.*q quit"))
+        (type "q")
+        (is (screen #"user=> $"))))))
 
 (deftest stacktrace-test
   (testing "the last error, on a screen of its own"
