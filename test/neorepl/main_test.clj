@@ -5,6 +5,7 @@
             [clojure.string :as str]
             [clojure.test :refer [are deftest is testing use-fixtures]]
             [neorepl.discovery :as discovery]
+            [neorepl.json :as json]
             [neorepl.main :as main]
             [neorepl.nrepl :as nrepl]
             [neorepl.sessions :as sessions]
@@ -773,19 +774,39 @@
   (map (fn [[_ quoted bare]] (or quoted bare))
        (re-seq #"'([^']*)'|(\S+)" command)))
 
+(defn- documented-commands
+  "The neorepl commands in the Markdown text md."
+  [md]
+  (concat
+   (mapcat #(re-seq #"(?m)^neorepl .*" (second %)) (re-seq #"(?s)```shell\n(.*?)```" md))
+   ;; Inline ones, which can run over a line break.
+   (map #(str/replace (second %) #"\s+" " ") (re-seq #"`(neorepl [^`]+)`" md))))
+
+(defn- check-commands
+  "Checks that each of commands runs with --help, so the docs don't drift
+  from the command line."
+  [commands]
+  (doseq [command commands
+          ;; Leave out a heredoc.
+          :let [args (rest (words (str/replace command #"\s*<<.*" "")))]]
+    (testing command
+      (is (zero? (:status (apply run-in *dir* "" (concat args ["--help"]))))))))
+
 (deftest skill-test
   (let [skill (lf (slurp "skills/neorepl/SKILL.md"))
-        commands (concat
-                  (re-seq #"(?m)^neorepl .*" skill)
-                  ;; Inline ones, which can run over a line break.
-                  (map #(str/replace (second %) #"\s+" " ") (re-seq #"`(neorepl [^`]+)`" skill)))]
+        commands (documented-commands skill)]
     (is (str/starts-with? skill "---\nname: neorepl\ndescription: "))
     (is (< 10 (count commands)))
-    (doseq [command commands
-            ;; Leave out a heredoc.
-            :let [args (rest (words (str/replace command #"\s*<<.*" "")))]]
-      (testing command
-        (is (zero? (:status (apply run-in *dir* "" (concat args ["--help"])))))))))
+    (check-commands commands)))
+
+(deftest agents-doc-test
+  (let [doc (lf (slurp "doc/agents.md"))
+        configs (map second (re-seq #"(?s)```json\n(.*?)```" doc))]
+    (check-commands (documented-commands doc))
+    (is (seq configs))
+    (doseq [config configs]
+      (is (= {:command "neorepl" :args ["mcp"]}
+             (select-keys (:neorepl (:mcpServers (json/read-str config))) [:command :args]))))))
 
 (deftest version-test
   (is (= {:status 0 :out (str "neorepl " main/version "\n") :err ""}

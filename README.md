@@ -170,14 +170,10 @@ json`, and named sessions keep `*ns*`, `*1` and `*e` from one call to the
 next. [`skills/neorepl/SKILL.md`](skills/neorepl/SKILL.md) is a skill that
 teaches them the workflow: check an edited file's parens, load it, run its
 tests, look at the stack trace when something fails. Agents that read
-skills load it when they work on Clojure code. For Claude Code, put it with
-your skills:
-
-```shell
-mkdir -p ~/.claude/skills/neorepl
-curl -fsSL -o ~/.claude/skills/neorepl/SKILL.md \
-  https://raw.githubusercontent.com/nrepl/neorepl/main/skills/neorepl/SKILL.md
-```
+skills load it when they work on Clojure code.
+[`doc/agents.md`](doc/agents.md) says where to put it for Claude Code,
+Codex, Gemini CLI, Cursor and VS Code, and how to set up `neorepl mcp` with
+each.
 
 For an agent without skills, a few lines in the project's `AGENTS.md` (or
 `CLAUDE.md`, `GEMINI.md`) cover the essentials:
