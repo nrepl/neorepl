@@ -4,6 +4,7 @@
 
 ### Features
 
+- [#16](https://github.com/nrepl/neorepl/pull/16): `doc/agents.md` says how to set up the skill and `neorepl mcp` with Claude Code, Codex, Gemini CLI, Cursor and VS Code.
 - [#14](https://github.com/nrepl/neorepl/pull/14): A skill, `skills/neorepl/SKILL.md`, teaches coding agents to check, load, test and debug Clojure code with the CLI.
 - [#13](https://github.com/nrepl/neorepl/pull/13): `neorepl check --fix`, and the MCP `check` tool's `fix`, repair unbalanced delimiters from the indentation, as parinfer's indent mode does.
 - [#12](https://github.com/nrepl/neorepl/pull/12): `neorepl mcp` serves MCP on stdio for coding agents, with a curated set of tools that share the CLI's named sessions.
