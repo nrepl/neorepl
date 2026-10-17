@@ -2,6 +2,10 @@
 
 ## main (unreleased)
 
+## 0.3.0 (2026-10-17)
+
+Coding agents.
+
 ### Features
 
 - [#16](https://github.com/nrepl/neorepl/pull/16): `doc/agents.md` says how to set up the skill and `neorepl mcp` with Claude Code, Codex, Gemini CLI, Cursor and VS Code.
