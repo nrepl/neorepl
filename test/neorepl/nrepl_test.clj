@@ -180,10 +180,13 @@
 (deftest memory-test
   (testing "responses can be collected once they're handled"
     (with-client [client {:port *port*}]
-      (let [response (atom nil)]
+      (let [response (promise)]
         (nrepl/request client {:op "eval" :code "(apply str (repeat 100 \"x\"))"})
-        (nrepl/send! client {:op "eval" :code "1"} #(when (:value %) (reset! response (WeakReference. %))))
+        (nrepl/send! client {:op "eval" :code "1"} #(when (:value %) (deliver response (WeakReference. %))))
         (nrepl/request client {:op "eval" :code "2"})
+        ;; Evaluations without a session can run at once, so 2 can finish
+        ;; before 1's value gets handled.
+        (is (deref response 5000 nil))
         (is (loop [tries 50]
               (System/gc)
               (cond
