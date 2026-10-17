@@ -767,6 +767,26 @@
     ["inspect" "--help"] "Usage: neorepl inspect"
     ["server" "--help"] "Usage: neorepl server"))
 
+(defn- words
+  "The words of a shell command, with single quotes."
+  [command]
+  (map (fn [[_ quoted bare]] (or quoted bare))
+       (re-seq #"'([^']*)'|(\S+)" command)))
+
+(deftest skill-test
+  (let [skill (lf (slurp "skills/neorepl/SKILL.md"))
+        commands (concat
+                  (re-seq #"(?m)^neorepl .*" skill)
+                  ;; Inline ones, which can run over a line break.
+                  (map #(str/replace (second %) #"\s+" " ") (re-seq #"`(neorepl [^`]+)`" skill)))]
+    (is (str/starts-with? skill "---\nname: neorepl\ndescription: "))
+    (is (< 10 (count commands)))
+    (doseq [command commands
+            ;; Leave out a heredoc.
+            :let [args (rest (words (str/replace command #"\s*<<.*" "")))]]
+      (testing command
+        (is (zero? (:status (apply run-in *dir* "" (concat args ["--help"])))))))))
+
 (deftest version-test
   (is (= {:status 0 :out (str "neorepl " main/version "\n") :err ""}
          (run-in *dir* "" "--version"))))
