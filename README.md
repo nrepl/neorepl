@@ -167,7 +167,30 @@ src/my/app.clj:12:1: Unclosed (, repaired from the indentation
 
 Agents can drive the CLI like anyone else: every command takes `--format
 json`, and named sessions keep `*ns*`, `*1` and `*e` from one call to the
-next. For agents that speak MCP, `neorepl mcp` serves the same features as
+next. [`skills/neorepl/SKILL.md`](skills/neorepl/SKILL.md) is a skill that
+teaches them the workflow: check an edited file's parens, load it, run its
+tests, look at the stack trace when something fails. Agents that read
+skills load it when they work on Clojure code. For Claude Code, put it with
+your skills:
+
+```shell
+mkdir -p ~/.claude/skills/neorepl
+curl -fsSL -o ~/.claude/skills/neorepl/SKILL.md \
+  https://raw.githubusercontent.com/nrepl/neorepl/main/skills/neorepl/SKILL.md
+```
+
+For an agent without skills, a few lines in the project's `AGENTS.md` (or
+`CLAUDE.md`, `GEMINI.md`) cover the essentials:
+
+```markdown
+This project has an nREPL server you can reach with `neorepl`. After
+editing a Clojure file, run `neorepl check --fix FILE`, then
+`neorepl load -s agent FILE`, then `neorepl test -s agent NS`. Try code
+with `neorepl eval -s agent 'CODE'` and read errors with
+`neorepl pst -s agent`. `neorepl COMMAND --help` has the details.
+```
+
+For agents that speak MCP, `neorepl mcp` serves the same features as
 MCP tools over standard input and output, through the server it finds the
 way the other commands do. With Claude Code:
 
