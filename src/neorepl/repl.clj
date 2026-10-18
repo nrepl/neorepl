@@ -55,7 +55,7 @@
                      (.interrupt thread)
                      thread))}))
 
-(declare edit inspect run-tests browse-error)
+(declare edit enter-ns inspect run-tests browse-error)
 
 (def ^:private commands
   "The REPL's commands, the CIDER way: a comma, which Clojure reads as
@@ -74,6 +74,9 @@
             :run (fn [state _] (browse-error state))}
            {:name "edit" :arg "SYM" :help "Open where SYM is defined in your EDITOR"
             :run #(edit %1 %2)}
+           {:name "ns" :arg "NS" :optional? true
+            :help "Switch to NS, loading it if need be, or list the project's"
+            :run #(enter-ns %1 %2)}
            {:name "help" :help "List the commands"}
            {:name "quit" :help "Leave the REPL"}]))
 
@@ -233,6 +236,20 @@
         (out (render/inspector-text lines)))
       {})))
 
+(defn- enter-ns
+  "Switches to the namespace called ns, loading it the way the REPL
+  :evaluates code if need be, or lists the project's loaded namespaces
+  without it. Returns what to print, as command-output does, with the
+  namespace the REPL's in now as its :ns."
+  [{:keys [client session evaluate] :as state} ns]
+  (if ns
+    (let [{:keys [status] :as result} (evaluate #(features/enter-ns client session ns %))]
+      (if (= "ok" status)
+        {:ns (:ns result)}
+        {}))
+    (out (or (some->> (features/namespaces client state) seq (str/join "\n"))
+             "None of the project's namespaces are loaded"))))
+
 (defn- reenter
   "Puts session back in the namespace called ns, as tools.namespace's refresh
   does: reloading code can make a namespace anew, and the session would go
@@ -264,7 +281,7 @@
   :browse what ,inspect and ,stacktrace find, as browser/browse does, partly
   applied to the editor, if the REPL can, an atom with the last test run's
   :test-errors and functions that have the REPL :show-traces and
-  :hide-traces."
+  :hide-traces. What to print can have the :ns the REPL goes on in."
   [{:keys [client] :as state} name arg]
   (let [{arg-name :arg :keys [code? args? optional?] :as command} (command name)]
     (cond
@@ -392,7 +409,7 @@
              (or (nil? code) (= ":repl/quit" (str/trim code)) (= :quit output)) nil
              (str/blank? code) (recur ns nil)
              output (do (print-response output)
-                        (recur ns more))
+                        (recur (or (:ns output) ns) more))
              :else
              (let [result (evaluate #(evaluation/evaluate client (eval-msg session code (width)) %))]
                (recur (or (:ns result) ns) nil)))))))))
