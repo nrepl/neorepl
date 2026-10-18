@@ -340,6 +340,13 @@
   [name]
   (str/includes? name "/"))
 
+(defn- symbol-name?
+  "Whether s is the name of a symbol that kind?, such as simple-symbol?, is
+  true of, as it would print."
+  [kind? s]
+  (let [sym (try (edn/read-string s) (catch Exception _ nil))]
+    (and (kind? sym) (= s (str sym)))))
+
 (defn- unknown-tests
   "Loads the namespaces that names, names of namespaces and of tests as
   ns/name, are or are in, in session, and returns the names of tests that
@@ -349,9 +356,7 @@
   only requires namespaces named by quoted symbols, so names have to be
   symbols."
   [client session names opts]
-  (when-let [bad (seq (remove #(let [s (try (edn/read-string %) (catch Exception _ nil))]
-                                 (and (symbol? s) (= % (str s))))
-                              names))]
+  (when-let [bad (seq (remove #(symbol-name? symbol? %) names))]
     (throw (ex-info (str "Not the name of a namespace or a test: " (str/join ", " bad)) {:type ::failed})))
   (let [symbols (map symbol names)
         nss (distinct (map #(symbol (or (namespace %) (name %))) symbols))
@@ -824,3 +829,62 @@
 
 (defn unsubscribe-traces [client subscription]
   (ask client {:op "cider/trace-unsubscribe" :subscription subscription} {}))
+
+(def ^:private project-namespaces-code
+  "Keeps the namespaces whose names %s has whose source is a file on the
+  classpath, not one in a jar, as a project's are."
+  "(filterv (fn [n]
+              (let [path (-> n (clojure.string/replace \"-\" \"_\") (clojure.string/replace \".\" \"/\"))]
+                (some-> (some (fn [ext] (clojure.java.io/resource (str path ext))) [\".clj\" \".cljc\" \".cljs\" \".bb\"])
+                        str
+                        (clojure.string/starts-with? \"file:\"))))
+            %s)")
+
+(defn namespaces
+  "The names of the project's loaded namespaces, sorted: those whose source
+  is in a directory on the classpath, rather than a jar. They're in the
+  language of ctx's :session with cider-nrepl or babashka on the server,
+  Clojure's without."
+  ([client ctx] (namespaces client ctx {}))
+  ([client {:keys [session]} opts]
+   (sort (if (supports? client "ns-list")
+           (eval-data client {} project-namespaces-code
+                      [(vec (some :ns-list (ask client (cond-> {:op "ns-list"} session (assoc :session session)) opts)))]
+                      opts)
+           (eval-data client {} (format project-namespaces-code "(map (comp str ns-name) (all-ns))") [] opts)))))
+
+(def ^:private ns-found-code
+  "Whether the namespace %s names is there, in Clojure, ClojureScript or,
+  unqualified, as best it can, the other dialects."
+  "#?(:clj (clojure.core/some? (clojure.core/find-ns (clojure.core/symbol %1$s)))
+      :cljs (cljs.core/some? (cljs.core/find-ns (cljs.core/symbol %1$s)))
+      :default (some? (find-ns (symbol %1$s))))")
+
+(defn enter-ns
+  "Puts session in the namespace called name, loading it first if it isn't
+  there, as require would, rather than leaving the session in an empty
+  namespace, as in-ns does, for one that isn't loaded or a typo. Works in
+  Clojure and ClojureScript alike. Returns what evaluation/evaluate does,
+  whose opts it takes, for loading the namespace, when that fails, or else
+  for switching to it, with the session's :ns. Neither shows its value."
+  [client session name opts]
+  (when-not (symbol-name? simple-symbol? name)
+    (throw (ex-info (str "Not the name of a namespace: " name) {:type ::failed})))
+  (let [eval-ns (fn [code]
+                  (evaluate-for client {:op "eval" :session session :code code} opts (fn [_])))
+        enter #(eval-ns (format "#?(:clj (clojure.core/in-ns '%1$s) :cljs (in-ns '%1$s) :default (in-ns '%1$s))" name))
+        ;; Asked in a copy of session, in its language, so its *1 stays put.
+        copy (nrepl/clone-session client session)
+        found? #(eval-data client {:session copy} ns-found-code [name] {})]
+    (try
+      (if (found?)
+        (enter)
+        ;; ClojureScript's require only works as a form of its own.
+        (let [loaded (eval-ns (format "#?(:clj (clojure.core/require '%1$s) :cljs (require '%1$s) :default (require '%1$s))" name))]
+          (cond
+            (not= "ok" (:status loaded)) loaded
+            ;; shadow-cljs only says what went wrong, with no eval-error.
+            (not (found?)) (throw (ex-info (str "Couldn't load " name) {:type ::failed}))
+            :else (enter))))
+      (finally
+        (nrepl/close-session client copy)))))

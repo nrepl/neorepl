@@ -45,6 +45,10 @@
                                       :apropos-matches [{:name "clojure.core/map" :type "function"
                                                          :doc "Cider's map.\nMore."}])
       "macroexpand" (transport/respond-to msg :status "done" :expansion (str "Cider's " (:expander msg)))
+      "ns-list" (transport/respond-to msg :status "done"
+                                      :ns-list (if (:session msg)
+                                                 ["clojure.core" "neorepl.features" "made.at.the.repl"]
+                                                 ["clojure.core"]))
       ("test-var-query" "retest")
       (do (swap! test-requests conj (select-keys msg [:op :var-query :stream]))
           (when (= "true" (:stream msg))
@@ -106,7 +110,7 @@
                                     (transport/respond-to msg :status "done"))
       (handler msg))))
 
-(middleware/set-descriptor! #'wrap-fake-cider {:handles {"info" {} "complete" {} "apropos" {}
+(middleware/set-descriptor! #'wrap-fake-cider {:handles {"info" {} "complete" {} "apropos" {} "ns-list" {}
                                                          "macroexpand" {} "analyze-last-stacktrace" {} "test-stacktrace" {}
                                                          "refresh" {} "test-var-query" {} "retest" {}
                                                          "inspect-last-exception" {}}})
@@ -246,6 +250,39 @@
     (testing "what changed, which takes cider-nrepl"
       (is (thrown-with-msg? clojure.lang.ExceptionInfo #"takes cider-nrepl" (features/reload client []))))))
 
+(deftest namespaces-test
+  (with-client [client {:port *port*}]
+    (let [names (features/namespaces client user)]
+      (testing "the project's, whose source isn't in a jar"
+        (is (some #{"neorepl.features"} names))
+        (is (not-any? #{"clojure.core" "nrepl.server"} names)))
+      (is (= names (sort names))))))
+
+(deftest enter-ns-test
+  (with-client [client {:port *port*}]
+    (let [session (nrepl/clone-session client)
+          eval-in (fn [code] (some :value (nrepl/request client {:op "eval" :session session :code code})))
+          enter #(features/enter-ns client session % {})]
+      (eval-in "(+ 1 2)")
+      (is (= {:status "ok" :ns "user"} (select-keys (enter "user") [:status :ns])))
+      (testing "keeping the value before, behind in-ns's"
+        (is (= "3" (eval-in "*2"))))
+      (testing "loading the namespace first"
+        (is (= {:status "ok" :ns "clojure.data"} (select-keys (enter "clojure.data") [:status :ns])))
+        (is (= "{:a 1}" (eval-in "(first (diff {:a 1} {}))"))))
+      (testing "out of a namespace that doesn't refer clojure.core"
+        (eval-in "(in-ns 'empty.one)")
+        (is (= "ok" (:status (enter "user"))))
+        (is (= "user" (nrepl/session-ns client session))))
+      (testing "not into one that doesn't load"
+        (let [{:keys [status err]} (features/enter-ns client session "no.such.ns" {:collect? true})]
+          (is (= "eval-error" status))
+          (is (str/includes? err "Could not locate no/such/ns")))
+        (is (= "user" (nrepl/session-ns client session)))
+        (is (= "nil" (eval-in "(find-ns 'no.such.ns)"))))
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Not the name of a namespace: a/b"
+                            (enter "a/b"))))))
+
 (deftest run-tests-test
   (with-client [client {:port *port*}]
     (let [session (nrepl/clone-session client)
@@ -317,6 +354,9 @@
                  (:type (ex-data (is (thrown? clojure.lang.ExceptionInfo (features/info client "broken" user)))))))
           (is (= [{:candidate "map" :type "function" :ns "clojure.core"}]
                  (features/complete client "ma" user)))
+          (testing "namespaces in the session's language"
+            (is (= ["neorepl.features"]
+                   (features/namespaces client (assoc user :session (nrepl/clone-session client))))))
           (is (= [{:name "clojure.core/map" :type "function" :doc "Cider's map.\nMore."}]
                  (features/apropos client "map")))
           (is (= "Cider's macroexpand-all" (features/expand client "(when x y)" user true)))

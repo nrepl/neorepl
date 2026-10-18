@@ -291,6 +291,24 @@
         (type "\u001b[200~,doc inc\n(+ 40 2)\u001b[201~\r")
         (is (screen #"clojure\.core/inc\n(?s).*\n42\nuser=> $"))))))
 
+(deftest ns-test
+  (call-with-repl {}
+    (fn [type screen]
+      (testing "TAB completing the name"
+        (type ",ns clojure.se\t\r")
+        (is (screen #"\nclojure\.set=> $")))
+      (testing "and the lookups go on there"
+        (type ",doc union\r")
+        (is (screen #"clojure\.set/union\n")))
+      (testing "but not into a namespace that doesn't load"
+        (type ",ns no.such.ns\r")
+        (is (screen #"Could not locate no/such/ns(?s).*\nclojure\.set=> $")))
+      (testing "with code after it running there"
+        (type "\u001b[200~,ns user\n(str *ns*)\u001b[201~\r")
+        (is (screen #"\n\"user\"\nuser=> $")))
+      (type ",ns\r")
+      (is (screen #"\nneorepl\.repl-test\n(?s).*user=> $")))))
+
 (deftest trace-test
   (with-client [client {:port *port*}]
     (try
