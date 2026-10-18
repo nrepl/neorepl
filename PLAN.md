@@ -135,7 +135,7 @@ Tooling requests that don't evaluate anything (completion, eldoc, ...) go to the
 - Output: `out`/`err` streamed in distinct styles. Output from background threads goes above the prompt (`LineReader#printAbove`) instead of over it. Values are pretty-printed on the server and highlighted on the client. We never read values client-side, so records, tagged literals and cljs objects just work.
 - Ctrl-C sends `interrupt` while something's running and clears the line otherwise. Ctrl-D on an empty line exits. `need-input` prompts for stdin (REPLy never got this fully right).
 - Errors: a one-line summary by default (class, message, location) and the full analyzed trace on demand.
-- Commands: CIDER-style comma commands (`,doc`, `,source`, `,apropos`, `,test`, `,reload`, `,inspect`, `,ns`, `,sessions`, `,quit`). A leading comma is whitespace to the Clojure reader, so it can't collide with real code. `:repl/quit` works too.
+- Commands: CIDER-style comma commands (`,doc`, `,source`, `,apropos`, `,test`, `,reload`, `,inspect`, `,stacktrace`, `,trace`, `,edit`, `,ns`, `,sessions`, `,quit`). A leading comma is whitespace to the Clojure reader, so it can't collide with real code. `:repl/quit` works too.
 - Keys: rebel-readline's C-x prefix conventions where they exist (C-x C-d doc, C-x C-s source, C-x C-a apropos), which bb's console REPL also follows.
 - Full-screen views for the inspector, test results and stacktrace navigation, built on JLine's `Display` and the alternate screen. No TUI framework.
 - ClojureScript: shadow-cljs and piggieback sessions, switching between clj and cljs. CIDER's history says this is where the dragons live, so it gets its own milestone.
@@ -148,11 +148,15 @@ Rules for every subcommand: plain output when not on a TTY, `--format text|edn|j
 neorepl [repl]                 connect or jack-in, interactive
 neorepl eval CODE | -f FILE | -
 neorepl load FILE
-neorepl doc | source | info SYM
+neorepl doc | source | where SYM
 neorepl apropos REGEX
 neorepl complete PREFIX [--ns NS]
 neorepl macroexpand FORM
 neorepl test [NS | VAR ...]
+neorepl retest
+neorepl reload [NS ...]
+neorepl inspect CODE | --push N | --pop
+neorepl pst
 neorepl trace | untrace [SYM | NS ...]
 neorepl server                 headless jack-in, writes the port file
 neorepl ports                  servers for this directory
@@ -208,6 +212,11 @@ src/neorepl/
   lexer.clj         completeness, highlighting, symbol at point, delimiter checks
   editor.cljc       JLine glue; the only namespace that imports org.jline
   repl.clj          interactive loop and comma commands
+  browser.clj       full-screen views to move around in, on JLine's Display
+  inspector.clj     the full-screen inspector, on cider-nrepl's inspect ops
+  stacktrace.clj    the full-screen stack trace browser
+  mcp.clj           neorepl mcp: JSON-RPC over stdio, the curated tools
+  repair.clj        check --fix, delimiter repair from the indentation
   render.clj        colors, themes, errors, test reports
   json.clj          minimal JSON
   xdg.clj           where the cache and history files go
