@@ -4,7 +4,8 @@
   (:refer-clojure :exclude [read-line])
   (:require [clojure.string :as str]
             [neorepl.lexer :as lexer])
-  (:import (java.util List)
+  (:import (java.nio.charset StandardCharsets)
+           (java.util List)
            #?@(:bb []
                :clj [(org.jline.reader CompletingParsedLine)])
            (org.jline.keymap BindingReader KeyMap)
@@ -163,6 +164,11 @@
         ;; The other providers wrap the streams in a pty.
         (.provider "exec")
         (.streams input output)
+        ;; Not the platform's, which on Windows can't take box drawing.
+        ;; JLine takes stdout.encoding over encoding, so all of them.
+        (.encoding StandardCharsets/UTF_8)
+        (.stdinEncoding StandardCharsets/UTF_8)
+        (.stdoutEncoding StandardCharsets/UTF_8)
         (.type ^String type)
         (.size (Size. (int width) 24))
         (.build))

@@ -420,3 +420,64 @@
   (testing "what isn't a view"
     (is (thrown-with-msg? clojure.lang.ExceptionInfo #"The server's inspector said 42"
                           (#'features/inspector-lines "42")))))
+
+(deftest trace-test
+  (let [events (atom [])]
+    (with-client [client {:port *port* :on-unclaimed #(some->> (:cider/trace-event %) (swap! events conj))}]
+      (nrepl/request client {:op "eval" :code "(ns trace.me) (defn f [x] (inc x)) (defn g [x] (f x)) (defmacro m [] 1)"})
+      (try
+        (testing "vars, the way the namespace has them"
+          (is (= [{:var "trace.me/f" :status "traced"}
+                  {:name "nope" :status "not-found"}
+                  {:var "trace.me/m" :status "not-traceable"}]
+                 (features/trace client ["f" "nope" "m"] {:ns "trace.me"} true))))
+        (testing "only when they aren't traced yet"
+          (is (= [{:var "trace.me/f" :status "already-traced"}]
+                 (features/trace client ["trace.me/f"] {:ns "user"} true)))
+          (is (= {:nses [] :vars ["trace.me/f"]} (features/traced client))))
+        (testing "namespaces, which take the place of their vars in the list"
+          (is (= [{:ns "trace.me" :status "traced"}] (features/trace client ["trace.me"] {:ns "user"} true)))
+          (is (= {:nses ["trace.me"] :vars []} (features/traced client))))
+        (testing "calls print in the evaluation's output"
+          (is (= "(trace.me/g 1)\n(trace.me/f 1)\n└─→ 2\n└─→ 2\n"
+                 (test-server/lf (str/join (keep :out (nrepl/request client {:op "eval" :code "(trace.me/g 1)"})))))))
+        (testing "untracing, only when they're traced"
+          (is (= [{:var "trace.me/g" :status "untraced"}] (features/trace client ["trace.me/g"] {:ns "user"} false)))
+          (is (= [{:var "trace.me/g" :status "not-traced"}] (features/trace client ["trace.me/g"] {:ns "user"} false))))
+        (testing "everything at once"
+          (is (= {:untraced 1} (features/untrace-all client)))
+          (is (= {:nses [] :vars []} (features/traced client))))
+        (testing "namespaces, without toggling what's traced in them"
+          (features/trace client ["trace.me/f"] {:ns "user"} true)
+          (is (= [{:ns "trace.me" :status "not-traced"}] (features/trace client ["trace.me"] {:ns "user"} false)))
+          (is (= {:nses [] :vars ["trace.me/f"]} (features/traced client)))
+          (is (= [{:ns "trace.me" :status "traced"}] (features/trace client ["trace.me"] {:ns "user"} true)))
+          (is (= [{:ns "trace.me" :status "already-traced"}] (features/trace client ["trace.me"] {:ns "user"} true)))
+          (is (= [{:name "no.such.ns" :status "not-found"}] (features/trace client ["no.such.ns"] {:ns "user"} false))))
+        (testing "in a namespace that isn't there"
+          (is (thrown-with-msg? clojure.lang.ExceptionInfo #"couldn't trace f: .*No namespace: not.loaded"
+                                (features/trace client ["f"] {:ns "not.loaded"} true))))
+        (features/untrace-all client)
+        (testing "events instead of printing, while subscribed"
+          (features/trace client ["trace.me/f"] {:ns "user"} true)
+          (let [subscription (features/subscribe-traces client)]
+            (is (string? subscription))
+            (is (= "2" (some :value (nrepl/request client {:op "eval" :code "(trace.me/f 1)"}))))
+            (is (= [{:phase "call" :name "trace.me/f" :depth 0 :args ["1"]}
+                    {:phase "return" :name "trace.me/f" :depth 0 :value "2"}]
+                   @events))
+            (features/unsubscribe-traces client subscription)
+            (is (zero? (test-server/trace-subscribers)))))
+        (finally
+          (features/untrace-all client))))))
+
+(deftest trace-without-cider-test
+  (let [srv (server/start-server :port 0)]
+    (try
+      (with-client [client {:port (:port srv)}]
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Tracing takes cider-nrepl"
+                              (features/trace client ["inc"] {:ns "user"} true)))
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Tracing takes cider-nrepl" (features/traced client)))
+        (is (nil? (features/subscribe-traces client))))
+      (finally
+        (server/stop-server srv)))))

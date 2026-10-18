@@ -6,13 +6,19 @@
             [neorepl.features :as features]
             [neorepl.render :as render]))
 
+(defn- untraceable?
+  "Whether tracing, or untracing, didn't find something to trace."
+  [{:keys [results]}]
+  (boolean (some #(#{"not-found" "not-traceable"} (:status %)) results)))
+
 (def all
   "Each lookup takes the :arg it names, unless it has none: :code-arg? says
   that's code, :args? that it's several, as a seq, and :optional? that it can
   be left out. Its :find takes the client, a context with the :ns to look in,
   the :session and the session's :session-name, if it has one, as
   neorepl.features has it, and the argument. :text turns what it finds into
-  text, code when :code? says so, and :none says what finding nothing means."
+  text, code when :code? says so, and :none says what finding nothing means.
+  :failed? says whether what it found means it failed after all."
   [{:name "doc" :arg "SYM" :help "Show the documentation of SYM"
     :find (fn [client ctx sym] (features/info client sym ctx))
     :text render/doc-text
@@ -50,6 +56,22 @@
                  (if (seq reloaded)
                    (str "Reloaded " (str/join ", " reloaded))
                    "Nothing changed")))}
+   {:name "trace" :arg "SYM..." :args? true :optional? true
+    :help "Trace the functions SYM, or a namespace's, or list what's traced"
+    :find (fn [client ctx syms]
+            (if (seq syms)
+              {:results (features/trace client syms ctx true)}
+              (features/traced client)))
+    :text render/tracing-text
+    :failed? untraceable?}
+   {:name "untrace" :arg "SYM..." :args? true :optional? true
+    :help "Stop tracing the functions SYM, or a namespace's, or everything"
+    :find (fn [client ctx syms]
+            (if (seq syms)
+              {:results (features/trace client syms ctx false)}
+              (features/untrace-all client)))
+    :text render/tracing-text
+    :failed? untraceable?}
    {:name "pst" :help "Show the stack trace of the last error"
     :find (fn [client {:keys [session]} _] (features/last-error client session))
     :text render/error-text
@@ -60,10 +82,12 @@
   (some #(when (= name (:name %)) %) all))
 
 (defn run
-  "Does the lookup called name: {:found what-it-found :text as-text}, or
-  {:none what-that-means} when it finds nothing."
+  "Does the lookup called name: {:found what-it-found :text as-text}, with
+  :failed? true when what it found means it failed, or {:none
+  what-that-means} when it finds nothing."
   [name client ctx arg]
-  (let [{:keys [find text none]} (lookup name)]
+  (let [{:keys [find text none failed?]} (lookup name)]
     (if-let [found (find client ctx arg)]
-      {:found found :text (text found)}
+      (cond-> {:found found :text (text found)}
+        (and failed? (failed? found)) (assoc :failed? true))
       {:none (none ctx arg)})))

@@ -467,6 +467,27 @@
       (is (= 1 status))
       (is (str/includes? err "takes cider-nrepl")))))
 
+(deftest trace-test
+  ;; In a session of its own, which the ns form moves.
+  (run "-s" "tracing" "(ns traced.cli) (defn f [x] (inc x))")
+  (try
+    (is (= {:status 0 :out "Tracing traced.cli/f\n" :err ""} (run-command "trace" "--ns" "traced.cli" "f")))
+    (testing "the calls, in the evaluation's output"
+      (is (= {:status 0 :out "(traced.cli/f 1)\n└─→ 2\n2\n" :err ""} (run "-s" "tracing" "(traced.cli/f 1)"))))
+    (testing "what's traced"
+      (is (= {:status 0 :out "traced.cli/f\n" :err ""} (run-command "trace")))
+      (is (= {:nses [] :vars ["traced.cli/f"]} (edn/read-string (:out (run-command "trace" "--format" "edn"))))))
+    (testing "what can't be traced"
+      (is (= {:status 1 :out "Already tracing traced.cli/f\nNo var or namespace called nope\n" :err ""}
+             (run-command "trace" "traced.cli/f" "nope"))))
+    (testing "untracing"
+      (is (= {:status 0 :out "Stopped tracing traced.cli/f\n" :err ""} (run-command "untrace" "traced.cli/f")))
+      (run-command "trace" "traced.cli")
+      (is (= {:status 0 :out "Stopped tracing 1 function\n" :err ""} (run-command "untrace")))
+      (is (= {:status 0 :out "Nothing's traced\n" :err ""} (run-command "trace"))))
+    (finally
+      (run-command "untrace"))))
+
 (deftest pst-test
   (run "-s" "pst" "(throw (ex-info \"boom\" {:k 1}))")
   (let [{:keys [status out]} (run-command "pst" "-s" "pst")]
@@ -766,7 +787,9 @@
     ["test" "--help"] "Usage: neorepl test"
     ["retest" "--help"] "Usage: neorepl retest"
     ["inspect" "--help"] "Usage: neorepl inspect"
-    ["server" "--help"] "Usage: neorepl server"))
+    ["server" "--help"] "Usage: neorepl server"
+    ["trace" "--help"] "Usage: neorepl trace"
+    ["untrace" "--help"] "Usage: neorepl untrace"))
 
 (defn- words
   "The words of a shell command, with single quotes."

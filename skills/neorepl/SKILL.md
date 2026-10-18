@@ -1,6 +1,6 @@
 ---
 name: neorepl
-description: Work with a running Clojure, ClojureScript or babashka program through its nREPL server, with the neorepl command line client. Use it to evaluate code, load edited files, run tests, look up docs and source, read stack traces and repair unbalanced parens.
+description: Work with a running Clojure, ClojureScript or babashka program through its nREPL server, with the neorepl command line client. Use it to evaluate code, load edited files, run tests, look up docs and source, read stack traces, trace function calls and repair unbalanced parens.
 ---
 
 # neorepl
@@ -80,6 +80,16 @@ evaluation left running by a call that got killed.
 the stack trace of the session's last error. `neorepl test` prints each
 failure with what it expected, what it got and where, and `neorepl retest
 -s agent` reruns only the tests that didn't pass.
+
+To see how a function gets called, and what it returns, trace it, run the
+code that calls it, and stop tracing it after. It takes cider-nrepl on the
+server:
+
+```shell
+neorepl trace my.app/parse-date
+neorepl eval -s agent '(my.app/import "data.csv")'
+neorepl untrace my.app/parse-date
+```
 
 ## Looking things up
 
