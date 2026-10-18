@@ -104,3 +104,30 @@
                                  [{:text "--- Contents:"}]
                                  [{:text "  0. "} {:text "{:a 1," :index 1}]
                                  [{:text " :b 2}" :index 1 :continued true} {:text "  "}]]))))
+
+(deftest tracing-text-test
+  (testing "what happened to each var or namespace"
+    (is (= (str "Tracing my.app/f\nTracing every function in my.db\nAlready tracing my.app/g\n"
+                "Stopped tracing my.app/h\nWasn't tracing my.app/i\n"
+                "Can't trace clojure.core/when, which is a macro or not a function\n"
+                "No var or namespace called nope")
+           (render/tracing-text {:results [{:var "my.app/f" :status "traced"}
+                                           {:ns "my.db" :status "traced"}
+                                           {:var "my.app/g" :status "already-traced"}
+                                           {:var "my.app/h" :status "untraced"}
+                                           {:var "my.app/i" :status "not-traced"}
+                                           {:var "clojure.core/when" :status "not-traceable"}
+                                           {:name "nope" :status "not-found"}]}))))
+  (testing "what's traced"
+    (is (= "my.app/f\nevery function in my.db" (render/tracing-text {:nses ["my.db"] :vars ["my.app/f"]})))
+    (is (= "Nothing's traced" (render/tracing-text {:nses [] :vars []}))))
+  (testing "untracing everything"
+    (are [n text] (= text (render/tracing-text {:untraced n}))
+      0 "Nothing was traced"
+      1 "Stopped tracing 1 function")))
+
+(deftest trace-event-text-test
+  (are [event text] (= text (render/trace-event-text event))
+    {:phase "call" :name "my.app/f" :depth 0 :args ["1" "\"a\""]} "(my.app/f 1 \"a\")"
+    {:phase "call" :name "my.app/g" :depth 2 :args []} "│ │ (my.app/g)"
+    {:phase "return" :name "my.app/g" :depth 1 :value "{:a 1}"} "│ └─→ {:a 1}"))

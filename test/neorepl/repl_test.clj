@@ -13,8 +13,18 @@
 
 (use-fixtures :once (test-server/fixture))
 
-(defn- strip-ansi [s]
-  (str/replace s #"\u001b\[[0-9;?]*[A-Za-z]|\u001b[=>]|\r" ""))
+(def ^:private line-drawing
+  "The box drawing characters JLine draws with the terminal's line drawing
+  set, by the characters it sends for them."
+  {\j "┘" \k "┐" \l "┌" \m "└" \q "─" \t "├" \u "┤" \v "┴" \w "┬" \x "│"})
+
+(defn- strip-ansi
+  "s without the ANSI codes, and with the line drawing set's characters as
+  the box drawing ones they stand for."
+  [s]
+  (-> s
+      (str/replace #"\u001b\(0([^\u001b]*)\u001b\(B" #(str/escape (second %) line-drawing))
+      (str/replace #"\u001b\[[0-9;?]*[A-Za-z]|\u001b[=>]|\r" "")))
 
 (defn- call-with-repl
   "Starts a REPL on a fake terminal, with the editor options in opts, and
@@ -280,6 +290,44 @@
       (testing "and code pasted after a command runs after it"
         (type "\u001b[200~,doc inc\n(+ 40 2)\u001b[201~\r")
         (is (screen #"clojure\.core/inc\n(?s).*\n42\nuser=> $"))))))
+
+(deftest trace-test
+  (with-client [client {:port *port*}]
+    (try
+      (call-with-repl {}
+        (fn [type screen]
+          (type "(defn traced-in-repl [x] (inc x))\r")
+          (type ",trace traced-in-repl\r")
+          (is (screen #"Tracing user/traced-in-repl\nuser=> $"))
+          (is (= 1 (test-server/trace-subscribers)))
+          (type "(traced-in-repl 1)\r")
+          (is (screen #"\(user/traced-in-repl 1\)\n└─→ 2\n2\nuser=> $"))
+          (testing "on other threads, after the evaluation"
+            (type "(do (future (Thread/sleep 200) (traced-in-repl 2)) nil)\r")
+            ;; Each goes above the prompt, which gets redrawn below.
+            (is (screen #"\(user/traced-in-repl 2\)\nuser=> └─→ 3\nuser=> $")))
+          (type ",trace\r")
+          (is (screen #"\nuser/traced-in-repl\nuser=> $"))
+          (type ",untrace\r")
+          (is (screen #"Stopped tracing 1 function\nuser=> $"))
+          (testing "and the server prints them again once nothing's traced"
+            (is (zero? (test-server/trace-subscribers))))
+          (type ",trace traced-in-repl\r")
+          (is (screen #"Tracing user/traced-in-repl\nuser=> $"))
+          (is (= 1 (test-server/trace-subscribers)))))
+      (testing "or once the REPL's done"
+        (is (zero? (test-server/trace-subscribers))))
+      (testing "the server printing them when there's no subscribing"
+        (reset! test-server/refuse-trace-subscriptions? true)
+        (call-with-repl {}
+          (fn [type screen]
+            (type ",trace traced-in-repl\r")
+            (is (screen #"Already tracing user/traced-in-repl\nuser=> $"))
+            (type "(traced-in-repl 1)\r")
+            (is (screen #"\(user/traced-in-repl 1\)\n└─→ 2\n2\nuser=> $")))))
+      (finally
+        (reset! test-server/refuse-trace-subscriptions? false)
+        (features/untrace-all client)))))
 
 (deftest inspect-test
   (let [{:keys [out]}

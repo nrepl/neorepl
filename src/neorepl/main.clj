@@ -574,23 +574,25 @@ when there's no server to talk to."
 
 (defn- report-lookup
   "Does the lookup called name, see neorepl.lookups, and prints what it found
-  in format. Returns the exit status: 0, or 1 when it found nothing."
+  in format. Returns the exit status: 0, or 1 when it found nothing or what
+  it found says it failed."
   [format name client ctx arg]
-  (let [{:keys [found text none]} (lookups/run name client ctx arg)]
+  (let [{:keys [found text none failed?]} (lookups/run name client ctx arg)]
     (if found
       (do (if (= "text" format)
             (println text)
             (emit format found))
-          0)
+          (if failed? 1 0))
       (do (report format {:status "not-found" :message none})
           1))))
 
 (defn- lookup-command
-  "The command doing the lookup called name on its one argument."
+  "The command doing the lookup called name on its one argument, or on all of
+  them when it takes several."
   [name]
-  (let [arg-name (:arg (lookups/lookup name))]
+  (let [{arg-name :arg :keys [args?]} (lookups/lookup name)]
     (fn [{:keys [ns format] :as options} args {:keys [dir]}]
-      (let [arg (the-arg args arg-name)]
+      (let [arg (if args? args (the-arg args arg-name))]
         (with-client options dir
           #(report-lookup format name % {:ns ns} arg))))))
 
@@ -696,6 +698,41 @@ and 3 when there's no server to talk to."
 (defn- reload-command [{:keys [format] :as options} args {:keys [dir]}]
   (with-client options dir
     #(report-lookup format "reload" % {} args)))
+
+(def ^:private trace-help
+  (help-text
+   "Usage: neorepl trace [options] [SYM...]"
+   "Traces the functions SYM, or every function in a namespace SYM, so each
+call prints its arguments and what it returns, nested in the calls it's in.
+Without SYM it lists what's traced. Calls print in the output of the
+evaluation that makes them, as neorepl eval shows it, and calls on other
+threads where those threads print, unless a neorepl REPL on the server is
+showing them. It takes cider-nrepl on the server, and listing takes 0.60 or
+later."
+   lookup-options
+   discovery-note
+   "Exit status: 0 when everything SYM names is traced, 1 when something
+isn't a function or a namespace, 2 on usage errors and 3 when there's no
+server to talk to."
+   "Examples:
+  neorepl trace my.app/start
+  neorepl trace --ns my.app start parse-date
+  neorepl trace my.app.db"))
+
+(def ^:private untrace-help
+  (help-text
+   "Usage: neorepl untrace [options] [SYM...]"
+   "Stops tracing the functions SYM, or the functions in a namespace SYM.
+Without SYM it stops tracing everything, which takes cider-nrepl 0.60 or
+later on the server."
+   lookup-options
+   discovery-note
+   "Exit status: 0 when nothing SYM names is traced anymore, 1 when something
+isn't a function or a namespace, 2 on usage errors and 3 when there's no
+server to talk to."
+   "Examples:
+  neorepl untrace my.app/start
+  neorepl untrace"))
 
 (def ^:private pst-options
   (concat connection-options [session-option] common-options))
@@ -1022,6 +1059,10 @@ eval --session NAME and the eval tool with that session see the same *ns*,
     :main macroexpand-command}
    {:name "where" :summary "Show where a var is defined" :options lookup-options :help where-help
     :main (lookup-command "where")}
+   {:name "trace" :summary "Trace functions" :options lookup-options :help trace-help
+    :main (lookup-command "trace")}
+   {:name "untrace" :summary "Stop tracing functions" :options lookup-options :help untrace-help
+    :main (lookup-command "untrace")}
    {:name "reload" :summary "Reload code" :options reload-options :help reload-help
     :main reload-command}
    {:name "test" :summary "Run tests" :options test-options :help test-help :main test-command}

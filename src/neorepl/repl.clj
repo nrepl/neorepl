@@ -242,6 +242,19 @@
   (nrepl/request client {:op "eval" :session session
                          :code (format "(clojure.core/in-ns (clojure.core/symbol %s))" (pr-str ns))}))
 
+(def ^:private follow-ups
+  "What the REPL does after some lookups, by name, given command-output's
+  state and what the lookup found."
+  {"reload" (fn [{:keys [client session ns]} _]
+              (reenter client session ns))
+   "trace" (fn [{:keys [show-traces]} {:keys [results]}]
+             (when (some #(#{"traced" "already-traced"} (:status %)) results)
+               (show-traces)))
+   "untrace" (fn [{:keys [hide-traces]} {:keys [untraced]}]
+               ;; Everything, that is.
+               (when untraced
+                 (hide-traces)))})
+
 (defn- command-output
   "Runs the command called name with arg, and returns what to print, as a
   response for the REPL's printer, or :quit. state has the :client, the
@@ -249,8 +262,9 @@
   to run it with the terminal :suspended, for ,edit, a function that
   :evaluates the way the REPL does, for ,test and ,inspect, and one to
   :browse what ,inspect and ,stacktrace find, as browser/browse does, partly
-  applied to the editor, if the REPL can, and an atom with the last test
-  run's :test-errors."
+  applied to the editor, if the REPL can, an atom with the last test run's
+  :test-errors and functions that have the REPL :show-traces and
+  :hide-traces."
   [{:keys [client] :as state} name arg]
   (let [{arg-name :arg :keys [code? args? optional?] :as command} (command name)]
     (cond
@@ -262,9 +276,8 @@
       :else (try
               (if-let [run (:run command)]
                 (run state arg)
-                (let [{:keys [text none]} (lookups/run name client state (if args? (some-> arg (str/split #"\s+")) arg))]
-                  (when (= "reload" name)
-                    (reenter client (:session state) (:ns state)))
+                (let [{:keys [found text none]} (lookups/run name client state (if args? (some-> arg (str/split #"\s+")) arg))]
+                  (some-> (follow-ups name) (apply [state found]))
                   (cond
                     none (out none)
                     code? {:value text}
@@ -300,6 +313,19 @@
         late (agent nil :error-mode :continue)
         ;; The errors of the last test run, until an evaluation fails.
         test-errors (atom nil)
+        ;; The subscription to trace events, once something's traced.
+        traces (atom nil)
+        ;; Without one, the server prints trace events, so failing to get
+        ;; one isn't worth more than that.
+        show-traces #(when-not @traces
+                       (reset! traces (try
+                                        (features/subscribe-traces client)
+                                        (catch clojure.lang.ExceptionInfo _ nil))))
+        ;; So the server prints them for other clients again.
+        hide-traces #(when-let [subscription (first (reset-vals! traces nil))]
+                       (try
+                         (features/unsubscribe-traces client subscription)
+                         (catch Exception _)))
         ;; Evaluates with (run opts), opts being evaluation/evaluate's, and
         ;; returns the result after printing its message.
         evaluate (fn [run]
@@ -312,7 +338,11 @@
                                  :on-interrupt-failed
                                  #(do (reset! interrupted nil)
                                       (print-message "The server can't interrupt the evaluation, Ctrl-C again stops waiting for it"))
-                                 :on-response print-response
+                                 ;; Trace events go out before the
+                                 ;; responses after them, but by way of
+                                 ;; late, which has them in hand by then.
+                                 :on-response #(do (when @traces (await-for 1000 late))
+                                                   (print-response %))
                                  ;; A Ctrl-C that came before the server
                                  ;; asked for a line is for the read too.
                                  :read-line #(if @interrupted :interrupted (read-line))
@@ -331,31 +361,41 @@
                      result))]
     ;; Late output comes on the client's reader thread, which mustn't wait
     ;; for the terminal: it has the responses lookups are waiting for.
-    (nrepl/on-unclaimed! client #(send-off late (fn [_] (print-response %))))
-    ;; Not necessarily user: shadow-cljs starts sessions in shadow.user, and a
-    ;; named session is wherever it was left.
-    (loop [ns (or (nrepl/session-ns client session) "user")
-           pending nil]
-      (let [code (or pending (read-code ns))
-            [name arg more] (some-> code command-call)
-            output (when name
-                     (reset! command-thread (Thread/currentThread))
-                     (try
-                       (command-output (assoc io :client client :session session :ns ns :evaluate evaluate
-                                                  :test-errors test-errors)
-                                       name arg)
-                       (finally
-                         (reset! command-thread nil)
-                         ;; In case Ctrl-C came after the command was done.
-                         (Thread/interrupted))))]
-        (cond
-          (or (nil? code) (= ":repl/quit" (str/trim code)) (= :quit output)) nil
-          (str/blank? code) (recur ns nil)
-          output (do (print-response output)
-                     (recur ns more))
-          :else
-          (let [result (evaluate #(evaluation/evaluate client (eval-msg session code (width)) %))]
-            (recur (or (:ns result) ns) nil)))))))
+    ;; So do trace events.
+    (nrepl/on-unclaimed! client #(send-off late (fn [_]
+                                                 (print-response (if-let [event (:cider/trace-event %)]
+                                                                   (out (render/trace-event-text event))
+                                                                   %)))))
+    (shutdown/call-with-cleanup
+     ;; Or the server goes on sending the events nowhere, rather than
+     ;; printing them.
+     hide-traces
+     (fn []
+       ;; Not necessarily user: shadow-cljs starts sessions in shadow.user,
+       ;; and a named session is wherever it was left.
+       (loop [ns (or (nrepl/session-ns client session) "user")
+              pending nil]
+         (let [code (or pending (read-code ns))
+               [name arg more] (some-> code command-call)
+               output (when name
+                        (reset! command-thread (Thread/currentThread))
+                        (try
+                          (command-output (assoc io :client client :session session :ns ns :evaluate evaluate
+                                                    :test-errors test-errors :show-traces show-traces
+                                                    :hide-traces hide-traces)
+                                          name arg)
+                          (finally
+                            (reset! command-thread nil)
+                            ;; In case Ctrl-C came after the command was done.
+                            (Thread/interrupted))))]
+           (cond
+             (or (nil? code) (= ":repl/quit" (str/trim code)) (= :quit output)) nil
+             (str/blank? code) (recur ns nil)
+             output (do (print-response output)
+                        (recur ns more))
+             :else
+             (let [result (evaluate #(evaluation/evaluate client (eval-msg session code (width)) %))]
+               (recur (or (:ns result) ns) nil)))))))))
 
 (defn- read-input
   "Reads lines from *in* until they hold complete forms, or nil at the end of

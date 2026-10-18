@@ -713,3 +713,114 @@
   [client session index ex-data? page-size]
   (inspector client session (cond-> {:op "inspect-last-exception" :index index :page-size page-size}
                               ex-data? (assoc :ex-data "true"))))
+
+(defn- check-tracer
+  "Throws unless the server can do op, a trace op."
+  [client op]
+  (when-not (supports? client op)
+    (throw (ex-info (if (supports? client "toggle-trace-var")
+                      "That takes cider-nrepl 0.60 or later on the server"
+                      "Tracing takes cider-nrepl on the server")
+                    {:type ::failed}))))
+
+(defn- var-name
+  "A var's name, the way cider-nrepl prints the var, without the #'."
+  [s]
+  (str/replace-first s #"^#'" ""))
+
+(defn- toggle-trace-ns
+  "Toggles tracing the namespace called name and returns the :ns and its
+  :status, traced or untraced, or the :name and not-found."
+  [client name opts]
+  (let [{:keys [ns-status]} (apply merge (nrepl/request client {:op "toggle-trace-ns" :ns name} opts))]
+    (if (#{"traced" "untraced"} ns-status)
+      {:ns name :status ns-status}
+      {:name name :status "not-found"})))
+
+(declare traced)
+
+(defn- trace-ns
+  "Traces the namespace called name when on?, or stops tracing it, as trace
+  does. Toggling a namespace traces, or untraces, every function in it,
+  including the ones traced on their own, so with cider-nrepl 0.60 or later,
+  which says what's traced, it only toggles when that changes something."
+  [client name on? opts]
+  (let [traced? (when (supports? client "cider/list-traced")
+                  (contains? (set (:nses (traced client opts))) name))]
+    (cond
+      (and on? traced?) {:ns name :status "already-traced"}
+      (and (false? traced?) (not on?))
+      (if (eval-data client {:ns "user"} "(some? (find-ns (symbol %s)))" [name] opts)
+        {:ns name :status "not-traced"}
+        {:name name :status "not-found"})
+      :else
+      (let [{:keys [status] :as result} (toggle-trace-ns client name opts)]
+        (if (= status (if on? "untraced" "traced"))
+          ;; It was that way already, so back it goes.
+          (do (toggle-trace-ns client name opts)
+              (assoc result :status (if on? "already-traced" "not-traced")))
+          result)))))
+
+(defn- trace-one
+  "Traces name when on?, or stops tracing it, as trace does: a var, resolved
+  in ns, or else a namespace."
+  [client name ns on? opts]
+  (let [msg {:op "toggle-trace-var" :ns ns :sym name}
+        {the-var :var-name :keys [var-status err]} (apply merge (nrepl/request client msg opts))]
+    (case var-status
+      ;; It failed, as when ns isn't there.
+      nil (throw (ex-info (str "The server couldn't trace " name (some->> err str/split-lines first (str ": ")))
+                          {:type ::failed}))
+      "not-found" (trace-ns client name on? opts)
+      "not-traceable" {:var (var-name the-var) :status var-status}
+      (if (= var-status (if on? "traced" "untraced"))
+        {:var (var-name the-var) :status var-status}
+        ;; cider-nrepl only toggles, so back it goes.
+        (do (nrepl/request client msg opts)
+            {:var (var-name the-var) :status (if on? "already-traced" "not-traced")})))))
+
+(defn trace
+  "Traces the functions names name, vars resolved in ctx's :ns or
+  namespaces, when on?, or stops tracing them, with cider-nrepl. Returns
+  what happened to each: the :var, qualified, the :ns, or the :name when
+  there's nothing called that, and the :status: traced, untraced,
+  already-traced or not-traced when it was that way already, not-traceable,
+  as macros are, or not-found."
+  ([client names ctx on?] (trace client names ctx on? {}))
+  ([client names {:keys [ns]} on? opts]
+   (check-tracer client "toggle-trace-var")
+   (mapv #(trace-one client % ns on? opts) names)))
+
+(defn traced
+  "What's traced: the :nses, and the :vars outside them, qualified."
+  ([client] (traced client {}))
+  ([client opts]
+   (check-tracer client "cider/list-traced")
+   (let [{:keys [traced-nses traced-vars]} (apply merge (ask client {:op "cider/list-traced"} opts))
+         nses (set traced-nses)]
+     {:nses (vec (sort traced-nses))
+      :vars (vec (sort (remove #(nses (namespace (symbol %)))
+                               (map var-name traced-vars))))})))
+
+(defn untrace-all
+  "Stops tracing everything and returns how many vars were traced, as
+  {:untraced n}."
+  ([client] (untrace-all client {}))
+  ([client opts]
+   (check-tracer client "cider/untrace-all")
+   {:untraced (or (some :untraced-count (ask client {:op "cider/untrace-all"} opts)) 0)}))
+
+(defn subscribe-traces
+  "Has the server send client trace events instead of printing what traced
+  functions do, when it has cider-nrepl 0.60 or later, and returns the
+  subscription, for unsubscribe-traces, or nil when it can't. The events
+  are responses with a :cider/trace-event, which come after the
+  subscription's done, so they go where the client's unclaimed responses
+  go. Printing what traced functions do is for the whole server, and stays
+  off until the last subscription ends."
+  [client]
+  (when (supports? client "cider/trace-subscribe")
+    (some :cider/trace-subscribe (ask client {:op "cider/trace-subscribe"} {}))))
+
+(defn unsubscribe-traces [client subscription]
+  (ask client {:op "cider/trace-unsubscribe" :subscription subscription} {}))

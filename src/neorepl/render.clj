@@ -151,3 +151,32 @@
   (str/join "\n" (for [line lines]
                    (str/trimr (str/join (for [{:keys [text index continued]} line]
                                           (str (when-not continued (some->> index (format "[%d]"))) text)))))))
+
+(defn tracing-text
+  "What trace, untrace and the like did: the :results of tracing or
+  untracing, a line each, what's traced, as the :nses and :vars, or how many
+  vars got :untraced."
+  [{:keys [results nses vars untraced]}]
+  (cond
+    results (str/join "\n" (for [{:keys [status var ns name]} results
+                                 :let [what (or var (str "every function in " ns))]]
+                             (case status
+                               "traced" (str "Tracing " what)
+                               "untraced" (str "Stopped tracing " what)
+                               "already-traced" (str "Already tracing " what)
+                               "not-traced" (str "Wasn't tracing " what)
+                               "not-traceable" (str "Can't trace " var ", which is a macro or not a function")
+                               "not-found" (str "No var or namespace called " name))))
+    (= 0 untraced) "Nothing was traced"
+    untraced (str "Stopped tracing " (counted untraced "function"))
+    (or (seq nses) (seq vars)) (str/join "\n" (concat vars (map #(str "every function in " %) nses)))
+    :else "Nothing's traced"))
+
+(defn trace-event-text
+  "A traced call, or its return, the way orchard prints them, a line under
+  the calls it's in: the call, with the arguments, or └─→ and the value."
+  [{:keys [phase name args value depth]}]
+  (str (str/join (repeat depth "│ "))
+       (if (= "call" phase)
+         (str "(" (str/join " " (cons name args)) ")")
+         (str "└─→ " value))))

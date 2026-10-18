@@ -29,7 +29,7 @@ TAB completes, the arglists of the function you're calling show up after
 the cursor and C-x C-d shows the documentation of what's at the cursor.
 Commands start with a comma, the CIDER way: `,doc`, `,source`, `,apropos`,
 `,macroexpand`, `,pst` for the last error's stack trace, `,stacktrace` to
-browse it, `,reload`, `,test`, `,inspect`, `,edit` to open a definition in
+browse it, `,reload`, `,test`, `,inspect`, `,trace`, `,edit` to open a definition in
 your `$EDITOR`, and `,help` for the rest.
 Without a terminal, say in a pipe or Emacs' `M-x shell`, it works like
 `clojure.main`'s REPL instead.
@@ -142,6 +142,21 @@ repeats of the same function. With cider-nrepl, `i` inspects the cause the
 frame's in and `d` its ex-data, and `q` brings you back. After a `,test`
 with errors it shows those, each under the test it's from, until an
 evaluation fails.
+
+`,trace` traces functions, or every function in a namespace, so each call
+shows its arguments and what it returns, nested in the calls it's in.
+`,trace` without a name lists what's traced and `,untrace` stops, for the
+functions named or everything. In the REPL, calls on other threads, like an
+HTTP handler's, show up above the prompt too. `neorepl trace` and `neorepl
+untrace` do the same for scripts and agents, the calls showing up in the
+output of the `neorepl eval` that makes them. Tracing takes cider-nrepl on
+the server:
+
+```shell
+neorepl trace my.app/handler my.app.db
+neorepl eval '(my.app/handler {:uri "/"})'
+neorepl untrace
+```
 
 `neorepl check` finds unbalanced parens, brackets and braces, the most
 common way for an edit (or a coding agent) to break a Clojure file. It

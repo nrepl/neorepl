@@ -162,13 +162,115 @@
                             {:expects #{"eval" #'print/wrap-print}
                              :handles (zipmap inspect-ops (repeat {}))})
 
+(def ^:private traced
+  "The vars wrap-fake-tracer traces, and what they held before."
+  (atom {}))
+
+(def ^:private traced-nses (atom #{}))
+
+(def ^:private trace-subscriptions
+  "The trace-subscribe messages wrap-fake-tracer sends events for, by id."
+  (atom {}))
+
+(def refuse-trace-subscriptions?
+  "Whether wrap-fake-tracer answers trace-subscribe with an error."
+  (atom false))
+
+(defn- traced-call
+  "Calls f, the var called name traces, with args, saying so the way
+  cider-nrepl does: printing the call and its value, unless there are
+  subscriptions, which get events instead. Nested calls don't get indented."
+  [name f args]
+  (let [subscriptions (vals @trace-subscriptions)
+        tell (fn [event]
+               (doseq [msg subscriptions]
+                 (transport/respond-to msg "cider/trace-event" (assoc event :name name :depth 0)
+                                       :status "cider/trace-event")))]
+    (if (seq subscriptions)
+      (tell {:phase "call" :args (mapv pr-str args)})
+      (println (str "(" (str/join " " (cons name (map pr-str args))) ")")))
+    (let [value (apply f args)]
+      (if (seq subscriptions)
+        (tell {:phase "return" :value (pr-str value)})
+        (println (str "└─→ " (pr-str value))))
+      value)))
+
+(defn- toggle-trace!
+  "Traces v, or stops tracing it, and returns which: traced or untraced."
+  [v]
+  (if-let [f (get @traced v)]
+    (do (alter-var-root v (constantly f))
+        (swap! traced dissoc v)
+        "untraced")
+    (let [name (str (symbol v))]
+      (swap! traced assoc v @v)
+      (alter-var-root v (fn [f] (fn [& args] (traced-call name f args))))
+      "traced")))
+
+(defn- traceable? [v]
+  (and (var? v) (fn? @v) (not (:macro (meta v)))))
+
+(defn wrap-fake-tracer
+  "Traces functions the way cider-nrepl does, roughly, with its trace ops,
+  and sends trace events after the trace-subscribe's done, as it does."
+  [handler]
+  (fn [{:keys [op ns sym subscription] :as msg}]
+    (case op
+      "toggle-trace-var"
+      (let [v (try (ns-resolve (symbol ns) (symbol sym)) (catch Exception e e))]
+        (cond
+          ;; As when ns isn't there.
+          (instance? Exception v) (transport/respond-to msg :ex (str (class v)) :err (str v "\n")
+                                                        :status ["done" "toggle-trace-error"])
+          (not (var? v)) (transport/respond-to msg :var-status "not-found" :status ["done" "toggle-trace-error"])
+          (not (traceable? v)) (transport/respond-to msg :var-name (str v) :var-status "not-traceable" :status "done")
+          :else (transport/respond-to msg :var-name (str v) :var-status (toggle-trace! v) :status "done")))
+      "toggle-trace-ns"
+      (if-let [the-ns (find-ns (symbol ns))]
+        (let [on? (not (contains? @traced-nses the-ns))]
+          (swap! traced-nses (if on? conj disj) the-ns)
+          (doseq [v (filter traceable? (vals (ns-interns the-ns)))
+                  :when (= on? (not (contains? @traced v)))]
+            (toggle-trace! v))
+          (transport/respond-to msg :ns-status (if on? "traced" "untraced") :status "done"))
+        (transport/respond-to msg :ns-status "not-found" :status "done"))
+      "cider/list-traced"
+      (transport/respond-to msg :traced-vars (mapv str (keys @traced)) :traced-nses (mapv str @traced-nses)
+                            :status "done")
+      "cider/untrace-all"
+      (let [n (count @traced)]
+        (run! toggle-trace! (keys @traced))
+        (reset! traced-nses #{})
+        (transport/respond-to msg :untraced-count n :status "done"))
+      "cider/trace-subscribe"
+      (if @refuse-trace-subscriptions?
+        (transport/respond-to msg :status ["done" "trace-subscribe-error"])
+        (let [id (str (java.util.UUID/randomUUID))]
+          (swap! trace-subscriptions assoc id msg)
+          (transport/respond-to msg "cider/trace-subscribe" id :status "done")))
+      "cider/trace-unsubscribe"
+      (do (swap! trace-subscriptions dissoc subscription)
+          (transport/respond-to msg "cider/trace-unsubscribe" subscription :status "done"))
+      (handler msg))))
+
+(def trace-ops
+  #{"toggle-trace-var" "toggle-trace-ns" "cider/list-traced" "cider/untrace-all"
+    "cider/trace-subscribe" "cider/trace-unsubscribe"})
+
+(middleware/set-descriptor! #'wrap-fake-tracer {:handles (zipmap trace-ops (repeat {}))})
+
+(defn trace-subscribers
+  "How many trace subscriptions wrap-fake-tracer has."
+  []
+  (count @trace-subscriptions))
+
 (defn fixture
   "A :once fixture that runs the tests with an nREPL server listening on
-  *port*, with wrap-stuck and wrap-fake-inspector unless opts, which go to
-  nrepl.server/start-server, give it a :handler."
+  *port*, with wrap-stuck, wrap-fake-inspector and wrap-fake-tracer unless
+  opts, which go to nrepl.server/start-server, give it a :handler."
   [& opts]
   (fn [f]
-    (let [srv (apply server/start-server :port 0 :handler (server/default-handler #'wrap-stuck #'wrap-fake-inspector) opts)]
+    (let [srv (apply server/start-server :port 0 :handler (server/default-handler #'wrap-stuck #'wrap-fake-inspector #'wrap-fake-tracer) opts)]
       (try
         (binding [*port* (:port srv)]
           (f))
