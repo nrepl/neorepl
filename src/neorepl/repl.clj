@@ -316,8 +316,9 @@
 
   What an interrupted evaluation says from then on is left out, since it
   comes from it dying: an InterruptedException, or code carrying on after a
-  read from *in* got cut short. So is what evaluations say once neorepl's
-  exiting, which interrupts them."
+  read from *in* got cut short or catching the interrupt, as clojure.test
+  does, even once the next evaluation's started. So is what evaluations say
+  once neorepl's exiting, which interrupts them."
   [client session {:keys [running interrupted command-thread]}
    {:keys [read-code read-line width print-response print-message] :as io}]
   (let [print-response #(let [stopped @interrupted
@@ -346,7 +347,6 @@
         ;; Evaluates with (run opts), opts being evaluation/evaluate's, and
         ;; returns the result after printing its message.
         evaluate (fn [run]
-                   (reset! interrupted nil)
                    (let [{:keys [status message] :as result}
                          (try
                            (run {:on-send #(reset! running {:id %1 :interrupt %2})
@@ -362,7 +362,7 @@
                                                    (print-response %))
                                  ;; A Ctrl-C that came before the server
                                  ;; asked for a line is for the read too.
-                                 :read-line #(if @interrupted :interrupted (read-line))
+                                 :read-line #(if (= @interrupted (:id @running)) :interrupted (read-line))
                                  :collect? false})
                            (finally
                              (reset! running nil)))]

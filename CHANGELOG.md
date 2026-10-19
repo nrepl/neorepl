@@ -10,6 +10,7 @@
 ### Bug fixes
 
 - [#20](https://github.com/nrepl/neorepl/pull/20): Interrupting an evaluation the moment it's sent, with Ctrl-C, `--timeout` or an MCP cancellation, no longer fails because the server hasn't started running it yet.
+- [#21](https://github.com/nrepl/neorepl/pull/21): The REPL no longer shows what an interrupted evaluation prints or returns after the next one starts, like the report of a `,test` run that clojure.test finished despite the Ctrl-C.
 
 ## 0.3.0 (2026-10-17)
 

@@ -199,6 +199,16 @@
         (is (screen #"The evaluation was interrupted\nuser=> $"))
         (type "(+ 3 3)\r")
         (is (screen #"(?m)^6\nuser=> $")))))
+  (testing "what an interrupted evaluation says after it's left out, even once the next one's started"
+    (call-with-repl {}
+      (fn [type screen]
+        ;; Catching the interrupt, as clojure.test does.
+        (type "(try (println :sleeping) (Thread/sleep 20000) (catch InterruptedException _ (Thread/sleep 500) (println (str \"dying\" \" words\"))))\r")
+        (screen #":sleeping\n$")
+        (type "\u0003")
+        (screen #"The evaluation was interrupted\nuser=> $")
+        (type "(do (Thread/sleep 1000) :next)\r")
+        (is (not (re-find #"(?m)^dying words$" (screen #"(?m)^:next\nuser=> $")))))))
   (testing "Ctrl-C again stops waiting for an evaluation the server can't interrupt"
     (call-with-repl {}
       (fn [type screen]
