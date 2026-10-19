@@ -191,6 +191,15 @@
          (is isError)
          (is (= "Gave up waiting after 0.5s, while the server may still be reloading" (text {:result result}))))))))
 
+(deftest ports-test
+  (call-with-mcp
+   (fn [send receive]
+     (testing "none, for a project without port files"
+       (send (tool-call 1 "ports" {}))
+       (let [{{:keys [isError] :as result} :result} (receive)]
+         (is (false? isError))
+         (is (= "No port files" (text {:result result}))))))))
+
 (deftest client-test
   (testing "a connection whose server went away gets replaced"
     (let [opened (atom [])

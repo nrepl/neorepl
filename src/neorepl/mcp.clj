@@ -266,7 +266,9 @@
     :description "List the nREPL servers this project's port files point at, and whether they answer."
     :inputSchema (schema {})
     :run (fn [{:keys [dir]} _ _]
-           (let [ports (discovery/probe dir)]
+           (let [ports (try
+                         (discovery/probe dir)
+                         (catch clojure.lang.ExceptionInfo _ []))]
              (result (if (seq ports)
                        (str/join "\n" (for [{:keys [file port live]} ports]
                                         (str file " " port (when-not live " (not answering)"))))
