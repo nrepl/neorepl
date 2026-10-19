@@ -64,6 +64,12 @@
       (doseq [[id handler] waiting]
         (call handler {:id id :status ["done" "disconnected"]})))))
 
+(defn connected?
+  "Whether client's connection is up, as far as it's heard: once the server
+  goes away, nothing more can go out on it."
+  [{:keys [pending]}]
+  (some? @pending))
+
 (defn send!
   "Sends msg with a fresh :id and calls (handler response) for each of its
   responses, the last one being the one with status done. Handlers run on the
