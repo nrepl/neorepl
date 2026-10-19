@@ -120,7 +120,9 @@
          (is (str/includes? (text {:result result}) "Divide by zero"))))
      (testing "and its stack trace"
        (send (tool-call 4 "pst" {}))
-       (is (str/starts-with? (text (receive)) "java.lang.ArithmeticException: Divide by zero")))
+       (let [response (receive)]
+         (is (str/starts-with? (text response) "java.lang.ArithmeticException: Divide by zero"))
+         (is (= "java.lang.ArithmeticException" (get-in response [:result :structuredContent :causes 0 :class])))))
      (testing "output cut short"
        (send (tool-call 5 "eval" {:code "(apply str (repeat 2000 \"x\"))"}))
        (let [response (receive)]
@@ -132,7 +134,9 @@
        (send (tool-call 7 "doc" {:symbol "nope"}))
        (let [{{:keys [isError structuredContent]} :result} (receive)]
          (is (false? isError))
-         (is (= "not-found" (:status structuredContent))))))))
+         (is (= "not-found" (:status structuredContent))))
+       (send (tool-call 10 "apropos" {:regex "^mapcat$"}))
+       (is (= "clojure.core/mapcat" (get-in (receive) [:result :structuredContent :vars 0 :name])))))))
 
 (deftest sessions-test
   (testing "shared with the CLI"

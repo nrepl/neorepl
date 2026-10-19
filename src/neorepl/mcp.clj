@@ -116,6 +116,13 @@
            (result text found)
            (result none {:status "not-found" :message none})))))))
 
+(defn- wrap
+  "r, a tool's result, with its data under k if it's a list, since the
+  structured content of a result is an object."
+  [r k]
+  (cond-> r
+    (sequential? (:data r)) (update :data #(hash-map k %))))
+
 (defn- check
   "The first unbalanced delimiter in each of files, as neorepl check finds
   them, repaired, as neorepl check --fix does, if fix?."
@@ -184,7 +191,7 @@
    {:name "apropos"
     :description "Find vars whose names match a regex, with the first line of their docs."
     :inputSchema (schema (merge {:regex {:type "string"}} port-arg) "regex")
-    :run (fn [server {:keys [regex] :as args} _] (lookup server args "apropos" regex))}
+    :run (fn [server {:keys [regex] :as args} _] (wrap (lookup server args "apropos" regex) :vars))}
    {:name "macroexpand"
     :description "Expand the macro a form calls, or every macro in it with all."
     :inputSchema (schema (merge {:form {:type "string"}
@@ -211,8 +218,9 @@
     :description "Show the stack trace of the session's last error, minus the frames of the tooling."
     :inputSchema (schema (merge session-arg port-arg))
     :run (fn [{:keys [sessions-file] :as server} {:keys [session] :as args} _]
-           (lookup server args "pst" nil
-                   (fn [client] {:session (sessions/ensure! sessions-file client session) :session-name session})))}
+           (wrap (lookup server args "pst" nil
+                         (fn [client] {:session (sessions/ensure! sessions-file client session) :session-name session}))
+                 :causes))}
    {:name "interrupt"
     :description "Interrupt what's running in a session, like an evaluation that's been left behind."
     :inputSchema (schema (merge session-arg port-arg))
