@@ -25,32 +25,30 @@
 
 ;;; Connections
 
+(defn- live?
+  "Whether d, a connection on its way, is one to use: still opening, or open
+  to a server that hasn't gone away."
+  [d]
+  (or (not (realized? d))
+      (try (nrepl/connected? @d) (catch Exception _ false))))
+
 (defn- client
   "The connection to the server on port, or the one the server was started
-  for without a port, opening it if there's none yet. Calls that come at
-  once share the one they open, and a failed one is forgotten, so the next
-  call tries again."
+  for without a port, opening it if there's none yet, or a new one if the
+  one there was failed to open or went down with its server, to the server
+  that's there by then. Calls that come at once share the one they open."
   [{:keys [clients connect]} port]
-  (let [d (get (swap! clients update port #(or % (delay (connect port)))) port)]
-    (try
-      @d
-      (catch Exception e
-        (swap! clients #(cond-> % (identical? d (get % port)) (dissoc port)))
-        (throw e)))))
+  (let [[old new] (swap-vals! clients update port #(if (some-> % live?) % (delay (connect port))))
+        d (get new port)
+        replaced (get old port)]
+    (when (and replaced (not (identical? replaced d)) (realized? replaced))
+      (try (nrepl/close @replaced) (catch Exception _ nil)))
+    @d))
 
 (defn- with-client
-  "Calls (f client) with the connection to the server on port. A connection
-  that dropped is forgotten, so the next call opens a new one, to the
-  server that's there by then."
-  [{:keys [clients] :as server} port f]
-  (let [c (client server port)]
-    (try
-      (f c)
-      (catch clojure.lang.ExceptionInfo e
-        (when (= ::nrepl/disconnected (:type (ex-data e)))
-          (swap! clients #(cond-> % (some-> (get % port) deref (identical? c)) (dissoc port)))
-          (try (nrepl/close c) (catch Exception _ nil)))
-        (throw e)))))
+  "Calls (f client) with the connection to the server on port."
+  [server port f]
+  (f (client server port)))
 
 ;;; Tools
 

@@ -182,6 +182,17 @@
          (is isError)
          (is (= "Gave up waiting after 0.5s, while the server may still be reloading" (text {:result result}))))))))
 
+(deftest client-test
+  (testing "a connection whose server went away gets replaced"
+    (let [opened (atom [])
+          server {:clients (atom {})
+                  :connect (fn [_] (peek (swap! opened conj {:pending (atom {})})))}
+          first-client (#'mcp/client server nil)]
+      (is (identical? first-client (#'mcp/client server nil)))
+      (reset! (:pending first-client) nil)
+      (is (not (identical? first-client (#'mcp/client server nil))))
+      (is (= 2 (count @opened))))))
+
 (deftest sessions-test
   (testing "shared with the CLI"
     (with-out-str
