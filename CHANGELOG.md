@@ -7,6 +7,10 @@
 - [#17](https://github.com/nrepl/neorepl/pull/17): `,trace` and `neorepl trace` trace functions, or whole namespaces, with cider-nrepl, and the REPL shows calls from other threads too.
 - [#18](https://github.com/nrepl/neorepl/pull/18): `,ns` switches namespaces, loading the one named if it isn't yet, and lists the project's loaded namespaces without a name.
 
+### Bug fixes
+
+- [#20](https://github.com/nrepl/neorepl/pull/20): Interrupting an evaluation the moment it's sent, with Ctrl-C, `--timeout` or an MCP cancellation, no longer fails because the server hasn't started running it yet.
+
 ## 0.3.0 (2026-10-17)
 
 Coding agents.
