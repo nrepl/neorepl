@@ -24,7 +24,7 @@
 
 (def version
   "neorepl's version, which every release bumps."
-  "0.3.0")
+  "0.4.0-snapshot")
 
 (defn- warn [msg]
   (binding [*out* *err*]
