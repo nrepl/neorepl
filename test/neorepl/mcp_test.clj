@@ -8,7 +8,8 @@
             [neorepl.mcp :as mcp]
             [neorepl.nrepl :as nrepl]
             [neorepl.test-server :as test-server :refer [*port* call-with-temp-dir spit-file]])
-  (:import (java.io BufferedReader InputStreamReader OutputStreamWriter PipedInputStream PipedOutputStream PrintWriter
+  (:import (clojure.lang LineNumberingPushbackReader)
+           (java.io BufferedReader InputStreamReader OutputStreamWriter PipedInputStream PipedOutputStream PrintWriter
                     StringReader StringWriter)
            (java.util.concurrent LinkedBlockingQueue TimeUnit)))
 
@@ -128,6 +129,14 @@
        (let [response (receive)]
          (is (get-in response [:result :structuredContent :truncated]))
          (is (str/ends-with? (text response) "(Cut at 1000 characters)"))))
+     (testing "no standard input for the code, which is the protocol's"
+       (let [in *in*]
+         (try
+           (alter-var-root #'*in* (constantly (LineNumberingPushbackReader. (StringReader. "not for the code\n"))))
+           (send (tool-call 9 "eval" {:code "(read-line)"}))
+           (is (= "nil" (text (receive))))
+           (finally
+             (alter-var-root #'*in* (constantly in))))))
      (testing "a lookup"
        (send (tool-call 6 "doc" {:symbol "inc"}))
        (is (str/starts-with? (text (receive)) "clojure.core/inc\n([x])"))
