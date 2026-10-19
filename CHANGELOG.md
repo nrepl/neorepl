@@ -9,6 +9,10 @@
 - [#23](https://github.com/nrepl/neorepl/pull/23): `,sessions` lists the named sessions and switches the REPL into one, such as an agent's, with `,sessions -` going back and the session's name in the prompt.
 - [#24](https://github.com/nrepl/neorepl/pull/24): `d` in the full-screen inspector, and `neorepl inspect --def NAME`, define what's being inspected as a var in the session's namespace.
 
+### Changes
+
+- [#26](https://github.com/nrepl/neorepl/pull/26): The MCP tools use the session called `agent` unless a call names another, the one the skill has agents use with the CLI, rather than `default`.
+
 ### Bug fixes
 
 - [#20](https://github.com/nrepl/neorepl/pull/20): Interrupting an evaluation the moment it's sent, with Ctrl-C, `--timeout` or an MCP cancellation, no longer fails because the server hasn't started running it yet.

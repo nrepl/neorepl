@@ -1022,13 +1022,13 @@ with an error, and 2 on usage errors."
 (def ^:private mcp-help
   (help-text
    "Usage: neorepl mcp [options]"
-   (str "Serves MCP on standard input and output, for coding agents: tools to
+   "Serves MCP on standard input and output, for coding agents: tools to
 evaluate code, load files, look up docs and source, run tests, show stack
 traces and check files for unbalanced delimiters, through the server it
-finds the way the other commands do. Each tool takes a port too, for projects
-with several servers. The tools share the CLI's named sessions, so neorepl
-eval --session NAME and the eval tool with that session see the same *ns*,
-*1 and *e. " sessions-note)
+finds the way the other commands do. The tools that talk to a server take a
+port too, for projects with several. They share the CLI's named sessions,
+the one called agent unless a call names another, so neorepl eval --session
+agent and the eval tool see the same *ns*, *1 and *e."
    mcp-options
    discovery-note
    "Examples:
