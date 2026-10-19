@@ -154,7 +154,14 @@
        (send (tool-call 5 "eval" {:code "(apply str (repeat 2000 \"x\"))"}))
        (let [response (receive)]
          (is (get-in response [:result :structuredContent :truncated]))
-         (is (str/ends-with? (text response) "(Cut at 1000 characters)"))))
+         (is (str/ends-with? (text response) "(Cut at 1000 characters)")))
+       (testing "all of it, not only each value"
+         (let [value (pr-str (apply str (repeat 50 "y")))]
+           (send (tool-call 8 "eval" {:code (str/join " " (repeat 30 value))}))
+           (let [response (receive)]
+             (is (= 30 (count (get-in response [:result :structuredContent :values]))))
+             (is (= (str (subs (str/join "\n" (repeat 30 value)) 0 1000) "\n(Cut at 1000 characters)")
+                    (text response)))))))
      (testing "no standard input for the code, which is the protocol's"
        (let [in *in*]
          (try

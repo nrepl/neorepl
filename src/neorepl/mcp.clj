@@ -64,14 +64,17 @@
   [message]
   (result message {:status "error" :message message} true))
 
-(defn- evaluation-text
-  "What an evaluation printed and came to, as text."
-  [{:keys [out err values message truncated]} max-output]
-  (str/join "\n" (remove str/blank? [(some-> out str/trimr)
-                                     (some-> err str/trimr)
-                                     (str/join "\n" values)
-                                     (when truncated (str "(Cut at " max-output " characters)"))
-                                     message])))
+(defn- output
+  "What an evaluation, r, printed and came to, as text cut at max-output
+  characters, as each of its values and streams is, and r, :truncated if
+  that cut it."
+  [{:keys [out err values] :as r} max-output]
+  (let [text (str/join "\n" (remove str/blank? [(some-> out str/trimr)
+                                                (some-> err str/trimr)
+                                                (str/join "\n" values)]))
+        cut? (< max-output (count text))]
+    [(cond-> text cut? (evaluation/cut max-output))
+     (cond-> r cut? (assoc :truncated true))]))
 
 (defn- evaluate
   "Runs (run client session opts) in the session args name, opts being
@@ -82,15 +85,20 @@
   ([{:keys [sessions-file timeout max-output] :as server} {:keys [session port] :as args} on-send run text]
    (with-client server port
      (fn [client]
-       (let [{:keys [status] :as r} (run client
-                                         (sessions/ensure! sessions-file client session)
-                                         {:timeout (or (:timeout args) timeout)
-                                          :max-output max-output
-                                          :on-send on-send
-                                          ;; Standard input is the protocol's, so
-                                          ;; there's none for the code.
-                                          :read-line (constantly nil)})]
-         (result (str/join "\n" (remove str/blank? [(evaluation-text r max-output) (text r)]))
+       (let [[output {:keys [status message truncated] :as r}]
+             (output (run client
+                          (sessions/ensure! sessions-file client session)
+                          {:timeout (or (:timeout args) timeout)
+                           :max-output max-output
+                           :on-send on-send
+                           ;; Standard input is the protocol's, so there's
+                           ;; none for the code.
+                           :read-line (constantly nil)})
+                     max-output)]
+         (result (str/join "\n" (remove str/blank? [output
+                                                    (when truncated (str "(Cut at " max-output " characters)"))
+                                                    message
+                                                    (text r)]))
                  r
                  ;; Tests that don't pass are an answer, not the tool failing.
                  (not (#{"ok" "failed"} status))))))))
