@@ -13,10 +13,10 @@
 
 - [#20](https://github.com/nrepl/neorepl/pull/20): Interrupting an evaluation the moment it's sent, with Ctrl-C, `--timeout` or an MCP cancellation, no longer fails because the server hasn't started running it yet.
 - [#21](https://github.com/nrepl/neorepl/pull/21): The REPL no longer shows what an interrupted evaluation prints or returns after the next one starts, like the report of a `,test` run that clojure.test finished despite the Ctrl-C.
-- [#25](https://github.com/nrepl/neorepl/pull/25): Output on stderr that doesn't end its line no longer runs into the value or the prompt after it.
-- [#25](https://github.com/nrepl/neorepl/pull/25): A read from `*in*` no longer keeps `neorepl eval` waiting past `--timeout`.
-- [#25](https://github.com/nrepl/neorepl/pull/25): A ClojureScript exception on shadow-cljs fails the evaluation, with exit status 1 and an MCP error, instead of passing as the value `:repl/exception!`.
 - [#25](https://github.com/nrepl/neorepl/pull/25): `--timeout`, Ctrl-C and MCP cancellations stop the forms after the one they interrupt, which used to run anyway, and piggieback evaluates every form of an eval, rather than only the first, since the forms now go to the server one at a time.
+- [#25](https://github.com/nrepl/neorepl/pull/25): A ClojureScript exception on shadow-cljs fails the evaluation, with exit status 1 and an MCP error, instead of passing as the value `:repl/exception!`.
+- [#25](https://github.com/nrepl/neorepl/pull/25): A read from `*in*` no longer keeps `neorepl eval` waiting past `--timeout`.
+- [#25](https://github.com/nrepl/neorepl/pull/25): Output on stderr that doesn't end its line no longer runs into the value or the prompt after it.
 
 ## 0.3.0 (2026-10-17)
 
