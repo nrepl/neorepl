@@ -8,6 +8,7 @@
             [neorepl.main :as main]
             [neorepl.nrepl :as nrepl]
             [neorepl.repl :as repl]
+            [neorepl.sessions :as sessions]
             [neorepl.test-server :as test-server :refer [*port* call-with-temp-dir lf with-client]])
   (:import (java.io ByteArrayInputStream ByteArrayOutputStream PipedInputStream PipedOutputStream)))
 
@@ -31,7 +32,7 @@
   calls (f type screen): type types a string, screen waits for a regex to
   show up in the output, ANSI codes stripped, and returns it. Then ends the
   REPL with Ctrl-D and returns its raw output and the history file's
-  contents.
+  contents. The named sessions are in opts' :sessions-file, if it has one.
 
   Eldoc is off unless opts say :eldoc? true, since what it shows after the
   cursor gets in the way of reading the screen."
@@ -43,10 +44,10 @@
        (let [out (ByteArrayOutputStream.)
              repl (future (main/run ["repl" "-p" (str *port*)]
                                     {:dir dir
-                                     :sessions-file (io/file dir "sessions.edn")
+                                     :sessions-file (or (:sessions-file opts) (io/file dir "sessions.edn"))
                                      :history-dir (io/file dir "history")
                                      :terminal (merge {:input in :output out :width 80 :eldoc? false}
-                                                      opts)}))
+                                                      (dissoc opts :sessions-file))}))
              type (fn [s]
                     (.write keys (.getBytes ^String s "UTF-8"))
                     (.flush keys))
@@ -318,6 +319,47 @@
         (is (screen #"\n\"user\"\nuser=> $")))
       (type ",ns\r")
       (is (screen #"\nneorepl\.repl-test\n(?s).*user=> $")))))
+
+(deftest sessions-test
+  (call-with-temp-dir
+   (fn [dir]
+     (let [sessions-file (io/file dir "sessions.edn")]
+       (with-client [client {:port *port*}]
+         (let [agent (sessions/ensure! sessions-file client "agent")]
+           (try
+             (nrepl/request client {:op "eval" :session agent
+                                    :code "(ns agent.scratch) (def answer \"The answer.\" 42) answer"})
+             (call-with-repl {:sessions-file sessions-file}
+               (fn [type screen]
+                 (type ":mine\r")
+                 (screen #":mine\nuser=> $")
+                 (testing "listed, the REPL's own first"
+                   (type ",sessions\r")
+                   (is (screen #"\* -\s+user\s+this REPL's\n  agent\s+agent\.scratch\nuser=> $")))
+                 (testing "switching to one, which the prompt says"
+                   (type ",sessions agent\r")
+                   (is (screen #"Reading \*in\* won't work in agent(?s).*\nagent:agent\.scratch=> $"))
+                   (type "*1\r")
+                   (is (screen #"(?m)^42\nagent:agent\.scratch=> $")))
+                 (testing "where the lookups go too"
+                   (type ",doc answer\r")
+                   (is (screen #"agent\.scratch/answer\n(?s).*agent:agent\.scratch=> $"))
+                   (type ",pst\r")
+                   (is (screen #"No error yet in session agent\nagent:agent\.scratch=> $")))
+                 (testing "and back"
+                   (type ",sessions -\r")
+                   (is (screen #"\nuser=> $"))
+                   (type "*1\r")
+                   (is (screen #"(?m)^:mine\nuser=> $")))
+                 (testing "but not to one that isn't there"
+                   (type ",sessions nope\r")
+                   (is (screen #"No session called nope, neorepl eval -s nope CODE makes one\nuser=> $")))
+                 (type ",sessions agent\r")
+                 (screen #"agent:agent\.scratch=> $")))
+             (testing "which outlives the REPL that switched to it"
+               (is (= agent (get (sessions/named sessions-file client) "agent"))))
+             (finally
+               (nrepl/close-session client agent)))))))))
 
 (deftest trace-test
   (with-client [client {:port *port*}]
