@@ -112,14 +112,23 @@
   [s token]
   (case (last (text s token)) \( ")" \[ "]" \{ "}"))
 
+(defn- prefix
+  "The pending prefix token starts, for form-done: how many forms it still
+  needs, and whether it discards them."
+  [s {:keys [type] :as token}]
+  [(if (= "^" (text s token)) 2 1) (= :discard type)])
+
 (defn- form-done
-  "Counts a finished form against the innermost pending prefix. A prefix that
-  got all the forms it needs is a finished form itself, for the next one."
+  "Counts a finished form against the innermost of the pending prefixes. A
+  prefix that got all the forms it needs is a finished form itself, for the
+  next one, unless it's #_, which leaves nothing behind: #_#_ a b discards
+  both."
   [prefixes]
-  (if-let [needed (peek prefixes)]
-    (if (= 1 needed)
-      (recur (pop prefixes))
-      (conj (pop prefixes) (dec needed)))
+  (if-let [[needed discard?] (peek prefixes)]
+    (cond
+      (< 1 needed) (conj (pop prefixes) [(dec needed) discard?])
+      discard? (pop prefixes)
+      :else (recur (pop prefixes)))
     prefixes))
 
 (defn- update-prefixes [frames f & args]
@@ -132,8 +141,8 @@
 (defn- scan
   "Walks tokens of s keeping a stack of frames, starting from frames: the top
   level first, then one per open delimiter, {:open token :closer \")\"
-  :prefixes [...]}. :prefixes holds how many forms each pending prefix (' #_
-  ^ #inst ...) still needs. When a closing delimiter doesn't match its
+  :prefixes [...]}. :prefixes holds each pending prefix (' #_ ^ #inst ...),
+  as prefix has it. When a closing delimiter doesn't match its
   opener or has none, it stops there and returns the error as a map, the way
   delimiter-error does.
 
@@ -150,7 +159,7 @@
                   (= (text s token) closer) (update-prefixes (pop frames) form-done)
                   :else (reduced {:error :mismatched :open open :close token :expected closer})))
        (:macro-char :discard :reader-macro)
-       (update-prefixes frames conj (if (= "^" (text s token)) 2 1))
+       (update-prefixes frames conj (prefix s token))
        :comment frames
        (update-prefixes frames form-done)))
    frames
@@ -213,23 +222,34 @@
   [text]
   (input-incomplete? (add-line empty-input text)))
 
-(defn forms
-  "The text of each top-level form in s, without comments. A prefix such as
-  ' goes with the form after it."
-  [s]
-  (loop [[{:keys [type start end] :as token} & more] (tokenize s)
+(defn form-spans
+  "Where each top-level form in the lexed text starts and ends, as [start
+  end]. A prefix goes with the forms it takes, ^ with two, and the forms #_
+  discards are left out, as comments are."
+  [{s :text :keys [tokens]}]
+  (loop [[{:keys [type start end] :as token} & more] tokens
          depth 0
+         prefixes []
          from nil
-         forms []]
-    (cond
-      (nil? token) forms
-      (and (zero? depth) (= :comment type)) (recur more depth from forms)
-      :else (let [from (or from start)
-                  depth (case type :open (inc depth) :close (dec depth) depth)]
-              (if (and (<= depth 0)
-                       (not (#{:open :macro-char :discard :reader-macro} type)))
-                (recur more 0 nil (conj forms (subs s from end)))
-                (recur more depth from forms))))))
+         spans []]
+    (let [inner (case type :open (inc depth) :close (dec depth) depth)]
+      (cond
+        (nil? token) spans
+        (and (zero? depth) (= :comment type)) (recur more depth prefixes from spans)
+        (pos? inner) (recur more inner prefixes (or from start) spans)
+        (and (zero? depth) (#{:macro-char :discard :reader-macro} type))
+        (recur more 0 (conj prefixes (prefix s token)) (or from start) spans)
+        :else (let [left (form-done prefixes)]
+                (cond
+                  (seq left) (recur more 0 left (or from start) spans)
+                  ;; The outermost prefix discarded it all.
+                  (second (first prefixes)) (recur more 0 [] nil spans)
+                  :else (recur more 0 [] nil (conj spans [(or from start) end]))))))))
+
+(defn forms
+  "The text of each top-level form in s, as form-spans finds them."
+  [s]
+  (mapv (fn [[start end]] (subs s start end)) (form-spans (lex s))))
 
 (def ^:private symbolic-types #{:symbol :keyword :constant})
 

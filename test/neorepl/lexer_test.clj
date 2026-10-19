@@ -83,6 +83,7 @@
    "^{:doc \"x\"}"
    "''"
    "#_"
+   "#_#_ a"
    "(+ 1 2) #_"
    "#'"
    "#?"
@@ -158,7 +159,16 @@
     "" []
     "[f] [f coll]" ["[f]" "[f coll]"]
     "[{:keys [a b]} & more] [x]" ["[{:keys [a b]} & more]" "[x]"]
-    "a 'b ; c\n\"d e\"" ["a" "'b" "\"d e\""]))
+    "a 'b ; c\n\"d e\"" ["a" "'b" "\"d e\""]
+    "^:foo [1 2] 3" ["^:foo [1 2]" "3"]
+    "' #_ a b c" ["' #_ a b" "c"])
+  (testing "without the ones #_ discards, #_#_ two of them"
+    (are [s forms] (= forms (lexer/forms s))
+      "#_ a" []
+      "#_#_ 1 (x) 3" ["3"]
+      "#_ ^:foo x y" ["y"]))
+  (testing "and where they are"
+    (is (= [[0 1] [2 4] [9 14]] (lexer/form-spans (lexer/lex "a 'b ; c\n\"d e\""))))))
 
 (deftest symbol-at-test
   (let [s "(map inc :kw)"]
