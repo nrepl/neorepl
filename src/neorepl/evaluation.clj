@@ -151,7 +151,9 @@
     :read-line    called when the code reads *in*, for the next line, nil
                   at end of input or :interrupted to leave the read
                   unanswered, since the evaluation's being interrupted,
-                  until the interrupt fails (read-line by default)
+                  until the interrupt fails (read-line by default). With a
+                  :timeout, it's called on a thread of its own, so a read
+                  that blocks doesn't outlast it
     :timeout      seconds after which to interrupt the evaluation
     :max-output   cuts each value at that many characters, and stdout and
                   stderr too, marking the result :truncated
@@ -218,10 +220,14 @@
             give-up #(do (deliver given-up true)
                          (result %1 %2))
             declined-read (volatile! false)
-            answer-read #(let [line (read-line)]
-                           (vreset! declined-read (= :interrupted line))
-                           (when-not @declined-read
-                             (send-stdin client session line)))
+            answer-read (fn []
+                          (let [answer #(let [line (read-line)]
+                                          (vreset! declined-read (= :interrupted line))
+                                          (when-not @declined-read
+                                            (send-stdin client session line)))]
+                            (if deadline
+                              (future (answer))
+                              (answer))))
             interrupted #(result (update % :statuses conj "interrupted") nil)
             acc {:values [] :out [] :err [] :out-size 0 :err-size 0 :statuses #{}}]
         (if-not (send-msg msg)
