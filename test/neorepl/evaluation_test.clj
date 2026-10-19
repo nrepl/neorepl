@@ -15,6 +15,33 @@
                                                   {:on-send (fn [_ interrupt] (interrupt))}))]
           (is (= "interrupted" (:status (deref result 10000 nil)))))))))
 
+(deftest forms-test
+  (with-client [client {:port *port*}]
+    (let [session (nrepl/clone-session client)
+          evaluate #(evaluation/evaluate client (assoc %1 :session session) %2)
+          values #(:values (evaluate {:op "eval" :code %} {}))]
+      (testing "each top-level form goes out on its own, starting where it does"
+        (is (= ["1" "#'user/defined-on-line-3"] (values "1 ; one\n\n  (defn defined-on-line-3 [] 2)")))
+        (is (= ["[3 3]"] (values "((juxt :line :column) (meta #'defined-on-line-3))"))))
+      (testing "with what the forms' prefixes take"
+        (is (= ["3" "[1 2]"] (values "#_#_ 1 (/ 1 0) 3 ^:foo [1 2]")))
+        (is (= ["{:foo true}"] (values "(meta *1)"))))
+      (testing "the forms after one that throws still run, as they would on the server"
+        (let [{:keys [status values]} (evaluate {:op "eval" :code "(/ 1 0) :after"} {})]
+          (is (= "eval-error" status))
+          (is (= [":after"] values))))
+      (testing "but not after one that's interrupted"
+        (values "(def ran (atom nil))")
+        (is (= "timeout" (:status (evaluate {:op "eval" :code "(Thread/sleep 5000) (reset! ran :ran)"} {:timeout 0.2}))))
+        (is (= ["nil"] (values "@ran")))
+        (is (= "interrupted" (:status (evaluate {:op "eval" :code "(Thread/sleep 5000) (reset! ran :ran)"}
+                                                {:on-send (fn [_ interrupt] (interrupt))}))))
+        (is (= ["nil"] (values "@ran"))))
+      (testing "code that doesn't balance goes out as it is, for the server to say so"
+        (let [{:keys [status values]} (evaluate {:op "eval" :code "1 (+ 1"} {})]
+          (is (= "eval-error" status))
+          (is (= ["1"] values)))))))
+
 (deftest text-printer-test
   (let [printed (fn [& responses]
                   (let [print-response (evaluation/text-printer)]
