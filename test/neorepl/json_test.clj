@@ -1,5 +1,5 @@
 (ns neorepl.json-test
-  (:require [clojure.test :refer [are deftest is]]
+  (:require [clojure.test :refer [are deftest is testing]]
             [neorepl.json :as json]))
 
 (deftest write-str-test
@@ -50,7 +50,10 @@
   (doseq [bad ["" "nul" "[1,]" "[1 2]" "{\"a\" 1}" "{a: 1}" "{\"a\": 1,}" "\"open" "\"bad \\x\""
                "\"\\u12\"" "01x" "-" "[1] x" "\"tab\there\""]]
     (is (= ::json/invalid (:type (ex-data (is (thrown? clojure.lang.ExceptionInfo (json/read-str bad))))))
-        bad)))
+        bad))
+  (testing "integers past a long"
+    (is (= (bigint "99999999999999999999") (json/read-str "99999999999999999999")))
+    (is (instance? Long (json/read-str "-9223372036854775808")))))
 
 (deftest round-trip-test
   (let [x {:jsonrpc "2.0" :id 7 :result {:content [{:type "text" :text "a \"b\"\n\u001b😀"}]
