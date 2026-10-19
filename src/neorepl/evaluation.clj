@@ -71,18 +71,26 @@
                (fn [_])))
 
 (defn- interrupt!
-  "Interrupts the evaluation with message id, whose responses go to the
-  queue responses, giving the server a second to confirm. Returns whether
-  it did, or found it done already. A server can find the session idle
-  while the evaluation runs elsewhere, as shadow-cljs's ClojureScript ones
-  do, but one that's done has sent done before saying so."
-  [client session id responses]
-  (case (try
-          (nrepl/interrupt client session id {:timeout-ms 1000})
-          (catch Exception _ :error))
-    :interrupted true
-    :idle (boolean (some nrepl/done? responses))
-    false))
+  "Interrupts the evaluation with message id, sent at the time sent-at, whose
+  responses go to the queue responses, giving the server a second to
+  confirm. Returns whether it did, or found it done already. A server can
+  find the session idle while the evaluation runs elsewhere, as
+  shadow-cljs's ClojureScript ones do, but one that's done has sent done
+  before saying so. It can also find it idle right after the message went
+  out, before the session's thread has taken the evaluation from its queue,
+  so neorepl asks again for half a second after sending."
+  [client session id sent-at responses]
+  (loop []
+    (case (try
+            (nrepl/interrupt client session id {:timeout-ms 1000})
+            (catch Exception _ :error))
+      :interrupted true
+      :idle (cond
+              (some nrepl/done? responses) true
+              (< (- (System/currentTimeMillis) sent-at) 500) (do (Thread/sleep 50)
+                                                                 (recur))
+              :else false)
+      false)))
 
 (defn evaluate
   "Sends msg, an eval or load-file, and returns its result: a map with the
@@ -126,8 +134,8 @@
         ;; Otherwise the evaluation keeps the session busy for later calls.
         ;; In place before the message goes out, since neorepl can get
         ;; killed right after.
-        cleanup (shutdown/add! #(when-let [id (deref sent 1000 nil)]
-                                  (interrupt! client session id responses)
+        cleanup (shutdown/add! #(when-let [try-interrupt (deref sent 1000 nil)]
+                                  (try-interrupt)
                                   ;; Its server may stop next, and shouldn't
                                   ;; while it's still answering.
                                   (deref finished 1000 nil)))]
@@ -142,13 +150,14 @@
                             #(if (realized? given-up)
                                (nrepl/unclaimed client %)
                                (.put responses %)))
-            _ (deliver sent id)
+            try-interrupt (partial interrupt! client session id (System/currentTimeMillis) responses)
+            _ (deliver sent try-interrupt)
             interrupt-failed (promise)
             interrupt #(if (realized? interrupt-failed)
                          (.put responses ::stop)
                          ;; Not on the thread that delivers signals and keystrokes.
                          (future
-                           (when-not (interrupt! client session id responses)
+                           (when-not (try-interrupt)
                              (.put responses ::interrupt-failed))))
             give-up #(do (deliver given-up true)
                          (result %1 %2))
@@ -164,7 +173,7 @@
                            (.take responses))]
             (cond
               (nil? response)
-              (give-up acc {:timeout timeout :interrupted? (interrupt! client session id responses)})
+              (give-up acc {:timeout timeout :interrupted? (try-interrupt)})
 
               (= ::stop response)
               (give-up acc {:stopped true})

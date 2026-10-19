@@ -147,13 +147,29 @@
        (send (tool-call 2 "eval" {:code "*1"}))
        (is (not= "#'user/shared-x" (text (receive))))))))
 
+(def started
+  "Delivered by code that neorepl evaluates on the test server, to say it's
+  running."
+  (atom nil))
+
+(def interrupted
+  "Delivered by code that neorepl evaluates on the test server, to say it got
+  interrupted."
+  (atom nil))
+
 (deftest cancel-test
+  (reset! started (promise))
+  (reset! interrupted (promise))
   (call-with-mcp
    (fn [send receive]
-     (send (tool-call 1 "eval" {:code "(Thread/sleep 30000) :slept"}))
-     (Thread/sleep 300)
+     (send (tool-call 1 "eval" {:code (str "(try (deliver @neorepl.mcp-test/started true) (Thread/sleep 30000)"
+                                           " (catch InterruptedException _ (deliver @neorepl.mcp-test/interrupted true)))")}))
+     (is (deref @started 10000 false))
      (send {:method "notifications/cancelled" :params {:requestId 1}})
      (testing "interrupts the evaluation, which goes unanswered"
+       (is (deref @interrupted 10000 false))
+       ;; Only now: nREPL drops the evaluations queued behind one it
+       ;; interrupts, and :next could be one of them.
        (send (tool-call 2 "eval" {:code ":next"}))
        (let [response (receive)]
          (is (= 2 (:id response)))
