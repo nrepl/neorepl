@@ -24,9 +24,9 @@
 
 (defn- call-with-mcp
   "Calls (f send receive) with neorepl mcp serving the test server: send
-  sends a message, receive waits for the next one back, or nil after
-  timeout-ms, ten seconds without it. Then ends the input and waits for the
-  server to finish."
+  sends a message, or a line as it is, receive waits for the next one back,
+  or nil after timeout-ms, ten seconds without it. Then ends the input and
+  waits for the server to finish."
   [f]
   (let [;; The server's threads don't get the binding.
         port *port*
@@ -44,7 +44,7 @@
                                  :connect #(nrepl/connect {:port (or % port)})}))
         writer (PrintWriter. (OutputStreamWriter. to-server "UTF-8") true)]
     (try
-      (f #(.println writer (json/write-str (assoc % :jsonrpc "2.0")))
+      (f #(.println writer (if (string? %) % (json/write-str (assoc % :jsonrpc "2.0"))))
          (fn receive
            ([] (receive 10000))
            ([timeout-ms] (.poll received timeout-ms TimeUnit/MILLISECONDS))))
@@ -93,12 +93,38 @@
        (send (tool-call 7 "eval" {}))
        (let [{:keys [result]} (receive)]
          (is (:isError result))
-         (is (= "Missing code" (text {:result result})))))))
+         (is (= "Missing code" (text {:result result})))))
+     (testing "arguments that don't fit the schema"
+       (send (tool-call 8 "eval" {:code "1" :port "18350"}))
+       (let [{:keys [result]} (receive)]
+         (is (:isError result))
+         (is (= "The port \"18350\" doesn't fit its schema, {\"type\":\"integer\",\"minimum\":1,\"maximum\":65535}"
+                (text {:result result}))))
+       (doseq [[id tool arguments] [[9 "eval" {:code "1" :timeout -5}]
+                                    [10 "eval" {:code "1" :timeout 1e300}]
+                                    [11 "eval" "{\"code\": \"1\", \"port\": 1e400}"]
+                                    [12 "test" {:names "neorepl.sample-suite"}]
+                                    [13 "eval" {:code "1" :session ""}]]]
+         (send (if (string? arguments)
+                 (format "{\"jsonrpc\": \"2.0\", \"id\": %d, \"method\": \"tools/call\", \"params\": {\"name\": \"%s\", \"arguments\": %s}}"
+                         id tool arguments)
+                 (tool-call id tool arguments)))
+         (let [{:keys [result]} (receive)]
+           (is (:isError result) (pr-str arguments))
+           (is (str/includes? (text {:result result}) "doesn't fit its schema") (pr-str arguments))))
+       (send (tool-call 14 "eval" "(+ 1 2)"))
+       (is (= "The arguments have to be an object" (text (receive)))))
+     (testing "ids past a long"
+       (send {:id (bigint "99999999999999999999") :method "ping"})
+       (is (= (bigint "99999999999999999999") (:id (receive)))))))
   (testing "what isn't JSON"
     (let [out (StringWriter.)]
-      (mcp/serve (BufferedReader. (StringReader. "{oops\n")) out {})
-      (is (= {:jsonrpc "2.0" :id nil :error {:code -32700 :message "That's not JSON"}}
-             (json/read-str (str out)))))))
+      (mcp/serve (BufferedReader. (StringReader. (str "{oops\n" (apply str (repeat 100000 "[")) "\n")))
+                 out {})
+      (is (= [{:jsonrpc "2.0" :id nil :error {:code -32700 :message "That's not JSON"}}
+              {:jsonrpc "2.0" :id nil :error {:code -32700 :message "That's not JSON"}}]
+             (map json/read-str (str/split-lines (str out))))))))
+
 
 (deftest eval-test
   (call-with-mcp

@@ -149,15 +149,15 @@
             {:problems problems})))
 
 (def ^:private port-arg
-  {:port {:type "integer"
-          :description "The nREPL server's port, for projects with several; the one neorepl mcp found by default"}})
+  {:port {:type "integer" :minimum 1 :maximum 65535
+          :description "The nREPL server's port, when the project runs several"}})
 
 (def ^:private session-arg
-  {:session {:type "string"
+  {:session {:type "string" :minLength 1
              :description "The named session, shared with neorepl's CLI (default: default)"}})
 
 (def ^:private timeout-arg
-  {:timeout {:type "number"
+  {:timeout {:type "number" :exclusiveMinimum 0 :maximum 86400
              :description "Seconds before interrupting it"}})
 
 (def ^:private ns-arg
@@ -185,16 +185,15 @@
   evaluation, for cancelling it."
   [{:name "eval"
     :description "Evaluate Clojure code in a session that keeps *ns*, *1 and *e from call to call. Returns what it printed and its values; an exception's message and its class come in the error output, and pst shows the stack trace."
-    :inputSchema (schema (merge {:code {:type "string" :description "The code, one form or several"}
-                                 :timeout {:type "number" :description "Seconds before interrupting it"}}
-                                session-arg port-arg)
+    :inputSchema (schema (merge {:code {:type "string" :description "The code, one form or several"}}
+                                timeout-arg session-arg port-arg)
                          "code")
     :run (fn [server {:keys [code] :as args} on-send]
            (evaluate server args on-send
                      #(evaluation/evaluate %1 {:op "eval" :code code :session %2} %3)))}
    {:name "load"
     :description "Load a Clojure file into the session, so its errors carry the file's name and lines. Check it first."
-    :inputSchema (schema (merge {:file {:type "string" :description "The file's path"}} session-arg port-arg)
+    :inputSchema (schema (merge {:file {:type "string" :description "The file's path"}} timeout-arg session-arg port-arg)
                          "file")
     :run (fn [server {:keys [file] :as args} on-send]
            (let [f (io/file file)]
@@ -209,11 +208,12 @@
    (symbol-tool "where" "Show the file and line a var is defined at.")
    {:name "apropos"
     :description "Find vars whose names match a regex, with the first line of their docs."
-    :inputSchema (schema (merge {:regex {:type "string"}} port-arg) "regex")
+    :inputSchema (schema (merge {:regex {:type "string" :description "A Java regex, matched against the names"}} port-arg)
+                         "regex")
     :run (fn [server {:keys [regex] :as args} _] (wrap (lookup server args "apropos" regex) :vars))}
    {:name "macroexpand"
     :description "Expand the macro a form calls, or every macro in it with all."
-    :inputSchema (schema (merge {:form {:type "string"}
+    :inputSchema (schema (merge {:form {:type "string" :description "The form, as code"}
                                  :all {:type "boolean" :description "Expand every macro, not just the outermost"}}
                                 ns-arg port-arg)
                          "form")
@@ -221,17 +221,19 @@
            (lookup server args (if all "macroexpand-all" "macroexpand") form))}
    {:name "reload"
     :description "Reload namespaces after changing their files: the ones given, or with cider-nrepl, every one that changed."
-    :inputSchema (schema (merge {:namespaces {:type "array" :items {:type "string"}}} timeout-arg port-arg))
+    :inputSchema (schema (merge {:namespaces {:type "array" :items {:type "string"}
+                                              :description "The namespaces to reload, by name"}}
+                                timeout-arg port-arg))
     :run (fn [server {:keys [namespaces] :as args} _] (reload server args namespaces))}
    {:name "test"
     :description "Run tests: the namespaces given, or tests as ns/name, or with cider-nrepl or babashka, the whole project's. Says what didn't pass, where and why."
-    :inputSchema (schema (merge {:names {:type "array" :items {:type "string"}}
-                                 :timeout {:type "number" :description "Seconds before interrupting them"}}
-                                session-arg port-arg))
+    :inputSchema (schema (merge {:names {:type "array" :items {:type "string"}
+                                         :description "Namespaces, and tests as ns/name"}}
+                                timeout-arg session-arg port-arg))
     :run (fn [server {:keys [names] :as args} on-send] (run-tests server args on-send (vec names)))}
    {:name "retest"
     :description "Rerun the tests that didn't pass last time. Takes cider-nrepl or babashka."
-    :inputSchema (schema (merge session-arg port-arg))
+    :inputSchema (schema (merge timeout-arg session-arg port-arg))
     :run (fn [server args on-send] (run-tests server args on-send :failed))}
    {:name "pst"
     :description "Show the stack trace of the session's last error, minus the frames of the tooling."
@@ -250,7 +252,7 @@
                  (result (or message "Interrupted") r (= "error" status))))))}
    {:name "check"
     :description "Check Clojure files for unbalanced parens, brackets, braces and strings, without a server. Run it after editing a file and before loading it. With fix, it repairs them from the indentation, as parinfer would, and writes the files back, leaving alone the ones it can't tell how to repair."
-    :inputSchema (schema {:files {:type "array" :items {:type "string"}}
+    :inputSchema (schema {:files {:type "array" :items {:type "string"} :description "The files' paths"}
                           :fix {:type "boolean" :description "Repair what doesn't balance, writing the files back"}}
                          "files")
     :run (fn [_ {:keys [files fix]} _] (check files fix))}
@@ -268,20 +270,41 @@
 (def ^:private tools-by-name
   (into {} (map (juxt :name identity)) tools))
 
-(defn- missing
-  "The required arguments of tool that args lack."
-  [{:keys [inputSchema]} args]
-  (remove #(some? (get args (keyword %))) (:required inputSchema)))
+(defn- fits?
+  "Whether value fits schema, as far as the tools' schemas go."
+  [{:keys [type items minimum maximum exclusiveMinimum minLength]} value]
+  (and (case type
+         "string" (string? value)
+         "integer" (integer? value)
+         "number" (number? value)
+         "boolean" (boolean? value)
+         "array" (and (sequential? value) (every? #(fits? items %) value))
+         true)
+       (or (nil? minimum) (<= minimum value))
+       (or (nil? maximum) (<= value maximum))
+       (or (nil? exclusiveMinimum) (< exclusiveMinimum value))
+       (or (nil? minLength) (<= minLength (count value)))))
+
+(defn- problem
+  "What's wrong with arguments for tool, as its inputSchema has it, or nil."
+  [{{:keys [properties required]} :inputSchema} arguments]
+  (if-not (or (nil? arguments) (map? arguments))
+    "The arguments have to be an object"
+    (if-let [lacking (seq (remove #(some? (get arguments (keyword %))) required))]
+      (str "Missing " (str/join ", " lacking))
+      (first (for [[k v] arguments
+                   :let [schema (get properties k)]
+                   :when (and schema (some? v) (not (fits? schema v)))]
+               (str "The " (name k) " " (pr-str v) " doesn't fit its schema, " (json/write-str (dissoc schema :description))))))))
 
 (defn- call-tool
   "Runs tool with arguments, as a tools/call result."
   [{:keys [run] :as tool} arguments server on-send]
-  (let [args (merge {:session "default" :ns "user"} arguments)
-        {:keys [text data error?]}
-        (if-let [lacking (seq (missing tool args))]
-          (error (str "Missing " (str/join ", " lacking)))
+  (let [{:keys [text data error?]}
+        (if-let [message (problem tool arguments)]
+          (error message)
           (try
-            (run server args on-send)
+            (run server (merge {:session "default" :ns "user"} arguments) on-send)
             (catch clojure.lang.ExceptionInfo e
               (error (ex-message e)))))]
     {:content [{:type "text" :text (if (str/blank? text) "(nothing)" text)}]
@@ -367,7 +390,9 @@
               :when (not (str/blank? line))]
         (let [message (try
                         (json/read-str line)
-                        (catch clojure.lang.ExceptionInfo _
+                        ;; Whatever it chokes on, a stack overflow from
+                        ;; nesting too.
+                        (catch Throwable _
                           (fail server nil -32700 "That's not JSON")
                           nil))]
           (when message

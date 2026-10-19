@@ -79,7 +79,8 @@
       (let [text (.group m)]
         [(if (or (.group m 1) (.group m 2))
            (Double/parseDouble text)
-           (Long/parseLong text))
+           ;; Which the regex leaves only overflowing to go wrong.
+           (try (Long/parseLong text) (catch NumberFormatException _ (bigint text))))
          (.end m)])
       (invalid s i "bad number"))))
 
@@ -130,7 +131,8 @@
 
 (defn read-str
   "The value of s, a JSON text: objects as maps with keyword keys, arrays as
-  vectors, integers as longs and other numbers as doubles. Throws ::invalid
+  vectors, integers as longs, or bigints past them, and other numbers as
+  doubles. Throws ::invalid
   when s isn't JSON."
   [^String s]
   (let [[value i] (read-value-at s 0)

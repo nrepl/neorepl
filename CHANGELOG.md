@@ -20,6 +20,7 @@
 - [#26](https://github.com/nrepl/neorepl/pull/26): The MCP `pst` and `apropos` tools return an object as structured content, which the official MCP SDK insists on, rather than a list.
 - [#26](https://github.com/nrepl/neorepl/pull/26): Code that reads `*in*` through the MCP tools gets end of input, instead of the next message the agent sends.
 - [#26](https://github.com/nrepl/neorepl/pull/26): The MCP `reload` tool gives up once its time is up, so a namespace that never finishes loading can't keep the call, or `neorepl mcp` ending, waiting for good.
+- [#26](https://github.com/nrepl/neorepl/pull/26): `neorepl mcp` checks a call's arguments against its tool's schema, and answers a line it can't read with a parse error, where an id past a long, for one, used to end it.
 
 ## 0.3.0 (2026-10-17)
 
