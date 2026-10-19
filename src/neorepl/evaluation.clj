@@ -282,22 +282,35 @@
   "A response handler printing output to stdout and stderr, and each value on
   a line of its own. Called without a response, once a REPL has read the
   code after its prompt, it lets the next value start right there, as in
-  clojure.main's REPL."
+  clojure.main's REPL. A line of stderr's that's left open gets ended
+  before what goes to stdout, which would run into it on a terminal, and
+  when it's called with :end, for what comes after the evaluation."
   []
-  (let [fresh-line? (volatile! true)]
+  (let [fresh-line? (volatile! true)
+        err-line-open? (volatile! false)
+        end-err-line #(when @err-line-open?
+                        (binding [*out* *err*]
+                          (newline)
+                          (flush))
+                        (vreset! err-line-open? false))]
     (fn
       ([]
        (vreset! fresh-line? true))
-      ([{:keys [out err value]}]
+      ([{:keys [out err value] :as response}]
+       (when (= :end response)
+         (end-err-line))
        (when (seq out)
+         (end-err-line)
          (print out)
          (flush)
          (vreset! fresh-line? (str/ends-with? out "\n")))
-       (when err
+       (when (seq err)
          (binding [*out* *err*]
            (print err)
-           (flush)))
+           (flush))
+         (vreset! err-line-open? (not (str/ends-with? err "\n"))))
        (when value
+         (end-err-line)
          (when-not @fresh-line? (newline))
          (println value)
          (vreset! fresh-line? true))))))

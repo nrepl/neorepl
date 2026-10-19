@@ -243,13 +243,6 @@ when it times out.")
               (call-with-client client f))
           (with-started-server @project options f))))))
 
-(defn- end-err-line
-  "Ends the line err, the evaluation's stderr output, left unfinished, so
-  that a warning after it, or the shell's prompt, gets a line of its own."
-  [err]
-  (when-not (or (empty? err) (str/ends-with? err "\n"))
-    (print-err "\n")))
-
 (defn- emit
   "Prints data in format, edn or json."
   [format data]
@@ -296,14 +289,17 @@ when it times out.")
   [run {:keys [session timeout max-output format] :as options} {:keys [dir sessions-file]} text]
   (with-client options dir
     (fn [client]
-      (let [{:keys [status message truncated out err] :as result}
+      (let [printer (if (= "text" format) (evaluation/text-printer) (fn [_]))
+            {:keys [status message truncated out] :as result}
             (run client
                  (sessions/ensure! sessions-file client session)
                  {:timeout timeout
                   :max-output max-output
-                  :on-response (if (= "text" format) (evaluation/text-printer) (fn [_]))})]
+                  :on-response printer})]
         (if (= "text" format)
-          (do (end-err-line err)
+          ;; So that a warning after it, or the shell's prompt, gets a
+          ;; line of its own.
+          (do (printer :end)
               (when truncated (warn (str "Cut the output at " max-output " characters")))
               (when-let [text (text result)]
                 (when-not (or (empty? out) (str/ends-with? out "\n"))

@@ -488,6 +488,8 @@
       (run-loop client session interruptions
                 (assoc opts
                        :read-code (fn [place]
+                                    ;; Rather than run into a line stderr left open.
+                                    (print-response :end)
                                     (print (prompt place))
                                     (flush)
                                     (let [code (read-input)]

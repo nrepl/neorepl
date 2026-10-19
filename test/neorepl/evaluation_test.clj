@@ -70,4 +70,10 @@
       (is (= "hi\nnil\n3\n" (printed {:out "hi\n"} {:value "nil"} {:value "3"})))
       (is (= "partial\n3\n" (printed {:out "partial"} {:value "3"}))))
     (testing "the value after a prompt goes right after it, whatever came before"
-      (is (= "partialboom\nuser=> 3\n" (printed {:out "partial"} {:err "boom\n"} :prompt {:value "3"}))))))
+      (is (= "partialboom\nuser=> 3\n" (printed {:out "partial"} {:err "boom\n"} :prompt {:value "3"}))))
+    (testing "a line stderr leaves open ends before what goes to stdout"
+      (is (= "warn\n42\n" (printed {:err "warn"} {:value "42"})))
+      (is (= "warn\nout" (printed {:err "warn"} {:out "out"})))
+      (testing "and when the evaluation's over"
+        (is (= "warn\n" (printed {:err "warn"} :end)))
+        (is (= "warn\n" (printed {:err "warn\n"} :end)))))))
