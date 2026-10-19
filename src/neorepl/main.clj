@@ -1016,7 +1016,7 @@ with an error, and 2 on usage errors."
           [{:long "--timeout" :arg "SECS" :parse parse-seconds :default 60
             :doc "Interrupt evaluations after SECS seconds, unless a call says otherwise (default: 60)"}
            {:long "--max-output" :arg "CHARS" :parse parse-count :default 10000
-            :doc "Cut each value, stdout and stderr at CHARS characters (default: 10000)"}
+            :doc "Cut what an evaluation prints and returns at CHARS characters (default: 10000)"}
            help-option]))
 
 (def ^:private mcp-help

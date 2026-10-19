@@ -27,7 +27,7 @@
     ns (assoc :ns ns)
     (and ex (not (:ex acc))) (assoc :ex ex :root-ex root-ex)))
 
-(defn- cut
+(defn cut
   "s cut down to n characters, short of splitting a surrogate pair."
   [^String s n]
   (cond
