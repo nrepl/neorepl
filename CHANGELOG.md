@@ -17,6 +17,7 @@
 - [#25](https://github.com/nrepl/neorepl/pull/25): A ClojureScript exception on shadow-cljs fails the evaluation, with exit status 1 and an MCP error, instead of passing as the value `:repl/exception!`.
 - [#25](https://github.com/nrepl/neorepl/pull/25): A read from `*in*` no longer keeps `neorepl eval` waiting past `--timeout`.
 - [#25](https://github.com/nrepl/neorepl/pull/25): Output on stderr that doesn't end its line no longer runs into the value or the prompt after it.
+- [#26](https://github.com/nrepl/neorepl/pull/26): The MCP `pst` and `apropos` tools return an object as structured content, which the official MCP SDK insists on, rather than a list.
 
 ## 0.3.0 (2026-10-17)
 
