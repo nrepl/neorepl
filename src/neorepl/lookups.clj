@@ -16,7 +16,8 @@
   that's code, :args? that it's several, as a seq, and :optional? that it can
   be left out. Its :find takes the client, a context with the :ns to look in,
   the :session and the session's :session-name, if it has one, as
-  neorepl.features has it, and the argument. :text turns what it finds into
+  neorepl.features has it, and how long to wait for a reload, its
+  :timeout-ms, and the argument. :text turns what it finds into
   text, code when :code? says so, and :none says what finding nothing means.
   :failed? says whether what it found means it failed after all."
   [{:name "doc" :arg "SYM" :help "Show the documentation of SYM"
@@ -50,7 +51,8 @@
     :none (fn [{:keys [ns]} sym] (str "Nowhere to find " sym " in " ns))}
    {:name "reload" :arg "NS..." :args? true :optional? true
     :help "Reload the namespaces NS, or the ones that changed"
-    :find (fn [client _ nses] (features/reload client nses))
+    :find (fn [client {:keys [timeout-ms]} nses]
+            (features/reload client nses {:timeout-ms timeout-ms}))
     :text (fn [{:keys [reloaded output]}]
             (str (some-> output str/trimr (str "\n"))
                  (if (seq reloaded)

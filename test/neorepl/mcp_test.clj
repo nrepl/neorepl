@@ -147,6 +147,15 @@
        (send (tool-call 10 "apropos" {:regex "^mapcat$"}))
        (is (= "clojure.core/mapcat" (get-in (receive) [:result :structuredContent :vars 0 :name])))))))
 
+(deftest reload-test
+  (call-with-mcp
+   (fn [send receive]
+     (testing "giving up once the timeout's up"
+       (send (tool-call 1 "reload" {:namespaces ["neorepl.sample-sleepy"] :timeout 0.5}))
+       (let [{{:keys [isError] :as result} :result} (receive)]
+         (is isError)
+         (is (= "Gave up waiting after 0.5s, while the server may still be reloading" (text {:result result}))))))))
+
 (deftest sessions-test
   (testing "shared with the CLI"
     (with-out-str

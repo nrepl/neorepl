@@ -126,6 +126,18 @@
   (cond-> r
     (sequential? (:data r)) (update :data #(hash-map k %))))
 
+(defn- reload
+  "Reloads namespaces, or what changed without them, as neorepl reload does,
+  giving up once the call's timeout, or the server's, is up."
+  [{:keys [timeout] :as server} args namespaces]
+  (let [seconds (or (:timeout args) timeout)]
+    (try
+      (lookup server args "reload" (seq namespaces) (constantly {:timeout-ms (long (* 1000 seconds))}))
+      (catch clojure.lang.ExceptionInfo e
+        (if (= ::nrepl/timeout (:type (ex-data e)))
+          (error (str "Gave up waiting after " seconds "s, while the server may still be reloading"))
+          (throw e))))))
+
 (defn- check
   "The first unbalanced delimiter in each of files, as neorepl check finds
   them, repaired, as neorepl check --fix does, if fix?."
@@ -143,6 +155,10 @@
 (def ^:private session-arg
   {:session {:type "string"
              :description "The named session, shared with neorepl's CLI (default: default)"}})
+
+(def ^:private timeout-arg
+  {:timeout {:type "number"
+             :description "Seconds before interrupting it"}})
 
 (def ^:private ns-arg
   {:ns {:type "string" :description "The namespace to resolve in (default: user)"}})
@@ -205,8 +221,8 @@
            (lookup server args (if all "macroexpand-all" "macroexpand") form))}
    {:name "reload"
     :description "Reload namespaces after changing their files: the ones given, or with cider-nrepl, every one that changed."
-    :inputSchema (schema (merge {:namespaces {:type "array" :items {:type "string"}}} port-arg))
-    :run (fn [server {:keys [namespaces] :as args} _] (lookup server args "reload" (seq namespaces)))}
+    :inputSchema (schema (merge {:namespaces {:type "array" :items {:type "string"}}} timeout-arg port-arg))
+    :run (fn [server {:keys [namespaces] :as args} _] (reload server args namespaces))}
    {:name "test"
     :description "Run tests: the namespaces given, or tests as ns/name, or with cider-nrepl or babashka, the whole project's. Says what didn't pass, where and why."
     :inputSchema (schema (merge {:names {:type "array" :items {:type "string"}}

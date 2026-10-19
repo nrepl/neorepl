@@ -19,6 +19,7 @@
 - [#25](https://github.com/nrepl/neorepl/pull/25): Output on stderr that doesn't end its line no longer runs into the value or the prompt after it.
 - [#26](https://github.com/nrepl/neorepl/pull/26): The MCP `pst` and `apropos` tools return an object as structured content, which the official MCP SDK insists on, rather than a list.
 - [#26](https://github.com/nrepl/neorepl/pull/26): Code that reads `*in*` through the MCP tools gets end of input, instead of the next message the agent sends.
+- [#26](https://github.com/nrepl/neorepl/pull/26): The MCP `reload` tool gives up once its time is up, so a namespace that never finishes loading can't keep the call, or `neorepl mcp` ending, waiting for good.
 
 ## 0.3.0 (2026-10-17)
 
