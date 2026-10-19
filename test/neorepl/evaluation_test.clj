@@ -44,6 +44,15 @@
       (testing "shadow-cljs's word for ClojureScript code that threw"
         (is (= "eval-error" (:status (evaluate {:op "eval" :code ":repl/exception!"} {}))))))))
 
+(deftest read-line-test
+  (with-client [client {:port *port*}]
+    (testing "a read from *in* that blocks doesn't outlast the timeout"
+      (let [started (System/currentTimeMillis)
+            {:keys [status]} (evaluation/evaluate client {:op "eval" :code "(read-line)" :session (nrepl/clone-session client)}
+                                                  {:timeout 0.3 :read-line #(do (Thread/sleep 5000) "late")})]
+        (is (= "timeout" status))
+        (is (< (- (System/currentTimeMillis) started) 3000))))))
+
 (deftest text-printer-test
   (let [printed (fn [& responses]
                   (let [print-response (evaluation/text-printer)]
