@@ -152,7 +152,7 @@
 
 (def ^:private session-arg
   {:session {:type "string" :minLength 1
-             :description "The named session, shared with neorepl's CLI (default: default)"}})
+             :description "The named session, shared with neorepl's CLI (default: agent)"}})
 
 (def ^:private timeout-arg
   {:timeout {:type "number" :exclusiveMinimum 0 :maximum 86400
@@ -302,7 +302,8 @@
         (if-let [message (problem tool arguments)]
           (error message)
           (try
-            (run server (merge {:session "default" :ns "user"} arguments) on-send)
+            ;; The skill has the CLI use the session called agent too.
+            (run server (merge {:session "agent" :ns "user"} arguments) on-send)
             (catch clojure.lang.ExceptionInfo e
               (error (ex-message e)))))]
     {:content [{:type "text" :text (if (str/blank? text) "(nothing)" text)}]

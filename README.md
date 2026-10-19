@@ -217,8 +217,9 @@ claude mcp add neorepl -- neorepl mcp
 
 Its tools are `eval`, `load`, `doc`, `source`, `where`, `apropos`,
 `macroexpand`, `reload`, `test`, `retest`, `pst`, `interrupt`, `check` and
-`ports`, with `check` taking a `fix` argument for `--fix`, and they share the CLI's sessions, so `neorepl eval --session NAME`
-and the `eval` tool with that session see the same state. That's fewer tools
+`ports`, with `check` taking a `fix` argument for `--fix`, and they share the CLI's sessions, the one called
+`agent` unless a call names another, so `neorepl eval --session agent` and
+the `eval` tool see the same state. That's fewer tools
 than the CLI has commands on purpose: an agent pays for every tool's
 description in its context on every turn, whether it uses it or not, while a
 command costs nothing until it runs. So completion, which is for people

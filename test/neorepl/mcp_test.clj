@@ -163,6 +163,8 @@
            (is (= "nil" (text (receive))))
            (finally
              (alter-var-root #'*in* (constantly in))))))
+     (testing "in the session called agent, unless the call names another"
+       (is (str/includes? (slurp (sessions-file)) "\"agent\"")))
      (testing "a lookup"
        (send (tool-call 6 "doc" {:symbol "inc"}))
        (is (str/starts-with? (text (receive)) "clojure.core/inc\n([x])"))

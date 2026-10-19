@@ -28,8 +28,8 @@ other commands find.
 Evaluations keep their state, `*ns*`, `*1` and `*e`, between calls in a
 named session. Use one of your own, `--session agent` (`-s agent`), on the
 commands that evaluate, so you don't trample the user's: `eval`, `load`,
-`test`, `retest`, `pst` and `interrupt`. `neorepl sessions close agent`
-starts it over.
+`test`, `retest`, `pst` and `interrupt`. neorepl's MCP tools use that one
+too. `neorepl sessions close agent` starts it over.
 
 ## After editing a file
 
