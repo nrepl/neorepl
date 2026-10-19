@@ -57,6 +57,36 @@
     (testing "other keys do nothing"
       (is (= view (inspector/handle view "x" (fn [_ _])))))))
 
+(deftest define-test
+  (let [view (assoc (inspector/view lines) :ns "user")
+        asked (atom nil)
+        new-lines (fn [msg]
+                    (reset! asked msg)
+                    lines)]
+    (testing "d asks for a name at the bottom"
+      (is (= "Define #'user/[ ]" (last (screen (press view new-lines "d") 4)))))
+    (testing "Enter defines what's being inspected as that var"
+      (let [defined (press view new-lines "d" "p" "i" "x" :backspace "c" "k" :enter)]
+        (is (= {:op "inspect-def-current-value" :ns "user" :var-name "pick"} @asked))
+        (is (= "Defined #'user/pick" (last (screen defined 4))))
+        (testing "until the next key"
+          (is (= "help" (last (screen (press defined new-lines :down) 4)))))))
+    (testing "but not without a name, or after Escape"
+      (reset! asked nil)
+      (doseq [keys [["d" " " :enter] ["d" "x" :escape]]]
+        (let [view (apply press view new-lines keys)]
+          (is (nil? (:prompt view)))
+          (is (= "help" (last (screen view 4))))))
+      (is (nil? @asked)))
+    (testing "nor with a name a var can't have"
+      (is (= "Not a name for a var: a/b" (last (screen (press view new-lines "d" "a" "/" "b" :enter) 4))))
+      (is (nil? @asked)))
+    (testing "what the server can't do shows at the bottom"
+      (let [failed (reduce #(inspector/handle %1 %2 (fn [view _] (assoc view :message "No luck")))
+                           view
+                           ["d" "x" :enter])]
+        (is (= "No luck" (last (screen failed 4))))))))
+
 (defn- view-lines
   "n lines of a view, the last saying which page it is, if it has pages."
   [n page]

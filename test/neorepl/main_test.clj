@@ -538,6 +538,10 @@
       (is (str/starts-with? (:out (inspect "--pop")) "Class: [0]clojure.lang.PersistentArrayMap\n"))
       (testing "and what's being inspected"
         (is (str/starts-with? (:out (inspect)) "Class: [0]clojure.lang.PersistentArrayMap\n")))
+      (testing "defining that as a var in the session's namespace"
+        (is (= {:status 0 :out "#'user/inspected-by-cli\n" :err ""}
+               (inspect "--def" "inspected-by-cli")))
+        (is (= "{:a [1 2]}\n" (:out (run-command "eval" "-s" "inspecting" "inspected-by-cli")))))
       (testing "within --timeout"
         (is (= 0 (:status (inspect "--timeout" "5" "--next-page")))))
       (testing "past --timeout"
@@ -547,7 +551,9 @@
     (testing "json"
       (is (= {:status 0 :out "{\"status\":\"ok\",\"text\":\"Class: [0]clojure.lang.PersistentVector\\nCount: 2\\n\\n--- Contents:\\n  0. [1]1\\n  1. [2]2\"}\n" :err ""}
              (inspect "--format" "json" "--push" "2")))
-      (is (str/includes? (:out (inspect "--format" "json" "[1]")) "\"text\":\"Class: [0]clojure.lang.PersistentVector")))
+      (is (str/includes? (:out (inspect "--format" "json" "[1]")) "\"text\":\"Class: [0]clojure.lang.PersistentVector"))
+      (is (= "{\"status\":\"ok\",\"text\":\"#'user/inspected-by-cli\"}\n"
+             (:out (inspect "--format" "json" "--def" "inspected-by-cli")))))
     (testing "code that fails"
       (let [{:keys [status out err]} (inspect "(/ 1 0)")]
         (is (= 1 status))
@@ -559,7 +565,10 @@
     (testing "usage"
       (is (= 2 (:status (inspect "--pop" "1"))))
       (is (= 2 (:status (inspect "--pop" "--next-page"))))
-      (is (= 2 (:status (inspect "--push" "x")))))))
+      (is (= 2 (:status (inspect "--push" "x"))))
+      (is (= 2 (:status (inspect "--def" "x" "--pop"))))
+      (is (= 2 (:status (inspect "--def" ""))))
+      (is (= 2 (:status (inspect "--def" "a/b")))))))
 
 (deftest repl-commands-test
   (let [repl #(:out (run-in *dir* % "repl" "-p" (str *port*)))]

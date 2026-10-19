@@ -816,16 +816,19 @@ server."
   (report-tests :failed options ctx))
 
 (def ^:private inspector-actions
-  "The options that move the inspector around, and the ops they send, with
-  --push's value as the :idx."
+  "The options that do something with the inspector, the ops they send, and
+  the key in those that takes the option's value, if it has one."
   [[{:long "--push" :arg "N" :parse parse-index
      :doc "Inspect the value marked [N] in what's being inspected"}
-    "inspect-push"]
+    "inspect-push" :idx]
    [{:long "--pop" :doc "Go back to what was being inspected before"} "inspect-pop"]
    [{:long "--next-page" :doc "Show the next page of a big collection"} "inspect-next-page"]
    [{:long "--prev-page" :doc "Show the previous page"} "inspect-prev-page"]
    [{:long "--view" :doc "Switch to the next view mode, like the object's fields"}
-    "inspect-toggle-view-mode"]])
+    "inspect-toggle-view-mode"]
+   [{:long "--def" :arg "NAME" :parse #(when (features/var-name? %) %)
+     :doc "Define what's being inspected as NAME in the session's namespace"}
+    "inspect-def-current-value" :var-name]])
 
 (def ^:private inspect-options
   (concat connection-options
@@ -837,7 +840,8 @@ server."
   (help-text
    "Usage: neorepl inspect [options] CODE
        neorepl inspect [options] -
-       neorepl inspect [options] [--push N | --pop | --next-page | --prev-page | --view]"
+       neorepl inspect [options] [--push N | --pop | --next-page | --prev-page | --view]
+       neorepl inspect [options] --def NAME"
    "Evaluates CODE, or standard input with -, and prints its value the way
 cider-nrepl's inspector shows it: the class, the contents, page by page for
 big collections, and so on. Each value in there that can be inspected further
@@ -853,6 +857,7 @@ babashka on the server."
   neorepl inspect '(System/getProperties)'
   neorepl inspect --push 3
   neorepl inspect --pop
+  neorepl inspect --def props
   neorepl inspect --format json '{:a [1 2 3]}'"))
 
 (defn- inspector-result
@@ -862,14 +867,14 @@ babashka on the server."
     lines (assoc :text (render/inspector-text lines))))
 
 (defn- inspect-command [{:keys [format timeout] :as options} args ctx]
-  (let [actions (keep (fn [[spec op]]
+  (let [actions (keep (fn [[spec op k]]
                         (when-some [value (get options (cli/option-key spec))]
-                          (cond-> {:op op} (number? value) (assoc :idx value))))
+                          (cond-> {:op op} k (assoc k value))))
                       inspector-actions)]
     (cond
       (< 1 (count actions)) (throw (usage-error (str "Give one of "
                                                      (str/join ", " (map (comp :long first) inspector-actions)))))
-      (and (seq actions) (seq args)) (throw (usage-error "Give either CODE or an option that moves the inspector, not both"))
+      (and (seq actions) (seq args)) (throw (usage-error "Give either CODE or an option for the inspector, not both"))
 
       (seq args)
       (let [code (read-code nil args)]
@@ -883,10 +888,13 @@ babashka on the server."
       (with-named-session options ctx
         (fn [client id]
           (try
-            (let [{:keys [text] :as result}
-                  (inspector-result (features/inspector client id (or (first actions) {:op "inspect-refresh"})
-                                                        (cond-> {}
-                                                          timeout (assoc :timeout-ms (long (* 1000 timeout))))))]
+            (let [{:keys [var-name] :as action} (or (first actions) {:op "inspect-refresh"})
+                  ns (when var-name (nrepl/evaluation-ns client id))
+                  opts (cond-> {} timeout (assoc :timeout-ms (long (* 1000 timeout))))
+                  result (inspector-result (features/inspector client id (cond-> action ns (assoc :ns ns)) opts))
+                  {:keys [text] :as result} (cond-> result
+                                              ;; Rather than the view again, which --def leaves as it was.
+                                              var-name (assoc :text (str "#'" ns "/" var-name)))]
               (if (= "text" format)
                 (println text)
                 (emit format result))

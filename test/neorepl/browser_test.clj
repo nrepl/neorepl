@@ -70,3 +70,16 @@
           (is (= "Value: [1]" (first (screen (press paged :down) 4)))))))
     (testing "other keys aren't for moving"
       (is (nil? (browser/moved view "x"))))))
+
+(deftest prompted-test
+  (let [view (assoc (browser/view lines) :prompt {:label "Name: " :text ""})
+        typed #(reduce browser/prompted view %&)]
+    (testing "typing after the label at the bottom, with a block for the cursor"
+      (is (= "Name: ab[ ]" (last (screen (typed "a" "x" :backspace "b") 3)))))
+    (testing "the keys that move around or quit are for typing too"
+      (is (= "jq" (:text (:prompt (typed "j" :down :page-down "q"))))))
+    (testing "Backspace with nothing typed"
+      (is (= "" (:text (:prompt (typed :backspace))))))
+    (testing "Escape and Ctrl-C drop the prompt"
+      (doseq [key [:escape :ctrl-c]]
+        (is (= "help" (last (screen (typed "a" key) 3))))))))

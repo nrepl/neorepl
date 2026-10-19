@@ -198,6 +198,13 @@
   [client session]
   (some #(get-in % [:aux :current-ns]) (request client {:op "describe" :session session})))
 
+(defn evaluation-ns
+  "The name of the namespace code sent to session evaluates in, user when
+  the server doesn't say. Not necessarily user otherwise: shadow-cljs starts
+  sessions in shadow.user, and a named session is wherever it was left."
+  [client session]
+  (or (session-ns client session) "user"))
+
 (defn interrupt
   "Asks the server to interrupt the evaluation with message id in session, or
   whichever is running there when id is nil. Returns how that went:

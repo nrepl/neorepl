@@ -347,6 +347,11 @@
   (let [sym (try (edn/read-string s) (catch Exception _ nil))]
     (and (kind? sym) (= s (str sym)))))
 
+(defn var-name?
+  "Whether s can name a var: an unqualified symbol."
+  [s]
+  (symbol-name? simple-symbol? s))
+
 (defn- unknown-tests
   "Loads the namespaces that names, names of namespaces and of tests as
   ns/name, are or are in, in session, and returns the names of tests that

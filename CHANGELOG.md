@@ -7,6 +7,7 @@
 - [#17](https://github.com/nrepl/neorepl/pull/17): `,trace` and `neorepl trace` trace functions, or whole namespaces, with cider-nrepl, and the REPL shows calls from other threads too.
 - [#18](https://github.com/nrepl/neorepl/pull/18): `,ns` switches namespaces, loading the one named if it isn't yet, and lists the project's loaded namespaces without a name.
 - [#23](https://github.com/nrepl/neorepl/pull/23): `,sessions` lists the named sessions and switches the REPL into one, such as an agent's, with `,sessions -` going back and the session's name in the prompt.
+- [#24](https://github.com/nrepl/neorepl/pull/24): `d` in the full-screen inspector, and `neorepl inspect --def NAME`, define what's being inspected as a var in the session's namespace.
 
 ### Bug fixes
 

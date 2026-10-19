@@ -405,14 +405,19 @@
           (fn [type screen]
             (type ",inspect {:a [1 2]}\r")
             (is (screen #"--- Contents:(?s).*q quit"))
-            (testing "digging into the value selected"
-              (type "j\r")
+            (testing "defining it as a var in the REPL's namespace"
+              (type "jdinspected-in-repl\r")
+              ;; The screen only gets what changed on the bottom line, the
+              ;; name typed a character at a time, then the rest of it.
+              (is (screen #"#'user/inspected-in-repl")))
+            (testing "digging into the value selected, which that left alone"
+              (type "\r")
               (is (screen #"0\. 1\s+1\. 2")))
             (testing "and back to the REPL, which carries on"
               (type "q")
               (is (screen #"user=> $"))
-              (type "(+ 1 2)\r")
-              (is (screen #"(?m)^3\nuser=> $")))))]
+              (type "inspected-in-repl\r")
+              (is (screen #"(?m)^\{:a \[1 2\]\}\nuser=> $")))))]
     (testing "on a screen of its own, which goes away after"
       (is (str/includes? out "\u001b[?1049h"))
       (is (str/includes? out "\u001b[?1049l"))))
