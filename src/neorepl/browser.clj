@@ -71,12 +71,25 @@
     :end (select view (dec (count values)))
     nil))
 
+(defn prompted
+  "view, which has a :prompt at the bottom, a map with its :label and the
+  :text typed after it, after key, as editor/full-screen has keys, but for
+  Enter, which is the caller's to take: printable characters go in the
+  :text, Backspace takes the last one out, and Escape or Ctrl-C drops the
+  prompt."
+  [view key]
+  (case key
+    :backspace (update-in view [:prompt :text] #(subs % 0 (max 0 (dec (count %)))))
+    (:escape :ctrl-c) (dissoc view :prompt)
+    (cond-> view
+      (string? key) (update-in [:prompt :text] str key))))
+
 (defn draw
   "What the screen shows of view, height lines of it: as
   much of the view as fits and help, a line saying what the keys do, or the
-  view's :message, at the bottom. Values are highlighted as code, unless
-  they have a :style."
-  [{:keys [lines top message] :as view} help height]
+  view's :message, or its :prompt, at the bottom. Values are highlighted as
+  code, unless they have a :style."
+  [{:keys [lines top message prompt] :as view} help height]
   (let [[_ selected-index] (selected-value view)
         body (for [line (take (dec height) (drop top lines))]
                (for [{:keys [text index heading? style]} line]
@@ -88,7 +101,10 @@
                    :else {:text text})))]
     (concat body
             (repeat (- (dec height) (count body)) [])
-            [[{:text (or message help) :style :notice}]])))
+            [(if-let [{:keys [label text]} prompt]
+               ;; A full-screen view hides the cursor, so this stands in.
+               [{:text label :style :notice} {:text text} {:text " " :selected? true}]
+               [{:text (or message help) :style :notice}])])))
 
 (defn browse
   "Shows view full-screen on editor, with help at the bottom, until (handle

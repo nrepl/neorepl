@@ -128,7 +128,8 @@ them yet.
 `,inspect` shows a value, or the last one without code, in cider-nrepl's
 inspector, full-screen: the arrow keys (or `j` and `k`) move between the
 values in it, Enter digs into one, Backspace goes back, `[` and `]` page
-through big collections, a screenful at a time, `v` shows the object's fields and `q` takes you back
+through big collections, a screenful at a time, `v` shows the object's fields, `d` defines what's
+being inspected as a var in the REPL's namespace, under the name you type, and `q` takes you back
 to the REPL. `neorepl inspect` does the same for scripts and agents, one step
 at a time, since the inspector stays in the session. Both take cider-nrepl or
 babashka on the server:
@@ -137,6 +138,7 @@ babashka on the server:
 neorepl inspect '(System/getProperties)'
 neorepl inspect --push 3
 neorepl inspect --pop
+neorepl inspect --def props
 ```
 
 `,stacktrace` shows the last error full-screen the same way: Enter on a

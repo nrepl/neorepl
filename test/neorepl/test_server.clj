@@ -116,7 +116,7 @@
 
 (def ^:private inspect-ops
   #{"inspect-push" "inspect-pop" "inspect-refresh" "inspect-next-page" "inspect-prev-page"
-    "inspect-toggle-view-mode" "inspect-toggle-pretty-print"})
+    "inspect-toggle-view-mode" "inspect-toggle-pretty-print" "inspect-def-current-value"})
 
 (defn wrap-fake-inspector
   "Inspects values the way cider-nrepl does, roughly, for evaluations with
@@ -125,7 +125,7 @@
   to an index it doesn't have. Values are data the reader can take back
   from how they're printed."
   [handler]
-  (fn [{:keys [op session inspect idx transport page-size] :as msg}]
+  (fn [{:keys [op session inspect idx transport page-size ns var-name] :as msg}]
     (when (and page-size (#{"eval" "inspect-refresh"} op))
       (swap! page-sizes assoc session page-size))
     (case op
@@ -153,6 +153,8 @@
                        (show msg))
       "inspect-pop" (do (swap! inspected update session #(cond-> % (< 1 (count %)) pop))
                         (show msg))
+      "inspect-def-current-value" (do (intern (symbol ns) (symbol var-name) (peek (get @inspected session)))
+                                      (show msg))
       (if (inspect-ops op)
         ;; The rest show what's on show.
         (show msg)

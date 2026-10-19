@@ -174,10 +174,10 @@
   "Inspects the cause at index of the error last-error found, or its ex-data
   if ex-data?, letting the user :browse it, and returns nil, or a message
   saying why it couldn't."
-  [{:keys [client session browse height]} index ex-data?]
+  [{:keys [client session ns browse height]} index ex-data?]
   (try
     (let [height (height)]
-      (inspector/browse browse client session
+      (inspector/browse browse client session ns
                         (:lines (features/inspect-error client session index ex-data?
                                                         (inspector/start-page-size height)))
                         height)
@@ -229,13 +229,13 @@
   "Inspects the value of code, or *1 without it, evaluating it the way the
   REPL :evaluates code, and lets the user :browse it, or prints it when
   there's no browsing. Returns what to print, as command-output does."
-  [{:keys [client session evaluate browse height]} code]
+  [{:keys [client session ns evaluate browse height]} code]
   (let [height (when browse (height))
         page-size (some-> height inspector/start-page-size)]
     (if-let [lines (:lines (evaluate #(features/inspect client session (or code "*1")
                                                         (assoc % :page-size page-size))))]
       (if browse
-        (do (inspector/browse browse client session lines height)
+        (do (inspector/browse browse client session ns lines height)
             {})
         (out (render/inspector-text lines)))
       {})))
@@ -254,13 +254,6 @@
     (out (or (some->> (features/namespaces client state) seq (str/join "\n"))
              "None of the project's namespaces are loaded"))))
 
-(defn- session-ns
-  "The name of the namespace session is in, user when the server doesn't
-  say. Not necessarily user otherwise: shadow-cljs starts sessions in
-  shadow.user, and a named session is wherever it was left."
-  [client session]
-  (or (nrepl/session-ns client session) "user"))
-
 (defn- switch-session
   "Switches to the session called name in the :sessions-file, or to the
   REPL's :own session for -, or lists them without a name, marking the one
@@ -278,7 +271,7 @@
                               ": the server asks the connection that made the session for the input")))
         {:session id
          :session-name (if own? (:session-name own) name)
-         :ns (session-ns client id)})
+         :ns (nrepl/evaluation-ns client id)})
       (out (str "No session called " name ", neorepl eval -s " name " CODE makes one")))
     (out (str/join "\n" (cli/columns (for [[name id] (cons [(or (:session-name own) "-") (:session own)]
                                                            (dissoc (sessions/named sessions-file client) (:session-name own)))]
@@ -437,7 +430,7 @@
      ;; printing them.
      hide-traces
      (fn []
-       (loop [{:keys [ns session] :as place} (assoc own :ns (session-ns client session))
+       (loop [{:keys [ns session] :as place} (assoc own :ns (nrepl/evaluation-ns client session))
               pending nil]
          (let [code (or pending (read-code place))
                [name arg more] (some-> code command-call)
