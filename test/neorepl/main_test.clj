@@ -293,8 +293,8 @@
     (testing "or a named one"
       (repl "(in-ns 'repl.named)\n" "-s" "repl-named")
       (is (= "repl.named" (:ns (edn/read-string (:out (run "-s" "repl-named" "--format" "edn" "1"))))))
-      (testing "which the prompt starts in"
-        (is (= "repl.named=> \n" (:out (repl "" "-s" "repl-named")))))))
+      (testing "which the prompt names, starting in its namespace"
+        (is (= "repl-named:repl.named=> \n" (:out (repl "" "-s" "repl-named")))))))
   (testing "the default command"
     (is (= "user=> 3\nuser=> \n" (:out (run-in *dir* "(+ 1 2)\n" "-p" (str *port*)))))))
 

@@ -947,7 +947,8 @@ drops."
          #(when-not session
             ;; There's nothing to close when the connection is gone.
             (try (nrepl/close-session client id) (catch Exception _ nil)))
-         #(do (start client id (select-keys ctx [:dir :history-dir :terminal :editor-command]))
+         #(do (start client id (-> (select-keys ctx [:dir :history-dir :terminal :editor-command :sessions-file])
+                                   (assoc :session-name session)))
               0))))))
 
 (def ^:private server-options

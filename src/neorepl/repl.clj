@@ -12,6 +12,7 @@
             [neorepl.lexer :as lexer]
             [neorepl.nrepl :as nrepl]
             [neorepl.render :as render]
+            [neorepl.sessions :as sessions]
             [neorepl.shutdown :as shutdown]
             [neorepl.stacktrace :as stacktrace])
   (:import (java.security MessageDigest)
@@ -55,7 +56,7 @@
                      (.interrupt thread)
                      thread))}))
 
-(declare edit enter-ns inspect run-tests browse-error)
+(declare edit enter-ns switch-session inspect run-tests browse-error)
 
 (def ^:private commands
   "The REPL's commands, the CIDER way: a comma, which Clojure reads as
@@ -77,6 +78,9 @@
            {:name "ns" :arg "NS" :optional? true
             :help "Switch to NS, loading it if need be, or list the project's"
             :run #(enter-ns %1 %2)}
+           {:name "sessions" :arg "NAME" :optional? true
+            :help "Switch to the session called NAME, or - for the REPL's own, or list them"
+            :run #(switch-session %1 %2)}
            {:name "help" :help "List the commands"}
            {:name "quit" :help "Leave the REPL"}]))
 
@@ -245,10 +249,42 @@
   (if ns
     (let [{:keys [status] :as result} (evaluate #(features/enter-ns client session ns %))]
       (if (= "ok" status)
-        {:ns (:ns result)}
+        {:ns (or (:ns result) ns)}
         {}))
     (out (or (some->> (features/namespaces client state) seq (str/join "\n"))
              "None of the project's namespaces are loaded"))))
+
+(defn- session-ns
+  "The name of the namespace session is in, user when the server doesn't
+  say. Not necessarily user otherwise: shadow-cljs starts sessions in
+  shadow.user, and a named session is wherever it was left."
+  [client session]
+  (or (nrepl/session-ns client session) "user"))
+
+(defn- switch-session
+  "Switches to the session called name in the :sessions-file, or to the
+  REPL's :own session for -, or lists them without a name, marking the one
+  the REPL's in. Returns what to print, as command-output does, with where
+  the REPL is now, as run-loop's read-code gets it."
+  [{:keys [client sessions-file session own test-errors print-message]} name]
+  (if name
+    (if-let [id (if (= "-" name) (:session own) (get (sessions/named sessions-file client) name))]
+      (let [own? (= id (:session own))]
+        ;; So ,stacktrace shows that session's last error.
+        (when-not (= id session)
+          (reset! test-errors nil))
+        (when-not own?
+          (print-message (str "Reading *in* won't work in " name
+                              ": the server asks the connection that made the session for the input")))
+        {:session id
+         :session-name (if own? (:session-name own) name)
+         :ns (session-ns client id)})
+      (out (str "No session called " name ", neorepl eval -s " name " CODE makes one")))
+    (out (str/join "\n" (cli/columns (for [[name id] (cons [(or (:session-name own) "-") (:session own)]
+                                                           (dissoc (sessions/named sessions-file client) (:session-name own)))]
+                                       [(str (if (= id session) "* " "  ") name)
+                                        (nrepl/session-ns client id)
+                                        (when (= id (:session own)) "this REPL's")]))))))
 
 (defn- reenter
   "Puts session back in the namespace called ns, as tools.namespace's refresh
@@ -274,14 +310,17 @@
 
 (defn- command-output
   "Runs the command called name with arg, and returns what to print, as a
-  response for the REPL's printer, or :quit. state has the :client, the
-  :session and the :ns, for the lookups, the :editor-command and a function
-  to run it with the terminal :suspended, for ,edit, a function that
-  :evaluates the way the REPL does, for ,test and ,inspect, and one to
-  :browse what ,inspect and ,stacktrace find, as browser/browse does, partly
-  applied to the editor, if the REPL can, an atom with the last test run's
-  :test-errors and functions that have the REPL :show-traces and
-  :hide-traces. What to print can have the :ns the REPL goes on in."
+  response for the REPL's printer, or :quit. state has the :client and
+  where the REPL is, as run-loop's read-code gets it, for the lookups, the
+  :editor-command and a function to run it with the terminal :suspended,
+  for ,edit, a function that :evaluates the way the REPL does, for ,test
+  and ,inspect, and one to :browse what ,inspect and ,stacktrace find, as
+  browser/browse does, partly applied to the editor, if the REPL can, an
+  atom with the last test run's :test-errors, functions that have the REPL
+  :show-traces and :hide-traces, and the :sessions-file and the REPL's :own
+  session, where it started, for ,sessions. What to print can have the :ns
+  the REPL goes on in, or the :session and its :session-name too, as
+  switch-session says."
   [{:keys [client] :as state} name arg]
   (let [{arg-name :arg :keys [code? args? optional?] :as command} (command name)]
     (cond
@@ -307,12 +346,21 @@
                   (throw e))
                 (out (or (ex-message e) (str e))))))))
 
+(defn- prompt
+  "The prompt for where the REPL is, as run-loop's read-code gets it: the
+  namespace, after the session's name and a colon when it has a name.
+  Without a space, which comint modes' prompt patterns don't take."
+  [{:keys [ns session-name]}]
+  (str (some-> session-name (str ":")) ns "=> "))
+
 (defn- run-loop
-  "Reads code with read-code, a function of the current namespace's name,
-  and evaluates it in session until the input ends or says :repl/quit. Runs
-  commands too, which get io for what else they need. Responses go to
-  print-response, late ones and what commands print too, and result
-  messages to print-message.
+  "Reads code with read-code and evaluates it until the input ends or says
+  :repl/quit. read-code gets where the REPL is: the :ns, the :session,
+  session to begin with, and its :session-name, if it has one,
+  session-name to begin with. Runs commands too, which get io for what
+  else they need, and can switch sessions. Responses go to print-response,
+  late ones and what commands print too, and result messages to
+  print-message.
 
   What an interrupted evaluation says from then on is left out, since it
   comes from it dying: an InterruptedException, or code carrying on after a
@@ -320,7 +368,7 @@
   does, even once the next evaluation's started. So is what evaluations say
   once neorepl's exiting, which interrupts them."
   [client session {:keys [running interrupted command-thread]}
-   {:keys [read-code read-line width print-response print-message] :as io}]
+   {:keys [read-code read-line width print-response print-message session-name] :as io}]
   (let [print-response #(let [stopped @interrupted
                               id (:id %)]
                           ;; What the server prints has no id, and isn't an
@@ -329,6 +377,7 @@
                                         (and id (shutdown/exiting?)))
                             (print-response %)))
         late (agent nil :error-mode :continue)
+        own {:session session :session-name session-name}
         ;; The errors of the last test run, until an evaluation fails.
         test-errors (atom nil)
         ;; The subscription to trace events, once something's traced.
@@ -388,18 +437,16 @@
      ;; printing them.
      hide-traces
      (fn []
-       ;; Not necessarily user: shadow-cljs starts sessions in shadow.user,
-       ;; and a named session is wherever it was left.
-       (loop [ns (or (nrepl/session-ns client session) "user")
+       (loop [{:keys [ns session] :as place} (assoc own :ns (session-ns client session))
               pending nil]
-         (let [code (or pending (read-code ns))
+         (let [code (or pending (read-code place))
                [name arg more] (some-> code command-call)
                output (when name
                         (reset! command-thread (Thread/currentThread))
                         (try
-                          (command-output (assoc io :client client :session session :ns ns :evaluate evaluate
-                                                    :test-errors test-errors :show-traces show-traces
-                                                    :hide-traces hide-traces)
+                          (command-output (merge io place {:client client :evaluate evaluate :test-errors test-errors
+                                                           :show-traces show-traces :hide-traces hide-traces
+                                                           :own own})
                                           name arg)
                           (finally
                             (reset! command-thread nil)
@@ -407,12 +454,12 @@
                             (Thread/interrupted))))]
            (cond
              (or (nil? code) (= ":repl/quit" (str/trim code)) (= :quit output)) nil
-             (str/blank? code) (recur ns nil)
+             (str/blank? code) (recur place nil)
              output (do (print-response output)
-                        (recur (or (:ns output) ns) more))
+                        (recur (merge place (select-keys output [:session :session-name :ns])) more))
              :else
              (let [result (evaluate #(evaluation/evaluate client (eval-msg session code (width)) %))]
-               (recur (or (:ns result) ns) nil)))))))))
+               (recur (assoc place :ns (or (:ns result) ns)) nil)))))))))
 
 (defn- read-input
   "Reads lines from *in* until they hold complete forms, or nil at the end of
@@ -439,26 +486,26 @@
   "A REPL without a line editor, for when there's no terminal to edit on:
   pipes, Emacs' M-x shell and the like. Reads from *in* and prints prompts and
   results to *out*, the way clojure.main's REPL does."
-  [client session editor-command]
+  [client session opts]
   (let [{:keys [interrupt] :as interruptions} (interruptions)
         print-response (evaluation/text-printer)
         ;; With nothing to interrupt, Ctrl-C is for the REPL.
         previous (on-sigint #(when-not (interrupt) (System/exit 130)))]
     (try
       (run-loop client session interruptions
-                {:read-code (fn [ns]
-                              (print (str ns "=> "))
-                              (flush)
-                              (let [code (read-input)]
-                                (print-response)
-                                code))
-                 :read-line read-line
-                 :width (constantly 80)
-                 :print-response print-response
-                 :print-message #(binding [*out* *err*]
-                                   (println %))
-                 :editor-command editor-command
-                 :suspended #(%)})
+                (assoc opts
+                       :read-code (fn [place]
+                                    (print (prompt place))
+                                    (flush)
+                                    (let [code (read-input)]
+                                      (print-response)
+                                      code))
+                       :read-line read-line
+                       :width (constantly 80)
+                       :print-response print-response
+                       :print-message #(binding [*out* *err*]
+                                         (println %))
+                       :suspended #(%)))
       ;; Ends the line the last prompt is on.
       (newline)
       (finally
@@ -492,15 +539,14 @@
 
 (defn- lookups
   "What the line editor's completion, eldoc and C-x C-d need, looking names
-  up in session, in the namespace the REPL's in, plus :in-ns, to say which
-  that is. Lookups get cached until then, since evaluating code can change
-  what names mean."
-  [client session]
-  (let [current-ns (atom "user")
-        ctx #(hash-map :ns @current-ns :session session)
+  up where the REPL is, plus :in-ns, to say where that is, as run-loop's
+  read-code gets it. Lookups get cached until then, since evaluating code
+  can change what names mean."
+  [client]
+  (let [ctx (atom nil)
         ;; Short timeouts, since these happen as the user types. Failures
         ;; don't get cached, so a slow first lookup gets another go.
-        lookup (fn [sym] (features/info client sym (ctx) {:timeout-ms 500}))
+        lookup (fn [sym] (features/info client sym @ctx {:timeout-ms 500}))
         cached (atom (memoize lookup))
         info #(try
                 (@cached %)
@@ -508,7 +554,7 @@
         token-at (fn [f text cursor]
                    (when-let [token (f (lexer/lex text) cursor)]
                      (assoc token :text (lexer/text text token))))]
-    {:complete #(features/complete client % (ctx) {:timeout-ms 2000})
+    {:complete #(features/complete client % @ctx {:timeout-ms 2000})
      :eldoc (fn [text cursor]
               (when-let [{:keys [end text]} (token-at lexer/enclosing-op text cursor)]
                 ;; Not while the function's name is still being typed.
@@ -519,34 +565,34 @@
                   ;; Keywords and constants have no docs, but the call they're in might.
                   token (if (= :symbol (:type at)) at (token-at lexer/enclosing-op text cursor))]
               (some-> token :text info render/doc-text)))
-     :in-ns (fn [ns]
-              (reset! current-ns ns)
+     :in-ns (fn [place]
+              (reset! ctx place)
               (reset! cached (memoize lookup)))}))
 
 (defn- interactive
-  "The REPL with a line editor. in-ns gets called with the namespace the
-  REPL's in at each prompt."
-  [client session editor in-ns editor-command]
+  "The REPL with a line editor. in-ns gets called with where the REPL is, as
+  run-loop's read-code gets it, at each prompt."
+  [client session editor in-ns opts]
   (let [{:keys [interrupt] :as interruptions} (interruptions)]
     (editor/on-interrupt editor interrupt)
     (editor/print-text editor :notice (banner client))
     (run-loop client session interruptions
-              {:read-code (fn [ns]
-                            (in-ns ns)
-                            (editor/fresh-line editor)
-                            (editor/read-code editor (str ns "=> ")))
-               :read-line #(let [line (editor/read-line editor)]
-                             (if (= ::editor/interrupted line)
-                               (do (interrupt) :interrupted)
-                               line))
-               :width #(editor/width editor)
-               :height #(editor/height editor)
-               :print-response (printer editor)
-               :print-message #(do (editor/fresh-line editor)
-                                   (editor/print-text editor :notice (str % "\n")))
-               :editor-command editor-command
-               :suspended #(editor/suspended editor %)
-               :browse (partial browser/browse editor)})))
+              (assoc opts
+                     :read-code (fn [place]
+                                  (in-ns place)
+                                  (editor/fresh-line editor)
+                                  (editor/read-code editor (prompt place)))
+                     :read-line #(let [line (editor/read-line editor)]
+                                   (if (= ::editor/interrupted line)
+                                     (do (interrupt) :interrupted)
+                                     line))
+                     :width #(editor/width editor)
+                     :height #(editor/height editor)
+                     :print-response (printer editor)
+                     :print-message #(do (editor/fresh-line editor)
+                                         (editor/print-text editor :notice (str % "\n")))
+                     :suspended #(editor/suspended editor %)
+                     :browse (partial browser/browse editor)))))
 
 (defn- history-file
   "The history for the project in dir: a file in history-dir named after a
@@ -564,16 +610,19 @@
     :history-dir  where to keep the history, per project
     :dir          the project's directory when the client doesn't say
     :editor-command
-                  the command line ,edit opens files with, like EDITOR's"
-  [client session {:keys [terminal history-dir dir editor-command]}]
-  (let [{:keys [in-ns] :as lookups} (lookups client session)]
+                  the command line ,edit opens files with, like EDITOR's
+    :sessions-file
+                  the named sessions' file, for ,sessions
+    :session-name session's name in it, if it has one"
+  [client session {:keys [terminal history-dir dir] :as opts}]
+  (let [{:keys [in-ns] :as lookups} (lookups client)]
     (if-let [editor (some-> terminal
                             (merge (select-keys lookups [:complete :eldoc :doc])
                                    {:incomplete? incomplete?
                                     :history-file (history-file history-dir (or (:project-dir client) dir))})
                             editor/open)]
       (try
-        (interactive client session editor in-ns editor-command)
+        (interactive client session editor in-ns opts)
         (finally
           (editor/close editor)))
-      (plain client session editor-command))))
+      (plain client session opts))))

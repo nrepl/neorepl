@@ -31,7 +31,8 @@ Commands start with a comma, the CIDER way: `,doc`, `,source`, `,apropos`,
 `,macroexpand`, `,pst` for the last error's stack trace, `,stacktrace` to
 browse it, `,reload`, `,test`, `,inspect`, `,trace`, `,edit` to open a definition in
 your `$EDITOR`, `,ns` to switch namespaces, loading the one you name if it
-isn't yet, and `,help` for the rest.
+isn't yet, `,sessions` to step into another session, like an agent's, and
+`,help` for the rest.
 Without a terminal, say in a pipe or Emacs' `M-x shell`, it works like
 `clojure.main`'s REPL instead.
 
@@ -82,6 +83,8 @@ echo '(range 3)' | neorepl eval -
 Evaluations share a session, so `*ns*`, `*1` and `*e` carry over from one
 call to the next. `--session NAME` keeps separate ones apart, `neorepl
 sessions` lists them and `neorepl sessions close NAME` starts one over.
+In the REPL, `,sessions NAME` steps into one, say to see what an agent left
+in `*1` and `*e`, and `,sessions -` steps back out.
 Servers whose sessions end with the connection, like Basilisp's and jank's,
 start each call afresh. `neorepl eval --help` has the rest.
 
