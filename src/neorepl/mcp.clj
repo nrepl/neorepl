@@ -88,7 +88,10 @@
                                          (sessions/ensure! sessions-file client session)
                                          {:timeout (or (:timeout args) timeout)
                                           :max-output max-output
-                                          :on-send on-send})]
+                                          :on-send on-send
+                                          ;; Standard input is the protocol's, so
+                                          ;; there's none for the code.
+                                          :read-line (constantly nil)})]
          (result (str/join "\n" (remove str/blank? [(evaluation-text r max-output) (text r)]))
                  r
                  ;; Tests that don't pass are an answer, not the tool failing.
