@@ -40,7 +40,9 @@
       (testing "code that doesn't balance goes out as it is, for the server to say so"
         (let [{:keys [status values]} (evaluate {:op "eval" :code "1 (+ 1"} {})]
           (is (= "eval-error" status))
-          (is (= ["1"] values)))))))
+          (is (= ["1"] values))))
+      (testing "shadow-cljs's word for ClojureScript code that threw"
+        (is (= "eval-error" (:status (evaluate {:op "eval" :code ":repl/exception!"} {}))))))))
 
 (deftest text-printer-test
   (let [printed (fn [& responses]

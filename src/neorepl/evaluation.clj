@@ -16,6 +16,9 @@
   "Adds response to acc, keeping only the size of its output unless collect?"
   [acc {:keys [value out err ns ex root-ex status]} collect?]
   (cond-> (update acc :statuses into status)
+    ;; shadow-cljs's way of saying ClojureScript code threw, after the
+    ;; error on stderr.
+    (= ":repl/exception!" value) (update :statuses conj "eval-error")
     (and collect? value) (update :values conj value)
     (and collect? (seq out)) (update :out conj out)
     (and collect? (seq err)) (update :err conj err)
