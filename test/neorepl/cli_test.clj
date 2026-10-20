@@ -45,4 +45,14 @@
   (is (= (str "  -p, --port PORT      The port\n"
               "      --format FORMAT  Output format\n"
               "  -h, --help           Help")
-         (cli/summary specs))))
+         (cli/summary specs)))
+  (testing "docs wrapped to fit in 80 columns"
+    (is (= (str "  -p, --port PORT  Connect to the server on PORT, the one in the port file it\n"
+                "                   finds without it, which is the nearest one up the tree\n"
+                "  -h, --help       Help")
+           (cli/summary [{:short "-p" :long "--port" :arg "PORT"
+                          :doc (str "Connect to the server on PORT, the one in the port file it finds"
+                                    " without it, which is the nearest one up the tree")}
+                         {:short "-h" :long "--help" :doc "Help"}]))))
+  (testing "or none"
+    (is (= "" (cli/summary [])))))
