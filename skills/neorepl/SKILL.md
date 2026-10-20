@@ -12,7 +12,9 @@ when you'd rather parse the output than read it.
 
 ## Getting a server
 
-`neorepl ports` lists the servers it can see. When there's none, ask the
+`neorepl ports` lists the servers it can see. The commands use the first
+one that answers; when there are several, a shadow-cljs server next to a
+Clojure one, say, `-p PORT` picks another. When there's none, ask the
 user before starting one, since they may want their editor's. If they say
 go ahead, start one in the background. It keeps running until it's stopped:
 
@@ -30,6 +32,13 @@ named session. Use one of your own, `--session agent` (`-s agent`), on the
 commands that evaluate, so you don't trample the user's: `eval`, `load`,
 `test`, `retest`, `pst` and `interrupt`. neorepl's MCP tools use that one
 too. `neorepl sessions close agent` starts it over.
+
+A server that restarts loses its sessions, with whatever you defined and
+loaded, and one started again with `neorepl server` is usually on another
+port. `eval` and `load` with `-s agent` start the session over, saying so
+on stderr when the port's the same, while `pst`, `interrupt` and the
+lookups say there's no such session until one of them has. Load your files
+again before going on.
 
 ## After editing a file
 
@@ -108,8 +117,9 @@ with `--ns`.
 
 ## Exit status
 
-0 is success, 1 means the code, test or check failed, 2 is a mistake in the
-command line, 3 means there's no server to talk to and 124 a timeout.
+0 is success, 1 means the code, test or check failed, a lookup found
+nothing or a server didn't start, 2 is a mistake in the command line, 3
+means there's no server to talk to and 124 a timeout.
 
 ## What not to do
 
