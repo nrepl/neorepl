@@ -8,6 +8,7 @@
             [neorepl.discovery :as discovery]
             [neorepl.shutdown :as shutdown])
   (:import (java.io BufferedReader File IOException)
+           (java.net InetSocketAddress Socket)
            (java.util.regex Pattern)))
 
 (def versions
@@ -183,15 +184,26 @@ for (const signal of ['SIGHUP', 'SIGTERM', 'SIGQUIT'])
       (when (= ::timeout (deref (.onExit p) (max 0 (- deadline (System/currentTimeMillis))) ::timeout))
         (.destroyForcibly p)))))
 
+(defn- listening?
+  "Whether something takes connections on port at host."
+  [^String host port]
+  (try
+    (with-open [socket (Socket.)]
+      (.connect socket (InetSocketAddress. host (int port)) 1000)
+      true)
+    (catch IOException _ false)))
+
 (defn with-server
   "Starts the server command describes in dir and, once it says where it
   listens, calls (f server) with its :host, :port and :process, returning
   what f does. The server stops when f returns, or when neorepl exits
-  first, even before the server's up. Each line it prints goes to
-  (on-line line), on a thread of its own, the last of them before this
-  returns. Throws ::failed when the server can't start, or ends before it's
-  up. Ctrl-C in the terminal doesn't stop it, see launch-command."
-  [dir command on-line f]
+  first, even before the server's up, and the port file it writes, the one
+  called port-file in dir, goes too if it's left behind, as when the
+  server gets killed. Each line it prints goes to (on-line line), on a
+  thread of its own, the last of them before this returns. Throws ::failed
+  when the server can't start, or ends before it's up. Ctrl-C in the
+  terminal doesn't stop it, see launch-command."
+  [dir command port-file on-line f]
   (let [;; Rather than the shell's word for it, exit status 127, or Java's.
         missing #(when-not (on-path? (first command))
                    (ex-info (str "Couldn't start the server: " (first command) " isn't installed, or isn't on the PATH")
@@ -222,9 +234,15 @@ for (const signal of ['SIGHUP', 'SIGTERM', 'SIGQUIT'])
     ;; Nothing for it to read.
     (.close (.getOutputStream process))
     (shutdown/call-with-cleanup
-     ;; What it says as it stops goes out too.
      #(do (stop process)
-          (.join output 1000))
+          ;; What it says as it stops goes out too.
+          (.join output 1000)
+          (when-let [{:keys [host port]} (deref up 0 nil)]
+            (let [file (io/file dir port-file)]
+              ;; Unless it's another server's by now, maybe on the same
+              ;; port, as when the project sets one.
+              (when (and (= port (discovery/read-port file)) (not (listening? host port)))
+                (.delete file)))))
      (fn []
        (.start output)
        (if-let [address @up]

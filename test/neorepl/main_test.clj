@@ -342,6 +342,13 @@
          (when-not (test-server/windows?)
            (testing "and stops it after"
              (is (not (.exists (io/file dir ".nrepl-port"))))))))))
+  (testing "saying how it ended, when it does before the REPL"
+    (call-with-temp-dir
+     (fn [dir]
+       (spit-file dir "bb.edn" "{}")
+       (let [{:keys [status err]} (run-in dir "(System/exit 9)\n" "repl")]
+         (is (= 3 status))
+         (is (str/includes? err "neorepl: The server ended with exit status 9\n"))))))
   (testing "nor a project to start one for"
     (call-with-temp-dir
      (fn [dir]
@@ -411,7 +418,22 @@
          (testing "stopping neorepl stops the server"
            (is (not (.exists (io/file dir ".nrepl-port"))))
            (is (= ::nrepl/no-server
-                  (:type (ex-data (is (thrown? clojure.lang.ExceptionInfo (nrepl/connect {:port port}))))))))))))
+                  (:type (ex-data (is (thrown? clojure.lang.ExceptionInfo (nrepl/connect {:port port})))))))))))
+    (testing "a server that dies says so, and the port file it leaves goes"
+      (call-with-temp-dir
+       (fn [dir]
+         (spit-file dir "bb.edn" "{}")
+         (let [process (start-neorepl-in dir "server" "--format" "edn")
+               {:keys [pid]} (edn/read-string (.readLine (io/reader (.getInputStream process))))]
+           (try
+             (is (.exists (io/file dir ".nrepl-port")))
+             (.waitFor (.start (ProcessBuilder. ["kill" "-9" (str pid)])))
+             (is (.waitFor process 10 TimeUnit/SECONDS))
+             (is (= 1 (.exitValue process)))
+             (is (re-find #"The server ended with exit status 137" (slurp (.getErrorStream process))))
+             (is (not (.exists (io/file dir ".nrepl-port"))))
+             (finally
+               (.destroyForcibly process))))))))
   (testing "without a project"
     (call-with-temp-dir
      (fn [dir]

@@ -6,7 +6,8 @@
             [clojure.test :refer [deftest is testing]]
             [neorepl.jack-in :as jack-in]
             [neorepl.nrepl :as nrepl]
-            [neorepl.test-server :refer [call-with-temp-dir spit-file windows? with-client]]))
+            [neorepl.test-server :refer [call-with-temp-dir free-port spit-file windows? with-client]])
+  (:import (java.net InetAddress ServerSocket)))
 
 (defn- descendants-of
   "The processes process started, and the ones they did."
@@ -90,7 +91,7 @@
    (fn [dir]
      (spit-file dir "bb.edn" "{}")
      (let [lines (atom [])
-           process (jack-in/with-server dir (jack-in/command "bb" {}) #(swap! lines conj %)
+           process (jack-in/with-server dir (jack-in/command "bb" {}) ".nrepl-port" #(swap! lines conj %)
                      (fn [{:keys [^Process process] :as server}]
                        (testing "says where the server listens"
                          (with-client [client (select-keys server [:host :port])]
@@ -114,14 +115,32 @@
       (call-with-temp-dir
        (fn [dir]
          (let [[process children]
-               (jack-in/with-server dir ["sh" "-c" "sleep 60 & sleep 60 & echo 'nREPL server started on port 1 on host x'; wait"]
+               (jack-in/with-server dir ["sh" "-c" "sleep 60 & sleep 60 & echo 'nREPL server started on port 1 on host x'; wait"] ".nrepl-port"
                  (fn [_])
                  (fn [{:keys [^Process process] :as server}]
                    (is (= {:host "x" :port 1} (select-keys server [:host :port])))
                    [process (descendants-of process)]))]
            (is (seq children))
            (is (not (.isAlive ^Process process)))
-           (is (not-any? #(.isAlive %) children))))))))
+           (is (not-any? #(.isAlive %) children))))))
+    (testing "and the port file it leaves behind"
+      (call-with-temp-dir
+       (fn [dir]
+         (let [port (free-port)
+               ;; A server on port that writes what it's given into its port file.
+               start #(jack-in/with-server dir ["sh" "-c" (str "echo " % " > .nrepl-port; "
+                                                              "echo 'nREPL server started on port " port " on host 127.0.0.1'; "
+                                                              "sleep 60")]
+                        ".nrepl-port" (fn [_]) (fn [_]))]
+           (start port)
+           (is (not (.exists (io/file dir ".nrepl-port"))))
+           (testing "unless it's another server's"
+             (start 2)
+             (is (.exists (io/file dir ".nrepl-port"))))
+           (testing "on the same port, by now"
+             (with-open [_ (ServerSocket. port 50 (InetAddress/getByName "127.0.0.1"))]
+               (start port))
+             (is (.exists (io/file dir ".nrepl-port"))))))))))
 
 (defn- process-group [pid]
   (str/trim (:out (shell/sh "ps" "-o" "pgid=" "-p" (str pid)))))
@@ -131,7 +150,7 @@
   (when (and (not (windows?)) (jack-in/on-path? "npx"))
     (call-with-temp-dir
      (fn [dir]
-       (let [with-server #(jack-in/with-server dir ["npx" "-c" "echo 'nREPL server started on port 1 on host x'; sleep 60"]
+       (let [with-server #(jack-in/with-server dir ["npx" "-c" "echo 'nREPL server started on port 1 on host x'; sleep 60"] ".nrepl-port"
                             (fn [_])
                             %)
              gone? #(not (.isAlive (doto % (-> .onExit (deref 5000 nil)))))]
@@ -166,15 +185,15 @@
      (let [lines (atom [])]
        (testing "a server that ends before it's up"
          (is (thrown-with-msg? clojure.lang.ExceptionInfo #"ended before it started, with exit status 3"
-                               (jack-in/with-server dir ["bb" "-e" "(binding [*out* *err*] (println :oops)) (System/exit 3)"]
+                               (jack-in/with-server dir ["bb" "-e" "(binding [*out* *err*] (println :oops)) (System/exit 3)"] ".nrepl-port"
                                  #(swap! lines conj %)
                                  (fn [_]))))
          (testing "after what it said"
            (is (= [":oops"] @lines))))
        (testing "one whose build tool isn't installed"
          (is (thrown-with-msg? clojure.lang.ExceptionInfo #"^Couldn't start the server: neorepl-no-such-tool isn't installed, or isn't on the PATH$"
-                               (jack-in/with-server dir ["neorepl-no-such-tool"] (fn [_]) (fn [_])))))
+                               (jack-in/with-server dir ["neorepl-no-such-tool"] ".nrepl-port" (fn [_]) (fn [_])))))
        (testing "one that can't start"
          (is (= ::jack-in/failed
                 (:type (ex-data (is (thrown? clojure.lang.ExceptionInfo
-                                             (jack-in/with-server (io/file dir "nope") ["bb"] (fn [_]) (fn [_])))))))))))))
+                                             (jack-in/with-server (io/file dir "nope") ["bb"] ".nrepl-port" (fn [_]) (fn [_])))))))))))))

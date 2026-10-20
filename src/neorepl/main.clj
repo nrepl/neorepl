@@ -17,7 +17,8 @@
             [neorepl.sessions :as sessions]
             [neorepl.shutdown :as shutdown]
             [neorepl.xdg :as xdg])
-  (:import (java.io BufferedReader File)))
+  (:import (java.io BufferedReader File)
+           (java.util.concurrent TimeUnit)))
 
 (defn- usage-error [msg]
   (ex-info msg {:type ::usage}))
@@ -173,7 +174,7 @@ when it times out.")
   say, saying what it runs, and calls f with it, as jack-in/with-server
   does. What the server prints goes to (on-line line)."
   [{:keys [dir tool]} {:keys [aliases port]} on-line f]
-  (let [{:keys [file aliases? port?]} (jack-in/tool tool)
+  (let [{:keys [file aliases? port? port-file]} (jack-in/tool tool)
         command (jack-in/command tool {:aliases aliases :port port})]
     (when (and aliases (not aliases?))
       (throw (usage-error (str "--aliases doesn't go with " tool))))
@@ -182,17 +183,18 @@ when it times out.")
     (warn (str "Starting an nREPL server in " dir ": " (shell-words command)))
     ;; Printing from the thread that follows the server's output, with this
     ;; one's *out* and *err*.
-    (jack-in/with-server dir command (bound-fn* on-line) f)))
+    (jack-in/with-server dir command port-file (bound-fn* on-line) f)))
 
 (defn- with-started-server
   "Calls f with a client for a server started for project, the way
   with-server does. What the server prints goes where output nobody asked
   for goes, like an evaluation's that comes late, and to stderr before
-  something takes that over and after f."
+  something takes that over and after f. When the connection drops because
+  the server's gone, it says how that ended."
   [project options f]
   (let [output (atom print-err-line)]
     (with-server project options #(@output %)
-      (fn [{:keys [host port]}]
+      (fn [{:keys [host port ^Process process]}]
         (call-with-client
          (-> (nrepl/connect {:host host :port port
                              :on-unclaimed (fn [{:keys [out err]}]
@@ -202,6 +204,13 @@ when it times out.")
            (reset! output #(nrepl/unclaimed client {:err (str % "\n")}))
            (try
              (f client)
+             (catch clojure.lang.ExceptionInfo e
+               (when (and (= ::nrepl/disconnected (:type (ex-data e)))
+                          ;; Not neorepl stopping it.
+                          (not (shutdown/exiting?))
+                          (.waitFor process 1 TimeUnit/SECONDS))
+                 (warn (str "The server ended with exit status " (.exitValue process))))
+               (throw e))
              (finally
                (reset! output print-err-line)))))))))
 
@@ -1042,7 +1051,13 @@ with an error, and 2 on usage errors."
             (emit format {:url url :host host :port port :pid (.pid process)
                           :dir project-dir :tool (:tool project)}))
           (flush)
-          (if (zero? (.waitFor process)) 0 1))))))
+          (let [status (.waitFor process)]
+            (cond
+              (zero? status) 0
+              ;; neorepl's stopping it.
+              (shutdown/exiting?) 1
+              :else (do (warn (str "The server ended with exit status " status))
+                        1))))))))
 
 (def ^:private mcp-options
   (concat connection-options
