@@ -979,8 +979,8 @@ With --tool shadow-cljs it connects only to a shadow-cljs server, going by
 .shadow-cljs/nrepl.port, and with the other tools only to one with a
 .nrepl-port, so a shadow-cljs server and a Clojure one can run side by side."
    "Exit status: 0 when the REPL ends, 1 when a server fails to start, 2 on
-usage errors and 3 when there's no server to talk to or the connection to it
-drops."
+usage errors, 3 when there's no server to talk to or the connection to it
+drops and 130 when Ctrl-C ends it, as it does without a terminal."
    "Examples:
   neorepl
   neorepl -p 7888
@@ -1027,8 +1027,9 @@ shadow-cljs goes first when it builds with the project's deps.edn or
 project.clj, as :deps or :lein in shadow-cljs.edn say. The server gets
 cider-nrepl, for CIDER's tooling, which babashka's has built in. Leiningen
 and Clojure CLI servers also get piggieback, for ClojureScript REPLs."
-   "Exit status: 0 when the server ends fine, 1 when it fails to start or ends
-with an error, and 2 on usage errors."
+   "Exit status: 130 when Ctrl-C stops the server and 143 when SIGTERM does, 0
+when it ends by itself without an error, 1 when it fails to start or ends
+with one, and 2 on usage errors."
    "Examples:
   neorepl server
   neorepl server --aliases :dev:test --port 7888
