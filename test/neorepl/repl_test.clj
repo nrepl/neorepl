@@ -132,6 +132,15 @@
         (Thread/sleep 150)
         (type "1\r")
         (is (re-find #"partial\n" (screen #"(?m)^1\nuser=> $"))))))
+  (testing "what's typed while an evaluation runs shows up at the next prompt only"
+    (call-with-repl {}
+      (fn [type screen]
+        (type "(do (Thread/sleep 300) :done)\r")
+        (screen #":done\)\n$")
+        (type "(+ 1 1)")
+        (is (re-find #"\)\n:done\nuser=> \(\+ 1 1\)$" (screen #":done\nuser=> \(\+ 1 1\)$")))
+        (type "\r")
+        (is (screen #"(?m)^2\nuser=> $")))))
   (testing "messages from the server"
     (with-client [client {:port *port*}]
       (call-with-repl {}
