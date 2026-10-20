@@ -30,6 +30,7 @@
 - [#26](https://github.com/nrepl/neorepl/pull/26): The MCP `ports` tool says there are no port files, rather than failing.
 - [#27](https://github.com/nrepl/neorepl/pull/27): Connecting to a host that doesn't answer gives up after 10 seconds, rather than after a minute or more.
 - [#27](https://github.com/nrepl/neorepl/pull/27): An evaluation on Linux no longer waits 40ms on the server's socket, nor 40ms a form for several, with neorepl on the JVM.
+- [#28](https://github.com/nrepl/neorepl/pull/28): `source`, and `doc` and `macroexpand` without cider-nrepl, work from a namespace that doesn't refer `clojure.core`, like one `in-ns` made.
 
 ## 0.3.0 (2026-10-17)
 

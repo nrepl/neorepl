@@ -46,6 +46,18 @@
            (some :value)
            edn/read-string))
 
+(defn- eval-in
+  "eval-data with the code evaluated as if in the namespace ns names, which
+  needn't refer clojure.core, made by in-ns, say: it's compiled in user,
+  after requiring the namespaces requires names, a top-level form of its
+  own so that the code compiles after, with *ns* bound to that one."
+  [client ns requires template args opts]
+  (eval-data client {:ns "user"}
+             (str "(do " (when (seq requires) (str "(require " (str/join " " (map #(str "'" %) requires)) ") "))
+                  "(binding [*ns* (the-ns (symbol %s))] " template "))")
+             (cons ns args)
+             opts))
+
 (defn- lookup-msg
   "msg, looking something up where ctx says."
   [msg {:keys [ns session]}]
@@ -117,16 +129,16 @@
          (normalize-info info)))
 
      :else
-     (some-> (eval-data client (select-keys ctx [:ns]) "(when-let [m (meta (resolve (symbol %s)))]
-                                    {:ns (str (:ns m))
-                                     :name (str (:name m))
-                                     :arglists-str (some->> (:arglists m) (map pr-str) (interpose \"\\n\") (apply str))
-                                     :doc (:doc m)
-                                     :file (:file m)
-                                     :line (:line m)
-                                     :column (:column m)
-                                     :macro (:macro m)})"
-                        [sym] opts)
+     (some-> (eval-in client (:ns ctx) [] "(when-let [m (meta (resolve (symbol %s)))]
+                                          {:ns (str (:ns m))
+                                           :name (str (:name m))
+                                           :arglists-str (some->> (:arglists m) (map pr-str) (interpose \"\\n\") (apply str))
+                                           :doc (:doc m)
+                                           :file (:file m)
+                                           :line (:line m)
+                                           :column (:column m)
+                                           :macro (:macro m)})"
+                      [sym] opts)
              normalize-info))))
 
 (defn complete
@@ -144,7 +156,7 @@
   server can't find it."
   ([client sym ctx] (source client sym ctx {}))
   ([client sym ctx opts]
-   (eval-data client (select-keys ctx [:ns]) "(do (require 'clojure.repl) (clojure.repl/source-fn (symbol %s)))" [sym] opts)))
+   (eval-in client (:ns ctx) ['clojure.repl] "(clojure.repl/source-fn (symbol %s))" [sym] opts)))
 
 (defn apropos
   "The vars whose names match the regex, as maps with the :name and, when
@@ -184,13 +196,12 @@
                                   ctx)
                opts)
           (some :expansion))
-     (some-> (eval-data client (select-keys ctx [:ns])
-                        "(do (require 'clojure.pprint 'clojure.walk)
-                             (with-out-str
-                               (clojure.pprint/pprint
-                                 ((if %s clojure.walk/macroexpand-all macroexpand-1)
-                                  (binding [*read-eval* false] (read-string %s))))))"
-                        [all? text] opts)
+     (some-> (eval-in client (:ns ctx) ['clojure.pprint 'clojure.walk]
+                      "(with-out-str
+                         (clojure.pprint/pprint
+                           ((if %s clojure.walk/macroexpand-all macroexpand-1)
+                            (binding [*read-eval* false] (read-string %s)))))"
+                      [all? text] opts)
              str/trimr))))
 
 (defn- blank->nil
