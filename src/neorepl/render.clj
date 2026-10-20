@@ -157,11 +157,14 @@
 
 (defn inspector-text
   "The inspector's view, as features/inspector has it, as text, with each
-  value to inspect further marked with the index to push it by, as [1]."
-  [lines]
-  (str/join "\n" (for [line lines]
-                   (str/trimr (str/join (for [{:keys [text index continued]} line]
-                                          (str (when-not continued (some->> index (format "[%d]"))) text)))))))
+  value to inspect further marked with the index to push it by, as [1],
+  unless marks? is false."
+  ([lines] (inspector-text lines true))
+  ([lines marks?]
+   (str/join "\n" (for [line lines]
+                    (str/trimr (str/join (for [{:keys [text index continued]} line]
+                                           (str (when (and marks? (not continued)) (some->> index (format "[%d]")))
+                                                text))))))))
 
 (defn tracing-text
   "What trace, untrace and the like did: the :results of tracing or

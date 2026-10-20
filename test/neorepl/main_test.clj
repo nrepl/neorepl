@@ -627,9 +627,10 @@
              (repl ",test neorepl.sample-suite/passing\n")))
       (is (= "user=> Rerunning the tests that failed takes cider-nrepl or babashka on the server\nuser=> \n"
              (repl ",retest\n")))
-      (is (= "user=> Class: [0]clojure.lang.PersistentVector\nCount: 1\n\n--- Contents:\n  0. [1]1\nuser=> \n"
+      ;; Without the marks, which there's no pushing to.
+      (is (= "user=> Class: clojure.lang.PersistentVector\nCount: 1\n\n--- Contents:\n  0. 1\nuser=> \n"
              (repl ",inspect [1]\n")))
-      (is (= "user=> 2\nuser=> Class: [0]java.lang.Long\n\n--- Contents:\nValue: [1]2\nuser=> \n"
+      (is (= "user=> 2\nuser=> Class: java.lang.Long\n\n--- Contents:\nValue: 2\nuser=> \n"
              (repl "2\n,inspect\n"))))
     (testing "a command's trouble doesn't end the REPL"
       (is (str/ends-with? (repl "(set! *print-length* 2)\n(throw (ex-info \"boom\" {:xs (range 10)}))\n,pst\n(+ 1 2)\n")
