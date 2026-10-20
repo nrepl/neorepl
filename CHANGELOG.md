@@ -48,6 +48,7 @@
 - [#30](https://github.com/nrepl/neorepl/pull/30): A namespace that isn't there, a regex that doesn't parse and inspected code that throws get a message saying so, rather than the server's exception.
 - [#31](https://github.com/nrepl/neorepl/pull/31): `pst` and `,stacktrace` show the frames that matter on every server: without cider-nrepl, not the REPL's own, and with it and babashka, not hiding a REPL's functions as duplicates, nor showing babashka's cider-nrepl frames.
 - [#31](https://github.com/nrepl/neorepl/pull/31): `reload` recovers from a namespace whose file is gone, which cider-nrepl kept trying to reload until it restarted.
+- [#31](https://github.com/nrepl/neorepl/pull/31): `,trace` and `neorepl trace` won't trace what the server's own tools call, like `clojure.core/map`, which took the server down.
 
 ## 0.3.0 (2026-10-17)
 

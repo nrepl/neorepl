@@ -125,14 +125,16 @@
     (is (= (str "Tracing my.app/f\nTracing every function in my.db\nAlready tracing my.app/g\n"
                 "Stopped tracing my.app/h\nWasn't tracing my.app/i\n"
                 "Can't trace clojure.core/when, which is a macro or not a function\n"
-                "No var or namespace called nope")
+                "No var or namespace called nope\n"
+                "Won't trace clojure.core/map, which the server's own tools call: tracing it would take the server down")
            (render/tracing-text {:results [{:var "my.app/f" :status "traced"}
                                            {:ns "my.db" :status "traced"}
                                            {:var "my.app/g" :status "already-traced"}
                                            {:var "my.app/h" :status "untraced"}
                                            {:var "my.app/i" :status "not-traced"}
                                            {:var "clojure.core/when" :status "not-traceable"}
-                                           {:name "nope" :status "not-found"}]}))))
+                                           {:name "nope" :status "not-found"}
+                                           {:var "clojure.core/map" :status "refused"}]}))))
   (testing "what's traced"
     (is (= "my.app/f\nevery function in my.db" (render/tracing-text {:nses ["my.db"] :vars ["my.app/f"]})))
     (is (= "Nothing's traced" (render/tracing-text {:nses [] :vars []}))))
