@@ -40,6 +40,7 @@
 - [#29](https://github.com/nrepl/neorepl/pull/29): A test error's location is its test's, rather than the file of the frame that threw with the test's line, and on babashka every failure's is.
 - [#29](https://github.com/nrepl/neorepl/pull/29): `neorepl test --timeout` covers loading the tests too, and running out of time there exits 124, rather than 3.
 - [#29](https://github.com/nrepl/neorepl/pull/29): `neorepl test` of a namespace without tests says so and exits 1, rather than passing.
+- [#30](https://github.com/nrepl/neorepl/pull/30): Symbols that start with a dash, like `->` and `-main`, are arguments to `doc`, `where` and the other lookups, rather than unknown options.
 
 ## 0.3.0 (2026-10-17)
 

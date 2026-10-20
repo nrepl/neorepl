@@ -12,10 +12,19 @@
   [{:keys [long]}]
   (keyword (subs long 2)))
 
+(defn- option?
+  "Whether arg looks like an option: --name, a short -x, or one of the
+  short options in by-name with more after it, so that symbols like -> and
+  -main, the arguments of lookups, don't."
+  [by-name arg]
+  (boolean (or (re-matches #"--[^-=].*|-[a-zA-Z](=.*)?" arg)
+               (and (< 2 (count arg)) (contains? by-name (subs arg 0 2))))))
+
 (defn parse
   "Parses args against specs into {:options {...} :args [...]}, or {:error
   msg}. Options and arguments can come in any order, values either as the
-  next argument or after =. -- ends the options; - alone is an argument."
+  next argument or after =. -- ends the options; - alone is an argument, as
+  is anything else that doesn't look like an option."
   [specs args]
   (let [by-name (into {} (for [spec specs
                                name ((juxt :short :long) spec)
@@ -29,7 +38,7 @@
       (cond
         (empty? args) {:options options :args positional}
         (= "--" a) {:options options :args (into positional more)}
-        (or (= "-" a) (not (str/starts-with? a "-"))) (recur more options (conj positional a))
+        (not (option? by-name a)) (recur more options (conj positional a))
         :else
         (let [[name inline] (str/split a #"=" 2)
               {:keys [arg parse] :or {parse identity} :as spec} (by-name name)]
