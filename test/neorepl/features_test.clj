@@ -8,7 +8,8 @@
             [neorepl.test-server :as test-server :refer [*port* with-client]]
             [nrepl.middleware :as middleware]
             [nrepl.server :as server]
-            [nrepl.transport :as transport]))
+            [nrepl.transport :as transport]
+            [orchard.namespace]))
 
 (use-fixtures :once (test-server/fixture))
 
@@ -72,6 +73,7 @@
       "apropos" (transport/respond-to msg :status "done"
                                       :apropos-matches [{:name "clojure.core/map" :type "function"
                                                          :doc "Cider's map.\nMore."}])
+      "cider-version" (transport/respond-to msg :status "done" :cider-version {:version-string "0.63.1"})
       "macroexpand" (transport/respond-to msg :status "done"
                                           :expansion (str "Cider's " (:expander msg) (some->> (:session msg) (str " in "))))
       "ns-list" (transport/respond-to msg :status "done"
@@ -139,7 +141,7 @@
                                     (transport/respond-to msg :status "done"))
       (handler msg))))
 
-(middleware/set-descriptor! #'wrap-fake-cider {:handles {"info" {} "complete" {} "apropos" {} "ns-list" {}
+(middleware/set-descriptor! #'wrap-fake-cider {:handles {"info" {} "complete" {} "apropos" {} "ns-list" {} "cider-version" {}
                                                          "macroexpand" {} "analyze-last-stacktrace" {} "test-stacktrace" {}
                                                          "refresh" {} "test-var-query" {} "retest" {}
                                                          "inspect-last-exception" {}}})
@@ -362,7 +364,8 @@
       (are [names message] (thrown-with-msg? clojure.lang.ExceptionInfo message (run names))
         ["neorepl.sample-suite/nope"] #"No test called neorepl.sample-suite/nope"
         ["neorepl.sample-suite" "neorepl.sample-suite/passing"] #"not both"
-        ["no.such-suite"] #"no/such_suite"
+        ["no.such-suite"] #"(?s)Couldn't load no.such-suite: .*no/such_suite"
+        ["neorepl.sample-throws"] #"(?s)Couldn't load neorepl.sample-throws: .*Doesn't load"
         ;; They go into the code as they are.
         ["neorepl.sample-suite) (System/exit 1"] #"Not the name of a namespace or a test"
         ["neorepl.sample-suite/passing 1"] #"Not the name of a namespace or a test"
@@ -472,10 +475,28 @@
                       {:op "test-var-query" :var-query {:exactly ["neorepl.sample-suite/passing"
                                                                   "neorepl.sample-suite/failing"]}
                        :stream "true"}
-                      {:op "test-var-query" :var-query {:ns-query {:project? "true" :load-project-ns? "true"}}
-                       :stream "true"}
+                      {:op "test-var-query" :var-query {:ns-query {:project? "true"}} :stream "true"}
                       {:op "retest" :stream "true"}]
                      (remove (comp #{"test-stacktrace"} :op) @test-requests)))
+              (testing "every test in the project, its namespaces loaded first, as orchard finds them"
+                ;; One that's never there, since one that threw is loaded as far
+                ;; as require is concerned, its ns form having said so.
+                (reset! orchard.namespace/project ['neorepl.sample-suite 'neorepl.not-there])
+                (try
+                  (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                                        #"(?s)^The project's namespaces don't all load:\n  neorepl.not-there: .*neorepl/not_there"
+                                        (features/run-tests client session [] {})))
+                  (finally
+                    (reset! orchard.namespace/project [])))
+                (testing "or by the server, without orchard"
+                  (reset! test-requests [])
+                  (reset! orchard.namespace/missing? true)
+                  (try
+                    (features/run-tests client session [] {})
+                    (is (= {:ns-query {:project? "true" :load-project-ns? "true"}}
+                           (:var-query (first @test-requests))))
+                    (finally
+                      (reset! orchard.namespace/missing? false)))))
               (testing "with the stack trace of each error, by its index"
                 (is (= {:op "test-stacktrace" :ns "neorepl.sample-suite" :var "erring" :index 0}
                        (some #(when (= "test-stacktrace" (:op %)) %) @test-requests))))))

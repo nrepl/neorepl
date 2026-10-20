@@ -35,6 +35,7 @@
 - [#28](https://github.com/nrepl/neorepl/pull/28): `doc`, and the REPL's arglists, cover Java methods, fields and classes with cider-nrepl, with their Javadoc as text, and `doc` of a namespace names it once.
 - [#28](https://github.com/nrepl/neorepl/pull/28): `source` reads a definition from where cider-nrepl or nREPL say it is, so it finds those in a file loaded from outside the classpath, and in ClojureScript.
 - [#28](https://github.com/nrepl/neorepl/pull/28): `,macroexpand` with cider-nrepl no longer replaces the session's `*1`.
+- [#29](https://github.com/nrepl/neorepl/pull/29): A whole-project `neorepl test` with cider-nrepl says which of the project's namespaces don't load, where it used to wait for good, and a test namespace that doesn't load says so, every run.
 
 ## 0.3.0 (2026-10-17)
 
