@@ -56,6 +56,7 @@
 - [#32](https://github.com/nrepl/neorepl/pull/32): What's typed while an evaluation or a command like `,reload` runs shows up at the next prompt only, rather than in its output too.
 - [#32](https://github.com/nrepl/neorepl/pull/32): The REPL without a line editor leaves out the inspector's `[N]` marks, which only the full-screen inspector has a use for.
 - [#32](https://github.com/nrepl/neorepl/pull/32): The REPL without a line editor says what a Ctrl-C did on the line after the `^C` the terminal shows, rather than right after it.
+- [#32](https://github.com/nrepl/neorepl/pull/32): The arglists eldoc shows after the cursor get cut to fit the line, rather than wrapping onto the lines below it.
 
 ## 0.3.0 (2026-10-17)
 

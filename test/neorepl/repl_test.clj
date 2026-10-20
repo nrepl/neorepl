@@ -294,6 +294,16 @@
         (type "(mapcat ")
         (is (screen #"\[f\] \[f & colls\]"))
         (type "\u0003"))))
+  (testing "eldoc cut to fit the line"
+    (call-with-repl {:eldoc? true :width 30}
+      (fn [type screen]
+        (type "(mapcat ")
+        (is (screen #"user=> \(mapcat \[f\] \[f & col…$"))
+        (testing "of the row it's on, when the line's longer"
+          (type "identity identity ")
+          ;; Uncut, which it is only after the line wraps.
+          (is (screen #"\[f\] \[f & colls\]")))
+        (type "\u0003"))))
   (testing "eldoc for something that isn't a function"
     (call-with-repl {:eldoc? true}
       (fn [type screen]
