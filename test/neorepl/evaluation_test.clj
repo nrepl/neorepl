@@ -44,6 +44,18 @@
       (testing "shadow-cljs's word for ClojureScript code that threw"
         (is (= "eval-error" (:status (evaluate {:op "eval" :code ":repl/exception!"} {}))))))))
 
+(deftest many-forms-test
+  (with-client [client {:port *port*}]
+    (testing "a form at a time doesn't wait on the server's socket, where TCP_QUICKACK has it acknowledged"
+      (let [started (System/currentTimeMillis)
+            {:keys [values]} (evaluation/evaluate client {:op "eval" :code (str/join " " (range 100))
+                                                          :session (nrepl/clone-session client)}
+                                                  {})
+            elapsed (- (System/currentTimeMillis) started)]
+        (is (= 100 (count values)))
+        (when @#'nrepl/quickack
+          (is (< elapsed 2000)))))))
+
 (deftest read-line-test
   (with-client [client {:port *port*}]
     (testing "a read from *in* that blocks doesn't outlast the timeout"
