@@ -266,7 +266,8 @@
       (if browse
         (do (inspector/browse browse client session ns lines height)
             {})
-        (out (render/inspector-text lines)))
+        ;; Without browsing, there's nothing to push the marks' indexes to.
+        (out (render/inspector-text lines false)))
       {})))
 
 (defn- enter-ns

@@ -118,7 +118,10 @@
                                  []
                                  [{:text "--- Contents:"}]
                                  [{:text "  0. "} {:text "{:a 1," :index 1}]
-                                 [{:text " :b 2}" :index 1 :continued true} {:text "  "}]]))))
+                                 [{:text " :b 2}" :index 1 :continued true} {:text "  "}]])))
+  (testing "without the marks"
+    (is (= "Class: clojure.lang.PersistentVector"
+           (render/inspector-text [[{:text "Class: "} {:text "clojure.lang.PersistentVector" :index 0}]] false)))))
 
 (deftest tracing-text-test
   (testing "what happened to each var or namespace"
