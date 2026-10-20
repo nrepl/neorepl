@@ -85,9 +85,10 @@
   ([{:keys [sessions-file timeout max-output] :as server} {:keys [session port] :as args} on-send run text]
    (with-client server port
      (fn [client]
-       (let [[output {:keys [status message truncated] :as r}]
+       (let [replaced? (volatile! false)
+             [output {:keys [status message truncated] :as r}]
              (output (run client
-                          (sessions/ensure! sessions-file client session)
+                          (sessions/ensure! sessions-file client session #(vreset! replaced? true))
                           {:timeout (or (:timeout args) timeout)
                            :max-output max-output
                            :on-send on-send
@@ -95,7 +96,9 @@
                            ;; none for the code.
                            :read-line (constantly nil)})
                      max-output)]
-         (result (str/join "\n" (remove str/blank? [output
+         (result (str/join "\n" (remove str/blank? [(when @replaced?
+                                                      (str "(" (sessions/replaced-message session) ".)"))
+                                                    output
                                                     (when truncated (str "(Cut at " max-output " characters)"))
                                                     message
                                                     (text r)]))
@@ -247,10 +250,13 @@
    {:name "pst"
     :description "Show the stack trace of the session's last error, minus the frames of the tooling."
     :inputSchema (schema (merge session-arg port-arg))
-    :run (fn [{:keys [sessions-file] :as server} {:keys [session] :as args} _]
-           (wrap (lookup server args "pst" nil
-                         (fn [client] {:session (sessions/ensure! sessions-file client session) :session-name session}))
-                 :causes))}
+    :run (fn [{:keys [sessions-file] :as server} {:keys [session port] :as args} _]
+           (with-client server port
+             (fn [client]
+               ;; One that's gone, or was never there, has no error.
+               (if-let [id (get (sessions/named sessions-file client) session)]
+                 (wrap (lookup server args "pst" nil (constantly {:session id :session-name session})) :causes)
+                 (error (sessions/missing-message sessions-file client session))))))}
    {:name "interrupt"
     :description "Interrupt what's running in a session, like an evaluation that's been left behind."
     :inputSchema (schema (merge session-arg port-arg))

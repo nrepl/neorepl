@@ -266,8 +266,11 @@ when it times out.")
     (some-> message warn)
     (emit format result)))
 
-(defn- no-session [name]
-  {:status "no-session" :message (str "No session called " name)})
+(defn- replaced-session
+  "Warns that the session called name was gone, so it's a new one, for
+  sessions/ensure!."
+  [name]
+  #(warn (sessions/replaced-message name)))
 
 (defn- with-named-session
   "Calls (f client id) with a client connected the way options say and the
@@ -278,7 +281,7 @@ when it times out.")
     (fn [client]
       (if-let [id (get (sessions/named sessions-file client) session)]
         (f client id)
-        (do (report format (no-session session))
+        (do (report format (sessions/missing sessions-file client session))
             1)))))
 
 (defn- report-run
@@ -292,7 +295,7 @@ when it times out.")
       (let [printer (if (= "text" format) (evaluation/text-printer) (fn [_]))
             {:keys [status message truncated out] :as result}
             (run client
-                 (sessions/ensure! sessions-file client session)
+                 (sessions/ensure! sessions-file client session (replaced-session session))
                  {:timeout timeout
                   :max-output max-output
                   :on-response printer})]
@@ -446,10 +449,12 @@ errors and 3 when there's no server to talk to."
     (with-client options dir
       (fn [client]
         (if name
-          (let [{:keys [status] :as result}
+          (let [;; Before it's gone from the cache too.
+                missing (sessions/missing sessions-file client name)
+                {:keys [status] :as result}
                 (if (sessions/close! sessions-file client name)
                   {:status "closed"}
-                  (no-session name))]
+                  missing)]
             (report format result)
             (if (= "closed" status) 0 1))
           (do (print-rows format (juxt :name :id) (for [[name id] (sessions/named sessions-file client)]
@@ -958,7 +963,7 @@ drops."
   (with-repl-client options dir
     (fn [client]
       (let [id (if session
-                 (sessions/ensure! sessions-file client session)
+                 (sessions/ensure! sessions-file client session (replaced-session session))
                  (nrepl/clone-session client))
             ;; Loaded only when needed, along with JLine.
             start (requiring-resolve 'neorepl.repl/start)]
