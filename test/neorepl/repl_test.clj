@@ -491,6 +491,17 @@
         (is (screen #",stacktrace\njava\.lang\.ArithmeticException: Divide by zero(?s).*q quit"))
         (type "q")
         (is (screen #"user=> $")))))
+  (testing "staying when a frame can't be opened"
+    (call-with-repl {}
+      (fn [type screen]
+        (type "(/ 1 0)\r")
+        (screen #"Divide by zero.*\nuser=> $")
+        (type ",stacktrace\r")
+        (screen #"q quit")
+        (type "\r")
+        (is (screen #"(No source to open for .*|Set EDITOR, or VISUAL, to the editor to open)$"))
+        (type "q")
+        (is (screen #"user=> $")))))
   ;; The editor's a shell script, and the frames on babashka are its
   ;; interpreter's. The fake terminal can't take an editor, since pausing
   ;; it for one ends its input.
@@ -511,12 +522,11 @@
                                               (features/last-error client session))
                    open #(#'repl/open-frame state (first (filter % stacktrace)))]
                (testing "at the frame's line"
-                 (is (= {} (open #(= "st.demo/f" (:var %)))))
+                 (is (nil? (open #(= "st.demo/f" (:var %)))))
                  (is (= (str "+4 " (.getAbsolutePath file) "\n") (slurp edited))))
                (testing "or at the frame's own path, when the server says"
-                 (is (= {} (#'repl/open-frame state {:path (str file) :line 2})))
+                 (is (nil? (#'repl/open-frame state {:path (str file) :line 2})))
                  (is (= (str "+2 " file "\n") (slurp edited))))
                (testing "which a Java frame hasn't"
-                 (is (= {:out "No source to open for clojure.lang.Numbers/divide (Numbers.java:190)\n"}
-                        (update (open #(str/starts-with? (:name %) "clojure.lang.Numbers/")) :out
-                                str/replace #"\d+\)" "190)"))))))))))))
+                 (is (= "No source to open for clojure.lang.Numbers/divide (Numbers.java:190)"
+                        (str/replace (open #(str/starts-with? (:name %) "clojure.lang.Numbers/")) #"\d+\)" "190)"))))))))))))
