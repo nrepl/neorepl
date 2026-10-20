@@ -11,7 +11,9 @@
   Leiningen, babashka and friends use the first, shadow-cljs the second."
   [".nrepl-port" ".shadow-cljs/nrepl.port"])
 
-(defn- read-port [^File f]
+(defn read-port
+  "The port in the port file f, or nil when there's none."
+  [^File f]
   (when (.isFile f)
     (try
       (Long/parseLong (str/trim (slurp f)))
