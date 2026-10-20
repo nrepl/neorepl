@@ -209,12 +209,15 @@
                          "file")
     :run (fn [server {:keys [file] :as args} on-send]
            (let [f (io/file file)]
-             (if (.isFile f)
-               (evaluate server args on-send
-                         #(evaluation/evaluate %1 {:op "load-file" :session %2 :file (slurp f)
-                                                   :file-path (.getAbsolutePath f) :file-name (.getName f)}
-                                               %3))
-               (error (str "No such file: " file)))))}
+             (cond
+               (not (.isFile f)) (error (str "No such file: " file))
+               (not (.canRead f)) (error (str "Can't read the file " file))
+               :else
+               (let [text (features/checked-text f file "check with fix")]
+                 (evaluate server args on-send
+                           #(evaluation/evaluate %1 {:op "load-file" :session %2 :file text
+                                                     :file-path (.getAbsolutePath f) :file-name (.getName f)}
+                                                 %3))))))}
    (symbol-tool "doc" "Show a var's arglists and documentation.")
    (symbol-tool "source" "Show a var's source.")
    (symbol-tool "where" "Show the file and line a var is defined at.")

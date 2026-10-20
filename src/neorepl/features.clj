@@ -16,7 +16,8 @@
             [clojure.string :as str]
             [neorepl.evaluation :as evaluation]
             [neorepl.lexer :as lexer]
-            [neorepl.nrepl :as nrepl]))
+            [neorepl.nrepl :as nrepl]
+            [neorepl.render :as render]))
 
 (defn- supports? [client op]
   (contains? (:ops client) op))
@@ -244,6 +245,8 @@
   evaluating anything, the way #= would. cider-nrepl evaluates what it
   expands with *read-eval* on."
   [text]
+  (when-let [{:keys [message]} (lexer/delimiter-problem text)]
+    (throw (ex-info (str "The form doesn't balance: " message) {:type ::failed})))
   (when-not (and (= 1 (count (lexer/forms text)))
                  (not (str/includes? text "#=")))
     (throw (ex-info "Give one form to expand, without #=" {:type ::failed}))))
@@ -830,6 +833,21 @@
 (defn- check-inspector [client]
   (when-not (supports? client "inspect-push")
     (throw (ex-info "Inspecting values takes cider-nrepl or babashka on the server" {:type ::failed}))))
+
+(defn checked-text
+  "The text of file, which is there, after checking its delimiters balance,
+  as neorepl check does, since the server's reader would place where they
+  don't as a line of the REPL. Throws ::failed saying what's wrong, about
+  path, and that fix repairs delimiters."
+  [file path fix]
+  (let [text (try
+               (slurp file)
+               (catch java.io.IOException _
+                 (throw (ex-info (str "Can't read the file " path) {:type ::failed}))))]
+    (when-let [problem (lexer/delimiter-problem text)]
+      (throw (ex-info (str (render/problem-text (assoc problem :file path)) ", which " fix " can repair")
+                      {:type ::failed})))
+    text))
 
 (defn inspect
   "Evaluates code in session and starts inspecting its value, or the last

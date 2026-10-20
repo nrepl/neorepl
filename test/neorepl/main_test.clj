@@ -279,7 +279,20 @@
     (let [file (spit-file *dir* "src/demo/value.clj" "(ns demo.value)\n:a\n(range 10)")]
       ;; load-file doesn't say which namespace the session's in.
       (is (= {:status "ok" :values ["(0 1 2"] :out "" :err "" :ns nil :truncated true}
-             (edn/read-string (:out (run-command "load" "--format" "edn" "--max-output" "6" (str file)))))))))
+             (edn/read-string (:out (run-command "load" "--format" "edn" "--max-output" "6" (str file))))))))
+  (testing "a file that doesn't balance, said as neorepl check would, rather than the reader's REPL:3:1"
+    (let [file (str (spit-file *dir* "src/demo/unbalanced.clj" "(ns demo.unbalanced)\n(defn f []\n"))]
+      (doseq [args [["load" file] ["eval" "-f" file]]]
+        (is (= {:status 1 :out ""
+                :err (str "neorepl: " file ":2:1: Unclosed (, which neorepl check --fix can repair\n")}
+               (apply run-command args))
+            (pr-str args)))))
+  (testing "a file that can't be read"
+    (let [file (spit-file *dir* "src/demo/unreadable.clj" "(ns demo.unreadable)")]
+      ;; Where that can be had: not on Windows, nor as root.
+      (when (and (.setReadable file false) (not (.canRead file)))
+        (is (= 2 (:status (run-command "load" (str file)))))
+        (is (str/includes? (:err (run-command "load" (str file))) "Can't read the file"))))))
 
 (deftest repl-test
   (let [repl #(apply run-in *dir* %1 "repl" "-p" (str *port*) %&)]
@@ -468,7 +481,9 @@
   (is (= {:status 0 :out "(if x (do y))\n" :err ""} (run-command "macroexpand" "(when x y)")))
   (is (str/includes? (:out (run-command "macroexpand" "--all" "(when-let [a 1] a)")) "let*"))
   (is (= {:expansion "(if x (do y))"}
-         (edn/read-string (:out (run-command "macroexpand" "--format" "edn" "(when x y)"))))))
+         (edn/read-string (:out (run-command "macroexpand" "--format" "edn" "(when x y)")))))
+  (is (= {:status 1 :out "" :err "neorepl: The form doesn't balance: Unclosed (\n"}
+         (run-command "macroexpand" "(when x"))))
 
 (deftest where-test
   (let [{:keys [status out]} (run-command "where" "map")]
