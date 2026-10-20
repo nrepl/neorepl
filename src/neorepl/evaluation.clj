@@ -55,8 +55,10 @@
                  :else (or (some statuses failure-statuses) "ok"))
         message (case status
                   "timeout" (str "Timed out after " timeout "s"
-                                 (if interrupted?
-                                   " and interrupted the evaluation"
+                                 (case interrupted?
+                                   true " and interrupted the evaluation"
+                                   :busy (str " waiting behind an evaluation from before, still running in the"
+                                              " session, which interrupting the session stops, and this one runs after")
                                    ", and interrupting the evaluation failed"))
                   "stopped" "Stopped waiting for the evaluation, which may still be running"
                   "interrupted" "The evaluation was interrupted"
@@ -77,7 +79,9 @@
 (defn- interrupt!
   "Interrupts the evaluation with message id, sent at the time sent-at, whose
   responses go to the queue responses, giving the server a second to
-  confirm. Returns whether it did, or found it done already. A server can
+  confirm. Returns whether it did, or found it done already, or :busy when
+  the session's running another evaluation, which this one waits behind,
+  from a client that went away, say. A server can
   find the session idle while the evaluation runs elsewhere, as
   shadow-cljs's ClojureScript ones do, but one that's done has sent done
   before saying so. It can also find it idle right after the message went
@@ -94,6 +98,7 @@
               (< (- (System/currentTimeMillis) sent-at) 500) (do (Thread/sleep 50)
                                                                  (recur))
               :else false)
+      :mismatch :busy
       false)))
 
 (defn- after
@@ -201,7 +206,7 @@
                          (let [try-interrupt (halt!)]
                            ;; Not on the thread that delivers signals and keystrokes.
                            (future
-                             (when-not (try-interrupt)
+                             (when-not (true? (try-interrupt))
                                (.put responses ::interrupt-failed)))))
             ;; Sends msg, unless halted, and says so.
             send-msg (fn [msg]
