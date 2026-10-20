@@ -53,6 +53,7 @@
 - [#32](https://github.com/nrepl/neorepl/pull/32): Ctrl-R and Ctrl-S show the history search's prompt, which eldoc's tip used to hide.
 - [#32](https://github.com/nrepl/neorepl/pull/32): `,stacktrace` stays open on a frame it can't open, saying why, and comes back after the editor exits, rather than leaving for the prompt either way.
 - [#32](https://github.com/nrepl/neorepl/pull/32): `,edit`, and opening a frame in `,stacktrace`, open a definition in a jar as a copy, rather than saying they can't.
+- [#32](https://github.com/nrepl/neorepl/pull/32): What's typed while an evaluation or a command like `,reload` runs shows up at the next prompt only, rather than in its output too.
 
 ## 0.3.0 (2026-10-17)
 

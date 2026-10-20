@@ -280,6 +280,19 @@
         (.resume terminal)
         (reset! suspended? false)))))
 
+(defn quietly
+  "Calls f with what's typed meanwhile not echoed, so that what's typed
+  ahead of the next prompt shows up there only, rather than in the output
+  too."
+  [{:keys [^Terminal terminal]} f]
+  (let [attributes (.getAttributes terminal)]
+    (.setAttributes terminal (doto (Attributes. attributes)
+                               (.setLocalFlag Attributes$LocalFlag/ECHO false)))
+    (try
+      (f)
+      (finally
+        (.setAttributes terminal attributes)))))
+
 (defn width
   "The terminal's width in columns."
   [{:keys [^Terminal terminal]}]
@@ -358,11 +371,14 @@
   (.handle terminal Terminal$Signal/INT (reify Terminal$SignalHandler
                                           (handle [_ _]
                                             ;; Ends the line the terminal echoed ^C on.
-                                            (if @suspended?
+                                            (cond
                                               ;; The program that has the terminal has the lock
                                               ;; too, but isn't using it, or the ^C would be its own.
-                                              (doto (.writer terminal) (.write "\n") (.flush))
-                                              (print-text editor nil "\n"))
+                                              @suspended? (doto (.writer terminal) (.write "\n") (.flush))
+                                              ;; Unless it didn't, with echo off, as quietly has it.
+                                              (not (.getLocalFlag (.getAttributes terminal) Attributes$LocalFlag/ECHO))
+                                              (fresh-line editor)
+                                              :else (print-text editor nil "\n"))
                                             (f)))))
 
 (defn- read-with

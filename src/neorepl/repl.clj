@@ -339,11 +339,12 @@
   does, for ,test and ,inspect, and one to :browse what ,inspect and
   ,stacktrace find, as browser/browse does, partly applied to the editor,
   if the REPL can, an atom with the last test run's :test-errors, functions
-  that have the REPL :show-traces and :hide-traces, and the :sessions-file
-  and the REPL's :own session, where it started, for ,sessions. What to
-  print can have the :ns the REPL goes on in, or the :session and its
+  that have the REPL :show-traces and :hide-traces, the :sessions-file and
+  the REPL's :own session, where it started, for ,sessions, and a function
+  to run lookups :quietly with, as editor/quietly takes f. What to print
+  can have the :ns the REPL goes on in, or the :session and its
   :session-name too, as switch-session says."
-  [{:keys [client] :as state} name arg]
+  [{:keys [client quietly] :as state} name arg]
   (let [{arg-name :arg :keys [code? args? optional?] :as command} (command name)]
     (cond
       (= "quit" name) :quit
@@ -354,7 +355,7 @@
       :else (try
               (if-let [run (:run command)]
                 (run state arg)
-                (let [{:keys [found text none]} (lookups/run name client state (if args? (some-> arg (str/split #"\s+")) arg))]
+                (let [{:keys [found text none]} (quietly #(lookups/run name client state (if args? (some-> arg (str/split #"\s+")) arg)))]
                   (some-> (follow-ups name) (apply [state found]))
                   (cond
                     none (out none)
@@ -382,7 +383,8 @@
   session-name to begin with. Runs commands too, which get io for what
   else they need, and can switch sessions. Responses go to print-response,
   late ones and what commands print too, and result messages to
-  print-message.
+  print-message. Evaluations, and commands' lookups, run through quietly,
+  if there is one, as editor/quietly takes f.
 
   What an interrupted evaluation says from then on is left out, since it
   comes from it dying: an InterruptedException, or code carrying on after a
@@ -390,7 +392,9 @@
   does, even once the next evaluation's started. So is what evaluations say
   once neorepl's exiting, which interrupts them."
   [client session {:keys [running interrupted command-thread]}
-   {:keys [read-code read-line width print-response print-message session-name] :as io}]
+   {:keys [read-code read-line width print-response print-message session-name quietly]
+    :or {quietly #(%)}
+    :as io}]
   (let [print-response #(let [stopped @interrupted
                               id (:id %)]
                           ;; What the server prints has no id, and isn't an
@@ -420,21 +424,23 @@
         evaluate (fn [run]
                    (let [{:keys [status message] :as result}
                          (try
-                           (run {:on-send #(reset! running {:id %1 :interrupt %2})
-                                 ;; It's not dying after all, so what it says
-                                 ;; from then on is worth seeing.
-                                 :on-interrupt-failed
-                                 #(do (reset! interrupted nil)
-                                      (print-message "The server can't interrupt the evaluation, Ctrl-C again stops waiting for it"))
-                                 ;; Trace events go out before the
-                                 ;; responses after them, but by way of
-                                 ;; late, which has them in hand by then.
-                                 :on-response #(do (when @traces (await-for 1000 late))
-                                                   (print-response %))
-                                 ;; A Ctrl-C that came before the server
-                                 ;; asked for a line is for the read too.
-                                 :read-line #(if (= @interrupted (:id @running)) :interrupted (read-line))
-                                 :collect? false})
+                           (quietly
+                            (fn []
+                              (run {:on-send #(reset! running {:id %1 :interrupt %2})
+                                    ;; It's not dying after all, so what it says
+                                    ;; from then on is worth seeing.
+                                    :on-interrupt-failed
+                                    #(do (reset! interrupted nil)
+                                         (print-message "The server can't interrupt the evaluation, Ctrl-C again stops waiting for it"))
+                                    ;; Trace events go out before the
+                                    ;; responses after them, but by way of
+                                    ;; late, which has them in hand by then.
+                                    :on-response #(do (when @traces (await-for 1000 late))
+                                                      (print-response %))
+                                    ;; A Ctrl-C that came before the server
+                                    ;; asked for a line is for the read too.
+                                    :read-line #(if (= @interrupted (:id @running)) :interrupted (read-line))
+                                    :collect? false})))
                            (finally
                              (reset! running nil)))]
                      ;; The Ctrl-C that stopped the wait marked it interrupted again.
@@ -468,7 +474,7 @@
                         (try
                           (command-output (merge io place {:client client :evaluate evaluate :test-errors test-errors
                                                            :show-traces show-traces :hide-traces hide-traces
-                                                           :own own})
+                                                           :own own :quietly quietly})
                                           name arg)
                           (finally
                             (reset! command-thread nil)
@@ -615,6 +621,7 @@
                      :print-message #(do (editor/fresh-line editor)
                                          (editor/print-text editor :notice (str % "\n")))
                      :suspended #(editor/suspended editor %)
+                     :quietly #(editor/quietly editor %)
                      :browse (partial browser/browse editor)))))
 
 (defn- history-file
