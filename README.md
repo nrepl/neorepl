@@ -99,7 +99,9 @@ neorepl load src/my/app.clj
 their `clojure.repl` namesakes do, `neorepl macroexpand` expands macros,
 `neorepl complete` lists completions, `neorepl where` says where something's
 defined and `neorepl reload` reloads code, all using cider-nrepl when the
-server has it:
+server has it. `--session NAME` looks things up as that session sees them:
+in its language, ClojureScript included, and in its namespace, the Clojure
+one in ClojureScript, which `--ns` can name otherwise:
 
 ```shell
 neorepl doc map

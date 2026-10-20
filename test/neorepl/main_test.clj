@@ -417,7 +417,13 @@
            (select-keys (edn/read-string (:out (run-command "doc" "--format" "edn" "map"))) [:ns :name]))))
   (testing "nothing there"
     (is (= {:status 1 :out "" :err "neorepl: Nothing called nope in user\n"}
-           (run-command "doc" "nope")))))
+           (run-command "doc" "nope"))))
+  (testing "as a session sees it, in its namespace"
+    (run-command "eval" "-s" "looking" "(ns neorepl.looking) (defn hello \"Hi.\" [])")
+    (is (str/starts-with? (:out (run-command "doc" "-s" "looking" "hello")) "neorepl.looking/hello\n([])\n  Hi."))
+    (is (str/starts-with? (:out (run-command "doc" "-s" "looking" "--ns" "clojure.core" "str")) "clojure.core/str\n"))
+    (is (= {:status 1 :out "" :err "neorepl: No session called nope\n"}
+           (run-command "doc" "-s" "nope" "map")))))
 
 (deftest source-test
   (is (= {:status 0

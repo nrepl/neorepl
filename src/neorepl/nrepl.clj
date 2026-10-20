@@ -243,7 +243,9 @@
 (defn evaluation-ns
   "The name of the namespace code sent to session evaluates in, user when
   the server doesn't say. Not necessarily user otherwise: shadow-cljs starts
-  sessions in shadow.user, and a named session is wherever it was left."
+  sessions in shadow.user, and a named session is wherever it was left. In
+  ClojureScript it's the Clojure namespace under it, which describe has,
+  rather than the one the ClojureScript code runs in."
   [client session]
   (or (session-ns client session) "user"))
 
