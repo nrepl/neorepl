@@ -1115,12 +1115,13 @@ Commands:
 Run neorepl COMMAND --help for its options. neorepl --version prints the
 version."))
 
-(defn- run-command [{:keys [options help main]} args ctx]
-  (let [{:keys [error] :as parsed} (cli/parse options args)]
-    (cond
-      error (throw (usage-error error))
-      (:help (:options parsed)) (do (println help) 0)
-      :else (main (:options parsed) (:args parsed) ctx))))
+(defn- run-command
+  "Runs the command spec with args, as cli/parse made them."
+  [{:keys [help main]} {:keys [error options args]} ctx]
+  (cond
+    error (throw (usage-error error))
+    (:help options) (do (println help) 0)
+    :else (main options args ctx)))
 
 (defn run
   "Runs the neorepl command line args and returns the exit status. ctx has
@@ -1134,20 +1135,26 @@ version."))
                                (and (str/starts-with? command "-") (not (#{"-h" "--help" "--version"} command))))
                          ["repl" args]
                          [command more])
-        spec (some #(when (= command (:name %)) %) commands)]
+        spec (some #(when (= command (:name %)) %) commands)
+        parsed (some-> spec :options (cli/parse args))]
     (try
       (cond
         (contains? #{"help" "-h" "--help"} command) (do (println help) 0)
         (= "--version" command) (do (println "neorepl" version) 0)
-        spec (run-command spec args ctx)
+        spec (run-command spec parsed ctx)
         :else (throw (usage-error (str "Unknown command: " command))))
       (catch clojure.lang.ExceptionInfo e
-        (case (:type (ex-data e))
-          ::usage (do (warn (str (ex-message e) "\nRun neorepl " (when spec (str command " ")) "--help for usage."))
-                      2)
-          (::nrepl/no-server ::nrepl/disconnected ::nrepl/timeout) (do (warn (ex-message e)) 3)
-          (::features/failed ::jack-in/failed ::jack-in/no-project ::server-running) (do (warn (ex-message e)) 1)
-          (throw e))))))
+        (let [;; The format failures come out in too, where scripts look for them.
+              format (get-in parsed [:options :format] "text")
+              fail #(do (report format {:status %1 :message %3}) %2)
+              message (ex-message e)
+              type (:type (ex-data e))]
+          (case type
+            ::usage (fail "usage" 2 (cond-> message
+                                      (= "text" format) (str "\nRun neorepl " (when spec (str command " ")) "--help for usage.")))
+            (::nrepl/no-server ::nrepl/disconnected ::nrepl/timeout) (fail (name type) 3 message)
+            (::features/failed ::jack-in/failed ::jack-in/no-project ::server-running) (fail "error" 1 message)
+            (throw e)))))))
 
 (defn -main [& args]
   (let [status (run args {:dir (System/getProperty "user.dir")
