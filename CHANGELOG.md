@@ -9,6 +9,7 @@
 - [#23](https://github.com/nrepl/neorepl/pull/23): `,sessions` lists the named sessions and switches the REPL into one, such as an agent's, with `,sessions -` going back and the session's name in the prompt.
 - [#24](https://github.com/nrepl/neorepl/pull/24): `d` in the full-screen inspector, and `neorepl inspect --def NAME`, define what's being inspected as a var in the session's namespace.
 - [#28](https://github.com/nrepl/neorepl/pull/28): `--session` has the CLI's lookups, and `session` the MCP tools', look things up as a session sees them, in its language and namespace.
+- [#32](https://github.com/nrepl/neorepl/pull/32): C-x C-s in the REPL shows the source of what's at the cursor, and C-x C-a the vars whose names have it in them, as rebel-readline does.
 
 ### Changes
 

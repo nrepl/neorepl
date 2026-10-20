@@ -333,6 +333,20 @@
         (type "\u0018\u0004")
         (is (screen #"clojure\.core/when\n\(\[test & body\]\)\nMacro\n  Evaluates test"))
         (type "\u0003"))))
+  (testing "C-x C-s shows the source"
+    (call-with-repl {}
+      (fn [type screen]
+        (type "(when")
+        (type "\u0018\u0013")
+        (is (screen #"\(defmacro when\n  \"Evaluates test"))
+        (type "\u0003"))))
+  (testing "C-x C-a shows the vars whose names have the symbol in them"
+    (call-with-repl {}
+      (fn [type screen]
+        (type "(mapca")
+        (type "\u0018\u0001")
+        (is (screen #"clojure\.core/mapcat"))
+        (type "\u0003"))))
   (testing "Ctrl-R searches the history, with eldoc on too"
     (call-with-repl {:eldoc? true}
       (fn [type screen]
