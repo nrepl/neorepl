@@ -168,7 +168,13 @@
 (deftest source-test
   (with-client [client {:port *port*}]
     (is (str/starts-with? (features/source client "when" user) "(defmacro when"))
-    (is (nil? (features/source client "no-such-thing" user)))))
+    (is (nil? (features/source client "no-such-thing" user)))
+    (testing "from a namespace that doesn't refer clojure.core, made by in-ns"
+      (nrepl/request client {:op "eval" :ns "user" :code "(in-ns 'neorepl.bare)"})
+      (doseq [[rung client] {"lookup" client "eval" (without client "lookup")}]
+        (testing rung
+          (is (str/starts-with? (features/source client "clojure.core/when" {:ns "neorepl.bare"}) "(defmacro when"))
+          (is (= "clojure.core" (:ns (features/info client "clojure.core/map" {:ns "neorepl.bare"})))))))))
 
 (deftest apropos-test
   (with-client [client {:port *port*}]
@@ -178,6 +184,9 @@
   (with-client [client {:port *port*}]
     (is (= "(if x (do y))" (features/expand client "(when x y)" user false)))
     (is (str/includes? (features/expand client "(when-let [a 1] a)" user true) "let*"))
+    (testing "from a namespace that doesn't refer clojure.core"
+      (nrepl/request client {:op "eval" :ns "user" :code "(in-ns 'neorepl.bare)"})
+      (is (= "(if x (do y))" (features/expand client "(clojure.core/when x y)" {:ns "neorepl.bare"} false))))
     (testing "one form, only ever read, not evaluated"
       (are [text] (= ::features/failed
                      (:type (ex-data (is (thrown? clojure.lang.ExceptionInfo (features/expand client text user false))))))
