@@ -355,6 +355,19 @@
        (let [{:keys [status err]} (run-in dir "" "repl")]
          (is (= 3 status))
          (is (str/includes? err "nor a project.clj, deps.edn, bb.edn or shadow-cljs.edn to start one for"))))))
+  (testing "for a project inside another, saying so when it's the other's"
+    (call-with-temp-dir
+     (fn [dir]
+       (spit-file dir "deps.edn" "{}")
+       (spit-file dir ".nrepl-port" (str *port*))
+       (spit-file dir "sub/bb.edn" "{}")
+       (is (= {:status 0
+               :out "user=> 3\nuser=> \n"
+               :err (str "neorepl: Using the server for " (.getCanonicalPath dir) ", as the project in "
+                         (.getCanonicalPath (io/file dir "sub")) " has none of its own: neorepl server there starts one\n")}
+              (run-in (io/file dir "sub") "(+ 1 2)\n" "repl")))
+       (testing "but not when it's this one's"
+         (is (= "" (:err (run-in dir "(+ 1 2)\n" "repl"))))))))
   (testing "with --tool, only one that tool started"
     (call-with-temp-dir
      (fn [dir]

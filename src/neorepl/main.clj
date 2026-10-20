@@ -232,7 +232,9 @@ when it times out.")
 (defn- with-repl-client
   "Calls f with a client for the REPL: connected the way options say, or to
   the nearest server, or else to one started for the project in dir, which
-  stops when f returns. With :in-process, to a server in this process."
+  stops when f returns. With :in-process, to a server in this process. A
+  server for a project around dir's, which has none of its own, gets a
+  warning, since it might be missing what's on dir's project's classpath."
   [{:keys [url host port tool aliases in-process] :as options} dir f]
   (let [connect? (or url host port)]
     (when (and in-process connect?)
@@ -243,22 +245,28 @@ when it times out.")
       in-process (with-in-process-server dir f)
       connect? (with-client options dir f)
       :else
-      (let [project (delay (jack-in/find-project dir tool))
+      (let [project (jack-in/find-project dir tool)
             client (try
                      ;; A server the tool started, if it's named.
                      (discovery/connect dir (if tool {:port-files [(:port-file (jack-in/tool tool))]} {}))
                      (catch clojure.lang.ExceptionInfo e
                        (cond
                          (not= ::nrepl/no-server (:type (ex-data e))) (throw e)
-                         @project nil
+                         project nil
                          :else (throw (ex-info (str (ex-message e) ", nor a " (jack-in/project-files tool)
                                                     " to start one for")
                                                (ex-data e))))))]
         (if client
-          (do (when aliases
-                (warn "There's a server running already, so --aliases doesn't apply"))
-              (call-with-client client f))
-          (with-started-server @project options f))))))
+          (let [server-dir (:project-dir client)
+                project-dir (:dir project)]
+            (when aliases
+              (warn "There's a server running already, so --aliases doesn't apply"))
+            (when (and project-dir (not= server-dir project-dir)
+                       (.startsWith (.toPath (io/file project-dir)) (.toPath (io/file server-dir))))
+              (warn (str "Using the server for " server-dir ", as the project in " project-dir
+                         " has none of its own: neorepl server there starts one")))
+            (call-with-client client f))
+          (with-started-server project options f))))))
 
 (defn- emit
   "Prints data in format, edn or json."
@@ -1030,9 +1038,9 @@ with an error, and 2 on usage errors."
   "The live server with tool's port file in dir, if any, the way
   discovery/probe has it."
   [dir tool]
-  (some #(when (and (:live %) (= dir (:dir %))) %)
+  (some #(when (:live %) %)
         (try
-          (discovery/probe dir {:port-files [(:port-file (jack-in/tool tool))]})
+          (discovery/probe dir {:until dir :port-files [(:port-file (jack-in/tool tool))]})
           (catch clojure.lang.ExceptionInfo _ nil))))
 
 (defn- server-command [{:keys [tool format] :as options} args {:keys [dir]}]
