@@ -13,7 +13,7 @@
             [nrepl.misc :as misc]
             [nrepl.transport :as transport])
   (:import (java.io Closeable)
-           (java.net URI URISyntaxException)))
+           (java.net InetSocketAddress Socket URI URISyntaxException)))
 
 (def default-port
   "The port nREPL URLs without one point at, same as in nrepl.core."
@@ -123,10 +123,28 @@
   ;; Closing doesn't wake up a reader blocked in recv, but interrupting does.
   (.interrupt reader))
 
+(def ^:private connect-timeout-ms
+  "How long to wait for a server to take a connection. A host that doesn't
+  answer at all takes over a minute to fail otherwise."
+  10000)
+
+(defn- tcp-socket
+  "A socket connected to the server at host and port."
+  ^Socket [^String host port]
+  (let [socket (Socket.)]
+    (try
+      (doto socket
+        (.setTcpNoDelay true)
+        (.connect (InetSocketAddress. host (int port)) (int connect-timeout-ms)))
+      (catch Exception e
+        (.close socket)
+        (throw e)))))
+
 (defn- open [{:keys [host port socket]} on-unclaimed on-error]
-  (let [client {:transport (if socket
+  (let [tcp (when-not socket (tcp-socket host port))
+        client {:transport (if socket
                              (nrepl/connect :socket socket)
-                             (nrepl/connect :host host :port port))
+                             (transport/bencode tcp))
                 :pending (atom {})
                 :on-unclaimed (atom on-unclaimed)}]
     (assoc client :reader (doto (Thread. ^Runnable #(read-responses client on-error)

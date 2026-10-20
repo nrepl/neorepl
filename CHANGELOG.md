@@ -28,6 +28,7 @@
 - [#26](https://github.com/nrepl/neorepl/pull/26): `neorepl mcp` checks a call's arguments against its tool's schema, and answers a line it can't read with a parse error, where an id past a long, for one, used to end it.
 - [#26](https://github.com/nrepl/neorepl/pull/26): `neorepl mcp` reconnects on the first call after its nREPL server restarts, which used to fail.
 - [#26](https://github.com/nrepl/neorepl/pull/26): The MCP `ports` tool says there are no port files, rather than failing.
+- [#27](https://github.com/nrepl/neorepl/pull/27): Connecting to a host that doesn't answer gives up after 10 seconds, rather than after a minute or more.
 
 ## 0.3.0 (2026-10-17)
 
