@@ -14,6 +14,9 @@
   (testing "-- ends the options and - is an argument"
     (is (= {:options {:port 1 :format "text"} :args ["-" "-1" "--help"]}
            (cli/parse specs ["--port=1" "-" "--" "-1" "--help"]))))
+  (testing "arguments that don't look like options, as symbols do"
+    (is (= {:options {:format "text"} :args ["->" "-main" "-1" "-"]}
+           (cli/parse specs ["->" "-main" "-1" "-"]))))
   (testing "values can look like options"
     (is (= {:options {:port -1 :format "text"} :args []}
            (cli/parse specs ["-p" "-1"]))))
@@ -24,6 +27,8 @@
   (testing "errors"
     (are [args error] (= {:error error} (cli/parse specs args))
       ["--nope"] "Unknown option: --nope"
+      ;; A value right after a short option isn't one.
+      ["-p7888"] "Unknown option: -p7888"
       ["-x" "--port" "1"] "Unknown option: -x"
       ["--port"] "--port needs a value"
       ["--port" "x"] "Invalid value for --port: x"
