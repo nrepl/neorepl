@@ -29,10 +29,11 @@
   "The port files in dir and its parents, nearest first, as maps with the
   :file, the :port in it and the project :dir it's for. Stale files
   included. opts can limit them to some :port-files, the names in
-  port-files."
+  port-files, and to the parents up to the directory called :until."
   ([dir] (find-ports dir {}))
-  ([dir {names :port-files :or {names port-files}}]
-   (for [d (dirs dir)
+  ([dir {names :port-files :keys [until] :or {names port-files}}]
+   (for [d (let [[below from] (split-with #(not= until (str %)) (dirs dir))]
+             (concat below (take 1 from)))
          name names
          :let [f (io/file d name)
                port (read-port f)]

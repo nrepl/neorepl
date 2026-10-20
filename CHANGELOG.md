@@ -64,6 +64,7 @@
 - [#33](https://github.com/nrepl/neorepl/pull/33): The REPL's `--tool` connects only to a server that tool started, going by its port file, rather than to whatever server is up, and `neorepl server` starts a shadow-cljs server next to a Clojure one, and the other way around.
 - [#33](https://github.com/nrepl/neorepl/pull/33): A server neorepl started that dies says how it ended, and takes the port file it leaves behind with it, rather than leaving it to point at nothing.
 - [#33](https://github.com/nrepl/neorepl/pull/33): Ctrl-C while a server starts no longer has neorepl say the server ended before it started.
+- [#33](https://github.com/nrepl/neorepl/pull/33): The REPL in a project inside another one says when it's using the other project's server, its own having none, which it used to without a word.
 
 ## 0.3.0 (2026-10-17)
 

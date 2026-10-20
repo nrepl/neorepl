@@ -53,6 +53,12 @@
        (let [e (is (thrown? clojure.lang.ExceptionInfo
                             (discovery/connect (io/file dir "app") {:port-files [".shadow-cljs/nrepl.port"]})))]
          (is (re-find #"No nREPL server answering at the ports in .*app[/\\]\.shadow-cljs[/\\]nrepl\.port$" (ex-message e)))))
+     (testing "or the parents up to a directory"
+       (is (= [(canonical dir "app/.nrepl-port")]
+              (map :file (discovery/find-ports (io/file dir "app") {:until (canonical dir "app") :port-files [".nrepl-port"]}))))
+       (let [e (is (thrown? clojure.lang.ExceptionInfo
+                            (discovery/connect (io/file dir "app/src") {:until (canonical dir "app") :port-files [".nrepl-port"]})))]
+         (is (re-find #"No nREPL server answering at the ports in .*app[/\\]\.nrepl-port$" (ex-message e)))))
      (testing "only stale port files"
        (spit-file dir ".nrepl-port" (str (test-server/free-port)))
        (let [e (is (thrown? clojure.lang.ExceptionInfo (discovery/connect (io/file dir "app"))))]
