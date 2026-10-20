@@ -6,6 +6,7 @@
             [clojure.test :refer [deftest is testing]]
             [neorepl.jack-in :as jack-in]
             [neorepl.nrepl :as nrepl]
+            [neorepl.shutdown :as shutdown]
             [neorepl.test-server :refer [call-with-temp-dir free-port spit-file windows? with-client]])
   (:import (java.net InetAddress ServerSocket)))
 
@@ -190,6 +191,12 @@
                                  (fn [_]))))
          (testing "after what it said"
            (is (= [":oops"] @lines))))
+       (testing "or one that neorepl exiting stopped, which isn't a failure"
+         (with-redefs [shutdown/exiting? (constantly true)]
+           (is (= ::jack-in/stopped
+                  (:type (ex-data (is (thrown? clojure.lang.ExceptionInfo
+                                               (jack-in/with-server dir ["bb" "-e" "(System/exit 143)"] ".nrepl-port"
+                                                 (fn [_]) (fn [_]))))))))))
        (testing "one whose build tool isn't installed"
          (is (thrown-with-msg? clojure.lang.ExceptionInfo #"^Couldn't start the server: neorepl-no-such-tool isn't installed, or isn't on the PATH$"
                                (jack-in/with-server dir ["neorepl-no-such-tool"] ".nrepl-port" (fn [_]) (fn [_])))))
