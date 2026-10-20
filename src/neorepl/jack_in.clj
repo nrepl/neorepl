@@ -34,16 +34,18 @@
 (def tools
   "The build tools jack-in knows, by the file a project of theirs has,
   whether they take :aliases?, deps.edn aliases or Leiningen profiles, and
-  a :port?. A directory with several files goes with the first, unless
-  (first? dir) says otherwise: a deps.edn next to a project.clj is usually
-  there for tooling, a bb.edn next to either holds the project's tasks, and
-  a shadow-cljs.edn builds the ClojureScript part, unless it builds with
-  the project's deps.edn or project.clj, when its server has it all."
-  [{:tool "lein" :file "project.clj" :aliases? true :port? true}
-   {:tool "clojure" :file "deps.edn" :aliases? true :port? true}
-   {:tool "bb" :file "bb.edn" :port? true}
+  a :port?, and the :port-file their servers write, one of
+  discovery/port-files. A directory with several files goes with the
+  first, unless (first? dir) says otherwise: a deps.edn next to a
+  project.clj is usually there for tooling, a bb.edn next to either holds
+  the project's tasks, and a shadow-cljs.edn builds the ClojureScript part,
+  unless it builds with the project's deps.edn or project.clj, when its
+  server has it all."
+  [{:tool "lein" :file "project.clj" :aliases? true :port? true :port-file ".nrepl-port"}
+   {:tool "clojure" :file "deps.edn" :aliases? true :port? true :port-file ".nrepl-port"}
+   {:tool "bb" :file "bb.edn" :port? true :port-file ".nrepl-port"}
    ;; It takes its port and aliases from shadow-cljs.edn.
-   {:tool "shadow-cljs" :file "shadow-cljs.edn" :first? builds-with-project?}])
+   {:tool "shadow-cljs" :file "shadow-cljs.edn" :first? builds-with-project? :port-file ".shadow-cljs/nrepl.port"}])
 
 (defn tool
   "The entry in tools for the tool called name."

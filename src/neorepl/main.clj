@@ -236,7 +236,8 @@ when it times out.")
       :else
       (let [project (delay (jack-in/find-project dir tool))
             client (try
-                     (discovery/connect dir)
+                     ;; A server the tool started, if it's named.
+                     (discovery/connect dir (if tool {:port-files [(:port-file (jack-in/tool tool))]} {}))
                      (catch clojure.lang.ExceptionInfo e
                        (cond
                          (not= ::nrepl/no-server (:type (ex-data e))) (throw e)
@@ -245,8 +246,8 @@ when it times out.")
                                                     " to start one for")
                                                (ex-data e))))))]
         (if client
-          (do (when (or tool aliases)
-                (warn "There's a server running already, so --tool and --aliases don't apply"))
+          (do (when aliases
+                (warn "There's a server running already, so --aliases doesn't apply"))
               (call-with-client client f))
           (with-started-server @project options f))))))
 
@@ -956,7 +957,10 @@ nothing's running."
    discovery-note
    "Without a server to connect to, it starts one for the project, the way
 neorepl server does, and stops it when the REPL ends. --tool and --aliases
-say how, and with --in-process the server runs in neorepl's own process."
+say how, and with --in-process the server runs in neorepl's own process.
+With --tool shadow-cljs it connects only to a shadow-cljs server, going by
+.shadow-cljs/nrepl.port, and with the other tools only to one with a
+.nrepl-port, so a shadow-cljs server and a Clojure one can run side by side."
    "Exit status: 0 when the REPL ends, 1 when a server fails to start, 2 on
 usage errors and 3 when there's no server to talk to or the connection to it
 drops."
@@ -1014,12 +1018,12 @@ with an error, and 2 on usage errors."
   neorepl server --tool bb --format json"))
 
 (defn- running-server
-  "The live server with its port file in dir, if any, the way
+  "The live server with tool's port file in dir, if any, the way
   discovery/probe has it."
-  [dir]
+  [dir tool]
   (some #(when (and (:live %) (= dir (:dir %))) %)
         (try
-          (discovery/probe dir)
+          (discovery/probe dir {:port-files [(:port-file (jack-in/tool tool))]})
           (catch clojure.lang.ExceptionInfo _ nil))))
 
 (defn- server-command [{:keys [tool format] :as options} args {:keys [dir]}]
@@ -1027,7 +1031,7 @@ with an error, and 2 on usage errors."
   (let [{project-dir :dir :as project} (or (jack-in/find-project dir tool)
                                            (throw (jack-in/no-project dir tool)))]
     ;; Another one would take its port file.
-    (when-let [{:keys [port]} (running-server project-dir)]
+    (when-let [{:keys [port]} (running-server project-dir (:tool project))]
       (throw (ex-info (str "There's a server for " project-dir " running already, on port " port)
                       {:type ::server-running})))
     (with-server project options print-err-line

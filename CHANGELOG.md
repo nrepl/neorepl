@@ -61,6 +61,7 @@
 - [#32](https://github.com/nrepl/neorepl/pull/32): `NO_COLOR` takes the color out of the completion menu too.
 - [#33](https://github.com/nrepl/neorepl/pull/33): Starting a server says when the build tool it takes isn't installed, rather than passing on the shell's `exec: lein: not found`.
 - [#33](https://github.com/nrepl/neorepl/pull/33): A port file pointing at something that isn't an nREPL server gets given up on after 3 seconds, rather than 10.
+- [#33](https://github.com/nrepl/neorepl/pull/33): The REPL's `--tool` connects only to a server that tool started, going by its port file, rather than to whatever server is up, and `neorepl server` starts a shadow-cljs server next to a Clojure one, and the other way around.
 
 ## 0.3.0 (2026-10-17)
 

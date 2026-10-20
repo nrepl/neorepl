@@ -48,6 +48,11 @@
          (is (= {:file (canonical dir "app/.nrepl-port") :live false} (dissoc stale :port :dir)))
          (is (= {:file (canonical dir ".nrepl-port") :port *port* :live true} (dissoc live :versions :dir)))
          (is (string? (:nrepl (:versions live))))))
+     (testing "or only some port files"
+       (spit-file dir "app/.shadow-cljs/nrepl.port" (str (test-server/free-port)))
+       (let [e (is (thrown? clojure.lang.ExceptionInfo
+                            (discovery/connect (io/file dir "app") {:port-files [".shadow-cljs/nrepl.port"]})))]
+         (is (re-find #"No nREPL server answering at the ports in .*app[/\\]\.shadow-cljs[/\\]nrepl\.port$" (ex-message e)))))
      (testing "only stale port files"
        (spit-file dir ".nrepl-port" (str (test-server/free-port)))
        (let [e (is (thrown? clojure.lang.ExceptionInfo (discovery/connect (io/file dir "app"))))]
