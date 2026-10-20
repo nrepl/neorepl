@@ -459,10 +459,21 @@
         nss (distinct (map #(symbol (or (namespace %) (name %))) symbols))
         tests (filter namespace symbols)]
     ;; Evaluations of their own: ClojureScript's require has to be a form
-    ;; of its own, and piggieback evaluates only the first form of the code.
-    (ask client {:op "eval" :session session
-                 :code (str "(require " (str/join " " (map #(str "'" %) nss)) ")")}
-         opts)
+    ;; of its own.
+    (try
+      (let [quoted (str/join " " (map #(str "'" %) nss))
+            load! #(ask client {:op "eval" :session session :code %} opts)]
+        (load! (str "(require " quoted ")"))
+        ;; One that threw while loading is gone, but loaded as far as
+        ;; require goes, its ns form having said so, so a reload says why.
+        (load! (str "#?(:clj (doseq [n [" quoted "]] (when-not (find-ns n) (require n :reload))) :default nil)")))
+      (catch clojure.lang.ExceptionInfo e
+        (if (= ::failed (:type (ex-data e)))
+          (throw (ex-info (str/replace-first (ex-message e) "The server couldn't do eval"
+                                             (str "Couldn't load " (str/join ", " nss)))
+                          (ex-data e)
+                          e))
+          (throw e))))
     (when (seq tests)
       (some->> (ask client {:op "eval" :session session
                             :code (str "(vec (remove nil? ["
@@ -623,10 +634,44 @@
       ;; In the order test-var-query has them.
       (update :failures #(vec (sort-by (juxt :ns :var) %)))))
 
+(def ^:private project-load-code
+  "Loads the project's namespaces, as cider-nrepl's orchard finds them, and
+  returns the ones that don't load and why, as strings, for a whole-project
+  run, since test-var-query never answers when its own loading fails."
+  "(do (require 'orchard.namespace)
+       (vec (for [ns (orchard.namespace/project-namespaces)
+                  ;; One that threw while loading is gone, but loaded as far
+                  ;; as require goes, so a reload says why.
+                  :let [problem (try (require ns)
+                                     (when-not (find-ns ns) (require ns :reload))
+                                     nil
+                                  (catch Throwable e
+                                    (str ns \": \" (.getMessage e)
+                                         (some->> (.getCause e) .getMessage (str \" \")))))]
+                  :when problem]
+              problem)))")
+
+(defn- load-project!
+  "Loads the project's namespaces in session, as project-load-code does,
+  throwing ::failed with the ones that don't load, if any. Returns whether
+  it could tell, as a server without orchard can't."
+  [client session opts]
+  (when-let [problems (try
+                        (eval-data client {:session session} project-load-code [] opts)
+                        (catch clojure.lang.ExceptionInfo e
+                          (when (= ::nrepl/timeout (:type (ex-data e)))
+                            (throw e))))]
+    (when (seq problems)
+      (throw (ex-info (str "The project's namespaces don't all load:\n" (str/join "\n" (map #(str "  " %) problems)))
+                      {:type ::failed})))
+    true))
+
 (defn- test-msg
   "The message that runs the tests run-tests takes names for, in session, or
-  in copy, a copy of it, through clojure.test, when there's one."
-  [session copy names]
+  in copy, a copy of it, through clojure.test, when there's one. Every test
+  in the project has the server load the project's namespaces unless
+  loaded?."
+  [session copy names loaded?]
   (cond
     ;; cider-nrepl streams test-events with it, for progress.
     (= :failed names) {:op "retest" :session session :stream "true"}
@@ -638,7 +683,8 @@
                         (some qualified? names) {:exactly (vec names)}
                         (seq names) {:ns-query {:exactly (vec names)}}
                         ;; bencode has no booleans.
-                        :else {:ns-query {:project? "true" :load-project-ns? "true"}})}))
+                        :else {:ns-query (cond-> {:project? "true"}
+                                           (not loaded?) (assoc :load-project-ns? "true"))})}))
 
 (defn- progress
   "response, with a test-event cider-nrepl streams, as the progress
@@ -684,17 +730,20 @@
         (empty? names) (throw (ex-info "Running every test takes cider-nrepl or babashka on the server; name the namespaces to test"
                                        {:type ::failed}))))
     (let [check? (and (not failed?) (seq names))
-          ;; The check and the eval ones run in a copy of the session, in its
-          ;; language, so its *1 stays put.
-          copy (when check? (nrepl/clone-session client session))
+          ;; cider-nrepl's orchard finds the project's namespaces.
+          project? (and ops? (not failed?) (empty? names) (supports? client "cider-version"))
+          ;; The check, the loading and the eval ones run in a copy of the
+          ;; session, in its language, so its *1 stays put.
+          copy (when (or check? project?) (nrepl/clone-session client session))
           report (atom nil)]
       (try
         (when check?
           (when-let [unknown (seq (unknown-tests client copy names {:timeout-ms (some-> timeout (* 1000) long)}))]
             (throw (ex-info (str "No test called " (str/join ", " unknown)) {:type ::failed}))))
-        (let [{:keys [status] :as result}
+        (let [loaded? (and project? (load-project! client copy {:timeout-ms (some-> timeout (* 1000) long)}))
+              {:keys [status] :as result}
               (-> (evaluate-for client
-                                (test-msg session (when-not ops? copy) names)
+                                (test-msg session (when-not ops? copy) names loaded?)
                                 (cond-> opts
                                   ;; It would cut the report short, which is the eval's value.
                                   (not ops?) (dissoc :max-output)
