@@ -564,21 +564,27 @@
 
 (defn- locate
   "failures with the :file each one's test is in, for those whose :file is
-  that file's name, as cider-nrepl and clojure.test give it, or missing, as
-  babashka has it. Others, like an assertion in a helper elsewhere, keep
-  theirs, which goes with their :line."
-  [client session failures]
-  (let [tests (distinct (keep (fn [{:keys [ns var]}] (when (and ns var) [ns var])) failures))
+  that file's name, as cider-nrepl and clojure.test give it, or missing. From
+  a test-op?, errors too, whose :file cider-nrepl takes from the frame that
+  threw, while the :line is the test's, and anything on babashka, whose
+  :file is whichever file the session loaded last. Other failures, like an
+  assertion in a helper elsewhere, keep theirs, which goes with their
+  :line."
+  [client session test-op? failures]
+  (let [bb? (contains? (:versions client) :babashka)
+        tests (distinct (keep (fn [{:keys [ns var]}] (when (and ns var) [ns var])) failures))
         ;; Independent lookups, so all at once.
         files (zipmap tests (pmap (fn [[ns var]]
                                     (try
                                       (:file (info client (str ns "/" var) {:ns ns :session session}))
                                       (catch clojure.lang.ExceptionInfo _ nil)))
                                   tests))]
-    (mapv (fn [{:keys [ns var] :as failure}]
+    (mapv (fn [{:keys [ns var type] :as failure}]
             (let [file (get files [ns var])
                   given (source-file (:file failure))]
-              (if (and file (or (nil? given) (= given (.getName (java.io.File. ^String file)))))
+              (if (and file (or (and test-op? (or bb? (= "error" type)))
+                                (nil? given)
+                                (= given (.getName (java.io.File. ^String file)))))
                 (assoc failure :file file)
                 failure)))
           failures)))
@@ -757,7 +763,7 @@
             ;; Only a run that ended by itself, since clojure.test reports
             ;; an interrupted test as an error and carries on.
             (not= "ok" status) result
-            report (cond-> (assoc result :report (update report :failures #(->> (locate client session %)
+            report (cond-> (assoc result :report (update report :failures #(->> (locate client session ops? %)
                                                                                   (with-causes client session
                                                                                     (cond-> {}
                                                                                       timeout (assoc :timeout-ms (long (* 1000 timeout))))))))
