@@ -43,8 +43,9 @@
 (defn- read-responses
   "The reader thread's loop. Once the connection is gone, the pending handler
   map becomes nil and every handler that was still waiting gets a final
-  response with the statuses done and disconnected."
-  [{:keys [transport pending on-unclaimed]} on-error]
+  response with the statuses done and disconnected. It calls
+  before-read before each read."
+  [{:keys [transport pending on-unclaimed before-read]} on-error]
   (let [call (fn [handler response]
                ;; A broken handler mustn't take the connection down with it.
                (try (handler response) (catch Throwable e (on-error e))))]
@@ -52,6 +53,7 @@
       ;; Not over nrepl/response-seq: on babashka, walking the lazy seq keeps
       ;; its head, and with it every response the connection ever got.
       (loop []
+        (before-read)
         (when-let [{:keys [id] :as response} (transport/recv transport Long/MAX_VALUE)]
           (if-let [handler (get @pending id)]
             (do (when (done? response) (swap! pending dissoc id))
@@ -128,6 +130,17 @@
   answer at all takes over a minute to fail otherwise."
   10000)
 
+(def ^:private quickack
+  "Linux's TCP_QUICKACK on the JVM, or nil where there's none, as on
+  babashka. Servers write an eval's done right after its value, and nREPL's
+  sockets hold a write back until the one before it is acknowledged, which
+  Linux delays by up to 40ms otherwise."
+  (try
+    (let [option (.get (.getField (Class/forName "jdk.net.ExtendedSocketOptions") "TCP_QUICKACK") nil)]
+      (when (.contains (.supportedOptions (Socket.)) option)
+        option))
+    (catch Throwable _ nil)))
+
 (defn- tcp-socket
   "A socket connected to the server at host and port."
   ^Socket [^String host port]
@@ -146,7 +159,12 @@
                              (nrepl/connect :socket socket)
                              (transport/bencode tcp))
                 :pending (atom {})
-                :on-unclaimed (atom on-unclaimed)}]
+                :on-unclaimed (atom on-unclaimed)
+                ;; Linux leaves quick acknowledgements once the client
+                ;; answers what it got, as it does, so it's back each time.
+                :before-read (if (and tcp quickack)
+                               #(try (.setOption tcp quickack true) (catch Exception _ nil))
+                               (fn []))}]
     (assoc client :reader (doto (Thread. ^Runnable #(read-responses client on-error)
                                          "neorepl-nrepl-reader")
                             (.setDaemon true)

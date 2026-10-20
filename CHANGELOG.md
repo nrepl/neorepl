@@ -29,6 +29,7 @@
 - [#26](https://github.com/nrepl/neorepl/pull/26): `neorepl mcp` reconnects on the first call after its nREPL server restarts, which used to fail.
 - [#26](https://github.com/nrepl/neorepl/pull/26): The MCP `ports` tool says there are no port files, rather than failing.
 - [#27](https://github.com/nrepl/neorepl/pull/27): Connecting to a host that doesn't answer gives up after 10 seconds, rather than after a minute or more.
+- [#27](https://github.com/nrepl/neorepl/pull/27): An evaluation on Linux no longer waits 40ms on the server's socket, nor 40ms a form for several, with neorepl on the JVM.
 
 ## 0.3.0 (2026-10-17)
 
