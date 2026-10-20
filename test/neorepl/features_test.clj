@@ -367,6 +367,11 @@
         (nrepl/request client {:op "eval" :session session :code ":before"})
         (run ["neorepl.sample-suite/passing"])
         (is (= [":before"] (keep :value (nrepl/request client {:op "eval" :session session :code "*1"})))))
+      (testing "within the timeout, loading the tests too"
+        (let [started (System/currentTimeMillis)]
+          (is (= {:status "timeout" :message "Timed out after 0.5s, loading the tests"}
+                 (features/run-tests client session ["neorepl.sample-slow-load"] {:timeout 0.5})))
+          (is (< (- (System/currentTimeMillis) started) 2500))))
       (are [names message] (thrown-with-msg? clojure.lang.ExceptionInfo message (run names))
         ["neorepl.sample-suite/nope"] #"No test called neorepl.sample-suite/nope"
         ["neorepl.sample-suite" "neorepl.sample-suite/passing"] #"not both"

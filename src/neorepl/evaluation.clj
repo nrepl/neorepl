@@ -155,6 +155,8 @@
                   :timeout, it's called on a thread of its own, so a read
                   that blocks doesn't outlast it
     :timeout      seconds after which to interrupt the evaluation
+    :deadline     when to, instead, in milliseconds since the epoch, for an
+                  evaluation that's part of something the :timeout covers
     :max-output   cuts each value at that many characters, and stdout and
                   stderr too, marking the result :truncated
     :collect?     false to leave :values, :out and :err empty, for callers
@@ -162,14 +164,14 @@
 
   Responses that come after it stops waiting, on a timeout or when told to,
   go where the client's unclaimed responses go."
-  [client {:keys [session] :as msg} {:keys [on-send on-interrupt-failed on-response read-line timeout max-output collect?]
+  [client {:keys [session] :as msg} {:keys [on-send on-interrupt-failed on-response read-line timeout deadline max-output collect?]
                                      :or {on-send (fn [_ _])
                                           on-interrupt-failed (fn [])
                                           on-response (fn [_])
                                           read-line clojure.core/read-line
                                           collect? true}}]
   (let [[msg & more] (messages msg)
-        deadline (when timeout (+ (System/currentTimeMillis) (long (* 1000 timeout))))
+        deadline (or deadline (when timeout (+ (System/currentTimeMillis) (long (* 1000 timeout)))))
         responses (LinkedBlockingQueue.)
         given-up (promise)
         ;; Under the lock: what interrupts the message that's out, and
