@@ -5,6 +5,7 @@
             [clojure.string :as str]
             [clojure.test :refer [are deftest is testing use-fixtures]]
             [neorepl.discovery :as discovery]
+            [neorepl.features :as features]
             [neorepl.json :as json]
             [neorepl.main :as main]
             [neorepl.nrepl :as nrepl]
@@ -521,7 +522,16 @@
 
 (deftest complete-test
   (is (re-find #"(?m)^mapcat\b" (:out (run-command "complete" "mapc"))))
-  (is (some #(= "mapcat" (:candidate %)) (edn/read-string (:out (run-command "complete" "--format" "edn" "mapc"))))))
+  (is (some #(= "mapcat" (:candidate %)) (edn/read-string (:out (run-command "complete" "--format" "edn" "mapc")))))
+  (testing "nothing to complete"
+    (is (= {:status 1 :out "" :err "neorepl: No completions for nope-nope-\n"}
+           (run-command "complete" "nope-nope-")))
+    (is (= {:status "not-found" :message "No completions for nope-nope-"}
+           (edn/read-string (:out (run-command "complete" "--format" "edn" "nope-nope-"))))))
+  (testing "a server that can't complete"
+    (with-redefs [features/complete (constantly nil)]
+      (is (= {:status 1 :out "" :err "neorepl: The server can't complete names, which takes cider-nrepl or nREPL 0.8\n"}
+             (run-command "complete" "map"))))))
 
 (deftest apropos-test
   (is (re-find #"(?m)^clojure\.core/mapcat$" (:out (run-command "apropos" "^mapc"))))
