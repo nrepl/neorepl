@@ -721,7 +721,8 @@
   :failures, maps with their :type (fail or error), :ns, :var, :context,
   :message, :expected, :actual or :error and the error's :causes, as
   last-error has them, if the server says, :file and :line, and the
-  :elapsed-ms. Its :status is failed when a test didn't pass. The :timeout
+  :elapsed-ms. Its :status is failed when a test didn't pass, or a
+  namespace named has none, with a :message saying so then. The :timeout
   covers the whole run, loading the tests too. The :on-response gets a
   Testing line for each namespace, as output, when the server says, as
   cider-nrepl does."
@@ -763,7 +764,7 @@
                                    (:summary %) (reset! report (op-report %))
                                    (and (not ops?) (:value %)) (reset! report (eval-report (:value %)))))
                   (dissoc :ns))
-              {{:keys [fail error]} :summary :as report} @report]
+              {{:keys [var fail error]} :summary :as report} @report]
           (cond
             ;; Only a run that ended by itself, since clojure.test reports
             ;; an interrupted test as an error and carries on.
@@ -773,7 +774,11 @@
                                                                                   (with-causes client session
                                                                                     (cond-> {}
                                                                                       deadline (assoc :timeout-ms (max 1000 (left-ms))))))))
-                     (pos? (+ fail error)) (assoc :status "failed"))
+                     (pos? (+ fail error)) (assoc :status "failed")
+                     ;; A source namespace for its tests' one, say.
+                     ;; Not when a fixture failed before them.
+                     (and check? (zero? (+ var fail error))) (assoc :status "failed"
+                                                     :message (str "No tests in " (str/join ", " names))))
             :else (throw (ex-info "The server didn't run the tests" {:type ::failed}))))
         (catch clojure.lang.ExceptionInfo e
           (if (= ::nrepl/timeout (:type (ex-data e)))

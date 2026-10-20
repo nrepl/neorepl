@@ -367,6 +367,9 @@
         (nrepl/request client {:op "eval" :session session :code ":before"})
         (run ["neorepl.sample-suite/passing"])
         (is (= [":before"] (keep :value (nrepl/request client {:op "eval" :session session :code "*1"})))))
+      (testing "a namespace without tests, which can't be what was meant"
+        (is (= {:status "failed" :message "No tests in clojure.string"}
+               (select-keys (run ["clojure.string"]) [:status :message]))))
       (testing "within the timeout, loading the tests too"
         (let [started (System/currentTimeMillis)]
           (is (= {:status "timeout" :message "Timed out after 0.5s, loading the tests"}
