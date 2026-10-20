@@ -38,6 +38,7 @@
 - [#29](https://github.com/nrepl/neorepl/pull/29): A whole-project `neorepl test` with cider-nrepl says which of the project's namespaces don't load, where it used to wait for good, and a test namespace that doesn't load says so, every run.
 - [#29](https://github.com/nrepl/neorepl/pull/29): A test error's location is its test's, rather than the file of the frame that threw with the test's line, and on babashka every failure's is.
 - [#29](https://github.com/nrepl/neorepl/pull/29): `neorepl test --timeout` covers loading the tests too, and running out of time there exits 124, rather than 3.
+- [#29](https://github.com/nrepl/neorepl/pull/29): `neorepl test` of a namespace without tests says so and exits 1, rather than passing.
 
 ## 0.3.0 (2026-10-17)
 

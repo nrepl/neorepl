@@ -773,9 +773,9 @@ usage errors and 3 when there's no server to talk to."
   (concat connection-options evaluation-options common-options))
 
 (def ^:private test-exit-statuses
-  "Exit status: 0 when every test passes, 1 when one doesn't or the tests can't
-run, 2 on usage errors, 3 when there's no server to talk to or the connection
-to it drops and 124 when they time out.")
+  "Exit status: 0 when every test passes, 1 when one doesn't, the tests can't
+run or a namespace named has none, 2 on usage errors, 3 when there's no
+server to talk to or the connection to it drops and 124 when they time out.")
 
 (defn- report-tests
   "Runs the tests names names, as features/run-tests takes them, the way
