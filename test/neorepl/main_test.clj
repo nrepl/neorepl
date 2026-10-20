@@ -348,6 +348,14 @@
        (let [{:keys [status err]} (run-in dir "" "repl")]
          (is (= 3 status))
          (is (str/includes? err "nor a project.clj, deps.edn, bb.edn or shadow-cljs.edn to start one for"))))))
+  (testing "with --tool, only one that tool started"
+    (call-with-temp-dir
+     (fn [dir]
+       (spit-file dir ".nrepl-port" (str *port*))
+       (let [{:keys [status err]} (run-in dir "" "repl" "--tool" "shadow-cljs")]
+         (is (= 3 status))
+         (is (str/includes? err "No nREPL port file (.shadow-cljs/nrepl.port) in "))
+         (is (str/includes? err "nor a shadow-cljs.edn to start one for"))))))
   (testing "or one in neorepl's own process"
     (is (= {:status 0 :out "user=> 3\nuser=> \n" :err ""}
            (run-in *dir* "(+ 1 2)\n" "repl" "--in-process"))))
@@ -421,6 +429,19 @@
        (let [{:keys [status err]} (run-in dir "" "server")]
          (is (= 1 status))
          (is (str/includes? err (str "running already, on port " *port*)))))))
+  ;; Windows has no SIGTERM, so stopping neorepl there leaves the server.
+  (when-not (test-server/windows?)
+    (testing "but not when it's another tool's, with another port file"
+      (call-with-temp-dir
+       (fn [dir]
+         (spit-file dir "bb.edn" "{}")
+         (spit-file dir ".shadow-cljs/nrepl.port" (str *port*))
+         (let [process (start-neorepl-in dir "server" "--format" "edn")]
+           (try
+             (is (= "bb" (:tool (edn/read-string (.readLine (io/reader (.getInputStream process)))))))
+             (finally
+               (.destroy process)
+               (.waitFor process 10 TimeUnit/SECONDS))))))))
   (testing "babashka projects take no aliases"
     (call-with-temp-dir
      (fn [dir]
