@@ -31,6 +31,7 @@
 - [#27](https://github.com/nrepl/neorepl/pull/27): Connecting to a host that doesn't answer gives up after 10 seconds, rather than after a minute or more.
 - [#27](https://github.com/nrepl/neorepl/pull/27): An evaluation on Linux no longer waits 40ms on the server's socket, nor 40ms a form for several, with neorepl on the JVM.
 - [#28](https://github.com/nrepl/neorepl/pull/28): `source`, and `doc` and `macroexpand` without cider-nrepl, work from a namespace that doesn't refer `clojure.core`, like one `in-ns` made.
+- [#28](https://github.com/nrepl/neorepl/pull/28): `doc`, and the REPL's arglists, cover Java methods, fields and classes with cider-nrepl, with their Javadoc as text, and `doc` of a namespace names it once.
 
 ## 0.3.0 (2026-10-17)
 

@@ -73,7 +73,8 @@
   as a vector of strings."
   [s]
   (cond
-    (str/blank? s) nil
+    ;; cider-nrepl's for a Java field.
+    (or (str/blank? s) (= "nil" s)) nil
     (str/starts-with? s "(") (lexer/forms (subs s 1 (dec (count s))))
     :else (str/split-lines s)))
 
@@ -95,13 +96,43 @@
     (str/starts-with? file "file:") (str (java.io.File. (java.net.URI. file)))
     :else file))
 
+(defn- html-text
+  "Javadoc's HTML as plain text, near enough: without its tags, and with the
+  entities it uses most spelled out."
+  [html]
+  (-> html
+      (str/replace #"<[^>]*>" "")
+      (str/replace "&nbsp;" " ")
+      (str/replace "&lt;" "<")
+      (str/replace "&gt;" ">")
+      (str/replace "&quot;" "\"")
+      (str/replace "&amp;" "&")))
+
+(defn- fragments-text
+  "cider-nrepl's doc fragments for a Java class or member as text, with the
+  spaces between the HTML and the text around it run together."
+  [fragments]
+  (-> (str/join (for [{:keys [type content]} fragments]
+                  (if (= "html" type) (html-text content) content)))
+      (str/replace #"(\S) {2,}" "$1 ")
+      str/trim))
+
 (defn- normalize-info
   "info and lookup responses in one shape: :ns, :name, :doc, where it is as
   the :file, :line and :column, :arglists and a special form's :forms as
-  vectors of strings, and :macro and :special-form."
-  [{:keys [file arglists-str forms forms-str macro special-form] :as info}]
-  (let [file (source-file file)]
-    (cond-> (select-keys info [:ns :name :doc])
+  vectors of strings, and :macro and :special-form. cider-nrepl's for a Java
+  member has its :class as the :ns and the :member as the :name, and for a
+  class, the :class as the :name, with its Javadoc as text either way. Its
+  for a namespace, which names it twice, has no :ns."
+  [{:keys [file arglists-str forms forms-str macro special-form class member doc-fragments column] :as info}]
+  (let [file (source-file file)
+        info (cond-> info
+               member (assoc :ns class :name member)
+               (and class (not member)) (assoc :name class)
+               (seq doc-fragments) (assoc :doc (fragments-text doc-fragments))
+               ;; Unlike a var named like its namespace, it has neither.
+               (and (= (:ns info) (:name info)) (nil? column) (str/blank? arglists-str)) (dissoc :ns))]
+    (cond-> (select-keys info [:ns :name :doc :class])
       file (merge {:file file} (select-keys info [:line :column]))
       (seq (arglists arglists-str)) (assoc :arglists (arglists arglists-str))
       (truthy macro) (assoc :macro true)
@@ -119,7 +150,8 @@
    (cond
      (supports? client "info")
      (let [info (apply merge (ask client (lookup-msg {:op "info" :sym sym} ctx) opts))]
-       (when (:name info)
+       ;; Java members come without a name.
+       (when (or (:name info) (:member info))
          (normalize-info info)))
 
      (supports? client "lookup")
