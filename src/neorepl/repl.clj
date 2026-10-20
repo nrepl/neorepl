@@ -575,7 +575,6 @@
               (assoc opts
                      :read-code (fn [place]
                                   (in-ns place)
-                                  (editor/fresh-line editor)
                                   (editor/read-code editor (prompt place)))
                      :read-line #(let [line (editor/read-line editor)]
                                    (if (= ::editor/interrupted line)

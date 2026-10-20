@@ -235,7 +235,9 @@
                         :suspended? (atom false)
                         ;; What's been printed of the line the cursor's on.
                         :line (atom "")
-                        :above (atom (AttributedString. ""))}]
+                        :above (atom (AttributedString. ""))
+                        ;; A token for the line waiting there.
+                        :waiting (atom nil)}]
             (when (and eldoc eldoc?)
               (.setAutosuggestion reader LineReader$SuggestionType/TAIL_TIP))
             (when doc
@@ -277,23 +279,42 @@
   (let [height (.getHeight terminal)]
     (if (pos? height) height 24)))
 
+(defn- print-above
+  "Prints what's waiting to go above the prompt, ending its line, if it's
+  the line that started waiting as token and the line's still being read."
+  [{:keys [^LineReader reader lock above waiting]} token]
+  (locking lock
+    (when (and (identical? token @waiting) (.isReading reader) (pos? (.length ^AttributedString @above)))
+      (.printAbove reader ^AttributedString @above)
+      (reset! above (AttributedString. "")))))
+
 (defn- emit
   "Prints s right away, or above the prompt while a line is being read.
   Printing above the prompt ends the text with a newline, so that only gets
-  whole lines, and the rest of a line waits for the newline ending it."
-  [{:keys [^Terminal terminal ^LineReader reader lock line above]} ^AttributedString s]
+  whole lines, and the rest of a line waits for the newline ending it, or a
+  quarter of a second, since it might be a question or dots showing
+  progress, and gets a line of its own then."
+  [{:keys [^Terminal terminal ^LineReader reader lock line above waiting] :as editor} ^AttributedString s]
   (locking lock
-    (let [^AttributedString s (if (pos? (.length ^AttributedString @above))
+    (let [waiting? (pos? (.length ^AttributedString @above))
+          ^AttributedString s (if waiting?
                                 (.toAttributedString (doto (AttributedStringBuilder.)
                                                        (.append ^AttributedString @above)
                                                        (.append s)))
                                 s)
           text (str s)]
       (if (.isReading reader)
-        (if-let [end (str/last-index-of text "\n")]
-          (do (.printAbove reader (.subSequence s 0 (int end)))
-              (reset! above (.subSequence s (int (inc end)) (count text))))
-          (reset! above s))
+        (let [end (str/last-index-of text "\n")]
+          (if end
+            (do (.printAbove reader (.subSequence s 0 (int end)))
+                (reset! above (.subSequence s (int (inc end)) (count text))))
+            (reset! above s))
+          ;; A line that starts waiting gets its quarter of a second.
+          (when (and (pos? (.length ^AttributedString @above)) (or end (not waiting?)))
+            (let [token (reset! waiting (Object.))]
+              (future
+                (Thread/sleep 250)
+                (print-above editor token)))))
         (do (reset! above (AttributedString. ""))
             (when (seq text)
               (.print s terminal)
@@ -333,7 +354,7 @@
 
 (defn- read-with
   "Reads a line with prompt. JLine always ends that line."
-  [{:keys [^Terminal terminal ^LineReader reader line]} prompt]
+  [{:keys [^Terminal terminal ^LineReader reader line lock] :as editor} prompt]
   ;; Whatever eldoc showed last time is stale.
   (.setTailTip reader "")
   (try
@@ -346,14 +367,19 @@
           (.read input 20)))
       (throw e))
     (finally
-      (reset! line ""))))
+      (locking lock
+        (reset! line "")
+        ;; What's still waiting to go above the prompt goes after it now,
+        ;; rather than at the start of what's printed next.
+        (emit editor (AttributedString. ""))))))
 
 (defn read-code
-  "Reads code from the user with prompt. Enter only submits it once its forms
-  are complete, and Ctrl-C starts over. Returns nil at the end of input, which
-  is Ctrl-D on an empty line."
+  "Reads code from the user with prompt, on a line of its own. Enter only
+  submits it once its forms are complete, and Ctrl-C starts over. Returns
+  nil at the end of input, which is Ctrl-D on an empty line."
   [editor prompt]
   (loop []
+    (fresh-line editor)
     (let [line (try
                  (read-with editor prompt)
                  (catch UserInterruptException _ ::interrupted)
