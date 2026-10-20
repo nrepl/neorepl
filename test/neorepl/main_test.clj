@@ -892,7 +892,12 @@
     ["inspect" "--help"] "Usage: neorepl inspect"
     ["server" "--help"] "Usage: neorepl server"
     ["trace" "--help"] "Usage: neorepl trace"
-    ["untrace" "--help"] "Usage: neorepl untrace"))
+    ["untrace" "--help"] "Usage: neorepl untrace"
+    ["mcp" "--help"] "Usage: neorepl mcp")
+  (testing "within 80 columns, for terminals that wide"
+    (doseq [args (cons ["--help"] (for [{:keys [name]} @#'main/commands] [name "--help"]))
+            line (str/split-lines (:out (apply run-in *dir* "" args)))]
+      (is (<= (count line) 80) (str (str/join " " args) ": " line)))))
 
 (defn- words
   "The words of a shell command, with single quotes."

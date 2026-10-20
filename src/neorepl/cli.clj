@@ -70,9 +70,28 @@
   [rows]
   (str/join "\n" (map #(str "  " %) (columns rows))))
 
+(defn- wrap
+  "text as lines of at most width columns, broken between words, unless a
+  word is wider."
+  [text width]
+  (reduce (fn [lines word]
+            (let [line (peek lines)]
+              (if (and (seq line) (<= (+ (count line) 1 (count word)) width))
+                (conj (pop lines) (str line " " word))
+                (conj lines word))))
+          []
+          (str/split (str text) #" +")))
+
 (defn summary
-  "The options part of a --help text."
+  "The options part of a --help text, with the docs wrapped to fit in 80
+  columns, under one another."
   [specs]
-  (indented-columns (for [{:keys [short long arg doc]} specs]
-                      [(str (if short (str short ", ") "    ") long (when arg (str " " arg)))
-                       doc])))
+  (let [option (fn [{:keys [short long arg]}]
+                 (str (if short (str short ", ") "    ") long (when arg (str " " arg))))
+        ;; What's left past the indentation, the widest option and the space
+        ;; after it, as indented-columns lays them out.
+        width (- 80 2 (apply max 0 (map (comp count option) specs)) 2)]
+    (indented-columns (for [{:keys [doc] :as spec} specs
+                            :let [[line & more] (wrap doc width)]
+                            row (cons [(option spec) line] (for [line more] ["" line]))]
+                        row))))

@@ -16,6 +16,7 @@
 - [#26](https://github.com/nrepl/neorepl/pull/26): The MCP tools use the session called `agent` unless a call names another, the one the skill has agents use with the CLI, rather than `default`.
 - [#26](https://github.com/nrepl/neorepl/pull/26): `neorepl mcp --max-output` cuts what an evaluation prints and returns as a whole, not only each value and stream.
 - [#29](https://github.com/nrepl/neorepl/pull/29): Test failures show their files relative to the directory neorepl runs in, when they're in it.
+- [#34](https://github.com/nrepl/neorepl/pull/34): The help fits in 80 columns, the options' descriptions wrapping under one another.
 
 ### Bug fixes
 

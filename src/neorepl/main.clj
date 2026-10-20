@@ -883,7 +883,8 @@ server."
   (help-text
    "Usage: neorepl inspect [options] CODE
        neorepl inspect [options] -
-       neorepl inspect [options] [--push N | --pop | --next-page | --prev-page | --view]
+       neorepl inspect [options] [--push N | --pop | --view]
+       neorepl inspect [options] [--next-page | --prev-page]
        neorepl inspect [options] --def NAME"
    "Evaluates CODE, or standard input with -, and prints its value the way
 cider-nrepl's inspector shows it: the class, the contents, page by page for
