@@ -14,6 +14,10 @@
 
 (def ^:private refresh-fails? (atom false))
 
+(def ^:private source-file
+  "The file wrap-fake-cider says from-a-file is in, on line 2."
+  (atom nil))
+
 (def ^:private test-requests
   "The test ops wrap-fake-cider got, and their var-queries."
   (atom []))
@@ -35,6 +39,11 @@
                "if" (transport/respond-to msg :status "done" :name "if" :special-form "true"
                                           :forms-str "(if test then else?)")
                "broken" (transport/respond-to msg :status ["done" "info-error"])
+               "from-a-file" (transport/respond-to msg :status "done" :ns "user" :name "from-a-file"
+                                                   :file (str (.toURI (io/file @source-file))) :line 2 :column 1)
+               ;; As for the macros ClojureScript takes from Clojure.
+               "on-a-wrong-line" (transport/respond-to msg :status "done" :ns "user" :name "on-a-wrong-line"
+                                                       :file (str (.toURI (io/file @source-file))) :line 5)
                ;; Java members come without a name, with their Javadoc in fragments.
                "Thread/sleep" (transport/respond-to msg :status "done" :class "java.lang.Thread" :member "sleep"
                                                     :arglists-str "[millis]\n[millis nanos]"
@@ -188,6 +197,12 @@
   (with-client [client {:port *port*}]
     (is (str/starts-with? (features/source client "when" user) "(defmacro when"))
     (is (nil? (features/source client "no-such-thing" user)))
+    (testing "of a file loaded from anywhere, read from where it is"
+      (test-server/call-with-temp-dir
+       (fn [dir]
+         (let [file (test-server/spit-file dir "loaded.clj" "(ns neorepl.loaded)\n\n(defn greet\n  [x]\n  x)\n")]
+           (nrepl/request client {:op "load-file" :file (slurp file) :file-path (str file) :file-name "loaded.clj"})
+           (is (= "(defn greet\n  [x]\n  x)" (features/source client "neorepl.loaded/greet" user)))))))
     (testing "from a namespace that doesn't refer clojure.core, made by in-ns"
       (nrepl/request client {:op "eval" :ns "user" :code "(in-ns 'neorepl.bare)"})
       (doseq [[rung client] {"lookup" client "eval" (without client "lookup")}]
@@ -396,10 +411,21 @@
                     :file "jar:file:/x/src.zip!/java/lang/String.java" :line 142}
                    (features/info client "String" user)))
             (is (= {:ns "java.lang.Integer" :name "MAX_VALUE" :class "java.lang.Integer" :doc "Biggest."}
-                   (features/info client "Integer/MAX_VALUE" user))))
+                   (features/info client "Integer/MAX_VALUE" user)))
+            (testing "but no source, which isn't a form"
+              (is (nil? (features/source client "String" user)))))
           (testing "a namespace, named once, unlike a var named like its namespace"
             (is (= {:name "clojure.string" :doc "Strings."} (features/info client "clojure.string" user)))
             (is (= "hello" (:ns (features/info client "hello" user)))))
+          (testing "source from the file info finds"
+            (test-server/call-with-temp-dir
+             (fn [dir]
+               (reset! source-file (test-server/spit-file dir "src.clj" "(ns user)\n(defn from-a-file []\n  1)\n(def after 2)\n(println :not-a-definition)\n"))
+               (is (= "(defn from-a-file []\n  1)" (features/source client "from-a-file" user)))
+               (testing "if it's a definition, rather than whatever the line has"
+                 (is (nil? (features/source client "on-a-wrong-line" user)))))))
+          (testing "or the server's classpath, for a file this machine can't read"
+            (is (str/starts-with? (features/source client "mapv" user) "(defn mapv")))
           (is (= {:reloaded ["changed.ns"] :output "Reflection warning, changed/ns.clj:3:1\n"}
                  (features/reload client [])))
           (reset! refresh-fails? true)
