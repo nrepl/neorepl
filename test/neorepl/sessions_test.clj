@@ -54,6 +54,19 @@
            (let [fresh (sessions/ensure! file client "agent")]
              (is (not= session fresh))
              (is (= fresh (sessions/ensure! file client "agent")))))
+         (testing "saying a session the server lost is gone, and replaced"
+           (let [lost (sessions/ensure! file client "lost")
+                 replaced (atom 0)]
+             (nrepl/close-session client lost)
+             (is (= "Session lost is gone: the server has restarted since, or closed it"
+                    (sessions/missing-message file client "lost")))
+             (is (= "No session called nope" (sessions/missing-message file client "nope")))
+             (is (not= lost (sessions/ensure! file client "lost" #(swap! replaced inc))))
+             (is (= 1 @replaced))
+             (testing "only then, not for one that's there or a new name"
+               (sessions/ensure! file client "lost" #(swap! replaced inc))
+               (sessions/ensure! file client "brand-new" #(swap! replaced inc))
+               (is (= 1 @replaced)))))
          (testing "a broken cache file is as good as none"
            (spit file "{:oops")
            (let [fresh (sessions/ensure! file client "agent")]

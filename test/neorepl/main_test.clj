@@ -112,7 +112,16 @@
     (with-client [client {:port *port*}]
       (let [lost (sessions/ensure! (sessions-file) client "lost")]
         (nrepl/close-session client lost)
-        (is (= {:status 0 :out "2\n" :err ""} (run "-s" "lost" "2")))
+        (testing "which the commands that don't make one say"
+          (is (= {:status 1 :out "" :err "neorepl: Session lost is gone: the server has restarted since, or closed it\n"}
+                 (run-command "pst" "-s" "lost")))
+          (run "-s" "lost-too" "1")
+          (nrepl/close-session client (sessions/ensure! (sessions-file) client "lost-too"))
+          (is (= {:status 1 :out "" :err "neorepl: Session lost-too is gone: the server has restarted since, or closed it\n"}
+                 (run-command "sessions" "close" "lost-too"))))
+        (testing "saying so"
+          (is (= {:status 0 :out "2\n" :err "neorepl: Session lost was gone, the server having restarted, so it's a new one\n"}
+                 (run "-s" "lost" "2"))))
         (is (not= lost (sessions/ensure! (sessions-file) client "lost")))))))
 
 (deftest sessions-command-test

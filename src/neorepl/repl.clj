@@ -272,7 +272,7 @@
         {:session id
          :session-name (if own? (:session-name own) name)
          :ns (nrepl/evaluation-ns client id)})
-      (out (str "No session called " name ", neorepl eval -s " name " CODE makes one")))
+      (out (str (sessions/missing-message sessions-file client name) ", neorepl eval -s " name " CODE makes one")))
     (out (str/join "\n" (cli/columns (for [[name id] (cons [(or (:session-name own) "-") (:session own)]
                                                            (dissoc (sessions/named sessions-file client) (:session-name own)))]
                                        [(str (if (= id session) "* " "  ") name)

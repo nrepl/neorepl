@@ -42,6 +42,7 @@
 - [#29](https://github.com/nrepl/neorepl/pull/29): `neorepl test` of a namespace without tests says so and exits 1, rather than passing.
 - [#30](https://github.com/nrepl/neorepl/pull/30): Symbols that start with a dash, like `->` and `-main`, are arguments to `doc`, `where` and the other lookups, rather than unknown options.
 - [#30](https://github.com/nrepl/neorepl/pull/30): `--format edn` and `json` have failures too, like no server to talk to or a usage mistake, as their status and message, where stdout used to be empty.
+- [#30](https://github.com/nrepl/neorepl/pull/30): A named session the server lost, as when it restarts, says so: where a new one takes its place, on stderr or in the MCP result, and where it doesn't, like `pst` and `sessions close`.
 
 ## 0.3.0 (2026-10-17)
 

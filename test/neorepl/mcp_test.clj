@@ -7,7 +7,8 @@
             [neorepl.main :as main]
             [neorepl.mcp :as mcp]
             [neorepl.nrepl :as nrepl]
-            [neorepl.test-server :as test-server :refer [*port* call-with-temp-dir spit-file]])
+            [neorepl.sessions :as sessions]
+            [neorepl.test-server :as test-server :refer [*port* call-with-temp-dir spit-file with-client]])
   (:import (clojure.lang LineNumberingPushbackReader)
            (java.io BufferedReader InputStreamReader OutputStreamWriter PipedInputStream PipedOutputStream PrintWriter
                     StringReader StringWriter)
@@ -227,7 +228,20 @@
        (send (tool-call 1 "eval" {:code "*1" :session "shared"}))
        (is (= "#'user/shared-x" (text (receive))))
        (send (tool-call 2 "eval" {:code "*1"}))
-       (is (not= "#'user/shared-x" (text (receive))))))))
+       (is (not= "#'user/shared-x" (text (receive))))
+       (testing "and saying when the server lost one"
+         (with-client [client {:port *port*}]
+           (nrepl/close-session client (get (sessions/named (sessions-file) client) "shared")))
+         (send (tool-call 3 "eval" {:code "3" :session "shared"}))
+         (is (= "(Session shared was gone, the server having restarted, so it's a new one.)\n3"
+                (text (receive))))
+         (testing "or that it's gone, for pst, which doesn't make one"
+           (with-client [client {:port *port*}]
+             (nrepl/close-session client (get (sessions/named (sessions-file) client) "shared")))
+           (send (tool-call 4 "pst" {:session "shared"}))
+           (let [{:keys [result]} (receive)]
+             (is (:isError result))
+             (is (= "Session shared is gone: the server has restarted since, or closed it" (text {:result result}))))))))))
 
 (def started
   "Delivered by code that neorepl evaluates on the test server, to say it's

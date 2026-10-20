@@ -84,20 +84,48 @@
 (defn ensure!
   "The id of the session called name on client's server, as cached in file.
   Clones and caches a new one when there's none yet or the server doesn't
-  know the cached one anymore."
+  know the cached one anymore, typically because it restarted, calling
+  (replaced) then, if given, since what the session had is gone."
+  ([file client name] (ensure! file client name (fn [])))
+  ([file client name replaced]
+   (let [before (cached file client name)]
+     (if (and before ((live-sessions client) before))
+       before
+       (call-with-lock file
+         #(let [cache (read-cache file)
+                now (get-in cache [(:address client) name])]
+            ;; Another call may have cached a new one in the meantime, for
+            ;; the one that was gone too.
+            (if (and now (not= now before))
+              (do (when before
+                    (replaced))
+                  now)
+              (let [session (nrepl/clone-session client)]
+                (write-cache! file (assoc-in cache [(:address client) name] session))
+                (when before
+                  (replaced))
+                session))))))))
+
+(defn replaced-message
+  "What to say when the session called name was gone, so there's a new one,
+  as ensure! has it."
+  [name]
+  (str "Session " name " was gone, the server having restarted, so it's a new one"))
+
+(defn missing-message
+  "What to say of the session called name, which client's server doesn't
+  have: that it's gone, when file still has it, as after the server
+  restarted, or that there's none."
   [file client name]
-  (let [before (cached file client name)]
-    (if (and before ((live-sessions client) before))
-      before
-      (call-with-lock file
-        #(let [cache (read-cache file)
-               now (get-in cache [(:address client) name])]
-           ;; Another call may have cached a new one in the meantime.
-           (if (and now (not= now before))
-             now
-             (let [session (nrepl/clone-session client)]
-               (write-cache! file (assoc-in cache [(:address client) name] session))
-               session)))))))
+  (if (cached file client name)
+    (str "Session " name " is gone: the server has restarted since, or closed it")
+    (str "No session called " name)))
+
+(defn missing
+  "The result saying client's server has no session called name, as
+  missing-message says it."
+  [file client name]
+  {:status "no-session" :message (missing-message file client name)})
 
 (defn interrupt
   "Interrupts whatever runs in the session called name, returning how that
@@ -116,7 +144,7 @@
   (case (interrupt file client name)
     :interrupted {:status "interrupted"}
     :idle {:status "idle" :message (str "Nothing is running in session " name)}
-    :unknown-session {:status "no-session" :message (str "No session called " name)}
+    :unknown-session (missing file client name)
     {:status "error" :message "The server couldn't interrupt the evaluation"}))
 
 (defn close!
