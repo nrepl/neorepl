@@ -60,6 +60,7 @@
 - [#32](https://github.com/nrepl/neorepl/pull/32): The arglists eldoc shows after the cursor get cut to fit the line, rather than wrapping onto the lines below it.
 - [#32](https://github.com/nrepl/neorepl/pull/32): `NO_COLOR` takes the color out of the completion menu too.
 - [#33](https://github.com/nrepl/neorepl/pull/33): Starting a server says when the build tool it takes isn't installed, rather than passing on the shell's `exec: lein: not found`.
+- [#33](https://github.com/nrepl/neorepl/pull/33): A port file pointing at something that isn't an nREPL server gets given up on after 3 seconds, rather than 10.
 
 ## 0.3.0 (2026-10-17)
 

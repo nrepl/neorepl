@@ -3,7 +3,8 @@
             [clojure.test :refer [deftest is testing use-fixtures]]
             [neorepl.discovery :as discovery]
             [neorepl.nrepl :as nrepl]
-            [neorepl.test-server :as test-server :refer [*port* call-with-temp-dir spit-file]]))
+            [neorepl.test-server :as test-server :refer [*port* call-with-temp-dir spit-file]])
+  (:import (java.net InetAddress ServerSocket)))
 
 (use-fixtures :once (test-server/fixture))
 
@@ -52,3 +53,14 @@
        (let [e (is (thrown? clojure.lang.ExceptionInfo (discovery/connect (io/file dir "app"))))]
          (is (= ::nrepl/no-server (:type (ex-data e))))
          (is (re-find #"No nREPL server answering at the ports in .*app" (ex-message e))))))))
+
+(deftest not-nrepl-test
+  (testing "a port file for something that isn't nREPL, which never answers, gets given up on soon"
+    (call-with-temp-dir
+     (fn [dir]
+       (with-open [listener (ServerSocket. 0 50 (InetAddress/getByName "127.0.0.1"))]
+         (spit-file dir ".nrepl-port" (str (.getLocalPort listener)))
+         (let [start (System/nanoTime)
+               [port-file] (discovery/probe dir)]
+           (is (= {:file (canonical dir ".nrepl-port") :live false} (select-keys port-file [:file :live])))
+           (is (< (- (System/nanoTime) start) 6e9))))))))

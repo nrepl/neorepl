@@ -39,7 +39,10 @@
   "A client for the server on port, or nil when nothing answers there."
   [port]
   (try
-    (nrepl/connect {:port port})
+    ;; A server describes itself at once, so a port file pointing at
+    ;; something else, which never answers, shouldn't take long to give up
+    ;; on.
+    (nrepl/connect {:port port :timeout-ms 3000})
     (catch clojure.lang.ExceptionInfo e
       (when-not (= ::nrepl/no-server (:type (ex-data e)))
         (throw e)))))
