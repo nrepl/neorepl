@@ -239,7 +239,20 @@
                         ;; A token for the line waiting there.
                         :waiting (atom nil)}]
             (when (and eldoc eldoc?)
-              (.setAutosuggestion reader LineReader$SuggestionType/TAIL_TIP))
+              (.setAutosuggestion reader LineReader$SuggestionType/TAIL_TIP)
+              ;; JLine shows the history search's prompt where the tip goes,
+              ;; and the tip wins, so searching does without it. In their
+              ;; place, since a search goes by the names of the keys' widgets,
+              ;; Ctrl-R again for the next match, say.
+              (doseq [name [LineReader/HISTORY_INCREMENTAL_SEARCH_BACKWARD LineReader/HISTORY_INCREMENTAL_SEARCH_FORWARD]]
+                (.put (.getWidgets reader) name
+                      (widget #(do (.setAutosuggestion reader LineReader$SuggestionType/NONE)
+                                   (try
+                                     ;; JLine's own.
+                                     (.callWidget reader (str "." name))
+                                     (finally
+                                       (.setAutosuggestion reader LineReader$SuggestionType/TAIL_TIP)))
+                                   true)))))
             (when doc
               (let [doc (safely doc)]
                 (bind-widget reader "neorepl-doc" (str (KeyMap/ctrl \X) (KeyMap/ctrl \D))

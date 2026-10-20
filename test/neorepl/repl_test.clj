@@ -304,7 +304,21 @@
         (type "(when")
         (type "\u0018\u0004")
         (is (screen #"clojure\.core/when\n\(\[test & body\]\)\nMacro\n  Evaluates test"))
-        (type "\u0003")))))
+        (type "\u0003"))))
+  (testing "Ctrl-R searches the history, with eldoc on too"
+    (call-with-repl {:eldoc? true}
+      (fn [type screen]
+        (type "(+ 40 2)\r")
+        (screen #"(?m)^42\nuser=> $")
+        (type "(+ 1 1)\r")
+        (screen #"(?m)^2\nuser=> $")
+        (type "\u0012")
+        (is (screen #"bck-i-search: _"))
+        (testing "and Ctrl-R again finds the match before"
+          (type "+")
+          (type "\u0012")
+          (type "\r")
+          (is (screen #"(?m)^42\nuser=> $")))))))
 
 (deftest commands-test
   (call-with-repl {}
