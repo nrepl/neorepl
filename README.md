@@ -130,12 +130,15 @@ them yet.
 
 `,inspect` shows a value, or the last one without code, in cider-nrepl's
 inspector, full-screen: the arrow keys (or `j` and `k`) move between the
-values in it, Enter digs into one, Backspace goes back, `[` and `]` page
-through big collections, a screenful at a time, `v` shows the object's fields, `d` defines what's
-being inspected as a var in the REPL's namespace, under the name you type, and `q` takes you back
-to the REPL. `neorepl inspect` does the same for scripts and agents, one step
-at a time, since the inspector stays in the session. Both take cider-nrepl or
-babashka on the server:
+values in it, Enter or → digs into one, Backspace or ← goes back, `[` and
+`]` page through big collections, a screenful at a time, `v` shows the
+object's fields, `P` turns pretty printing on and off, `g` shows the value
+again, for one that changes, like an atom's, `d` defines what's being
+inspected as a var in the REPL's namespace, under the name you type, and
+`q` takes you back to the REPL. `neorepl inspect` pushes, pops, pages and
+defines the same way for scripts and agents, one step at a time, since the
+inspector stays in the session. Both take
+cider-nrepl or babashka on the server:
 
 ```shell
 neorepl inspect '(System/getProperties)'
