@@ -721,9 +721,10 @@
   :failures, maps with their :type (fail or error), :ns, :var, :context,
   :message, :expected, :actual or :error and the error's :causes, as
   last-error has them, if the server says, :file and :line, and the
-  :elapsed-ms. Its :status is failed when a test didn't pass. The
-  :on-response gets a Testing line for each namespace too, as output, when
-  the server says, as cider-nrepl does."
+  :elapsed-ms. Its :status is failed when a test didn't pass. The :timeout
+  covers the whole run, loading the tests too. The :on-response gets a
+  Testing line for each namespace, as output, when the server says, as
+  cider-nrepl does."
   [client session names {:keys [timeout] :as opts}]
   (let [failed? (= :failed names)
         ops? (supports? client (if failed? "retest" "test-var-query"))]
@@ -741,16 +742,20 @@
           ;; The check, the loading and the eval ones run in a copy of the
           ;; session, in its language, so its *1 stays put.
           copy (when (or check? project?) (nrepl/clone-session client session))
+          deadline (when timeout (+ (System/currentTimeMillis) (long (* 1000 timeout))))
+          ;; The timeout left, for what waits on the server.
+          left-ms #(when deadline (max 1 (- deadline (System/currentTimeMillis))))
           report (atom nil)]
       (try
         (when check?
-          (when-let [unknown (seq (unknown-tests client copy names {:timeout-ms (some-> timeout (* 1000) long)}))]
+          (when-let [unknown (seq (unknown-tests client copy names {:timeout-ms (left-ms)}))]
             (throw (ex-info (str "No test called " (str/join ", " unknown)) {:type ::failed}))))
-        (let [loaded? (and project? (load-project! client copy {:timeout-ms (some-> timeout (* 1000) long)}))
+        (let [loaded? (and project? (load-project! client copy {:timeout-ms (left-ms)}))
               {:keys [status] :as result}
               (-> (evaluate-for client
                                 (test-msg session (when-not ops? copy) names loaded?)
                                 (cond-> opts
+                                  deadline (assoc :deadline deadline)
                                   ;; It would cut the report short, which is the eval's value.
                                   (not ops?) (dissoc :max-output)
                                   (:on-response opts) (update :on-response comp progress))
@@ -764,11 +769,16 @@
             ;; an interrupted test as an error and carries on.
             (not= "ok" status) result
             report (cond-> (assoc result :report (update report :failures #(->> (locate client session ops? %)
+                                                                                  ;; A second at least, past the deadline.
                                                                                   (with-causes client session
                                                                                     (cond-> {}
-                                                                                      timeout (assoc :timeout-ms (long (* 1000 timeout))))))))
+                                                                                      deadline (assoc :timeout-ms (max 1000 (left-ms))))))))
                      (pos? (+ fail error)) (assoc :status "failed"))
             :else (throw (ex-info "The server didn't run the tests" {:type ::failed}))))
+        (catch clojure.lang.ExceptionInfo e
+          (if (= ::nrepl/timeout (:type (ex-data e)))
+            {:status "timeout" :message (str "Timed out after " timeout "s, loading the tests")}
+            (throw e)))
         (finally
           (when copy
             ;; There's nothing to close when the connection is gone.
