@@ -72,7 +72,8 @@
       "apropos" (transport/respond-to msg :status "done"
                                       :apropos-matches [{:name "clojure.core/map" :type "function"
                                                          :doc "Cider's map.\nMore."}])
-      "macroexpand" (transport/respond-to msg :status "done" :expansion (str "Cider's " (:expander msg)))
+      "macroexpand" (transport/respond-to msg :status "done"
+                                          :expansion (str "Cider's " (:expander msg) (some->> (:session msg) (str " in "))))
       "ns-list" (transport/respond-to msg :status "done"
                                       :ns-list (if (:session msg)
                                                  ["clojure.core" "neorepl.features" "made.at.the.repl"]
@@ -403,6 +404,13 @@
           (is (= [{:name "clojure.core/map" :type "function" :doc "Cider's map.\nMore."}]
                  (features/apropos client "map")))
           (is (= "Cider's macroexpand-all" (features/expand client "(when x y)" user true)))
+          (testing "in a copy of the session, whose *1 it would change otherwise"
+            (let [session (nrepl/clone-session client)
+                  expansion (features/expand client "(when x y)" (assoc user :session session) false)
+                  [_ copy] (re-find #" in (.+)$" expansion)]
+              (is (some? copy))
+              (is (not= session copy))
+              (is (not (some #{copy} (some :sessions (nrepl/request client {:op "ls-sessions"})))))))
           (testing "Java members and classes, with their Javadoc as text"
             (is (= {:ns "java.lang.Thread" :name "sleep" :class "java.lang.Thread" :arglists ["[millis]" "[millis nanos]"]
                     :doc "Causes the Thread to sleep, a <b> & c"}
