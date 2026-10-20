@@ -288,6 +288,14 @@
         (type "\t")
         (type " list [[1]])\r")
         (is (screen #"(?m)^\(\[1\]\)\nuser=> $")))))
+  (testing "the completion menu goes without colors too"
+    (let [{:keys [out]} (call-with-repl {:color? false}
+                          (fn [type screen]
+                            (type "(map-")
+                            (type "\t")
+                            (is (screen #"map-indexed"))
+                            (type "\u0003")))]
+      (is (not (re-find #"\u001b\[[0-9;]*m" out)))))
   (testing "eldoc shows the arglists of the function being called"
     (call-with-repl {:eldoc? true}
       (fn [type screen]

@@ -242,6 +242,12 @@
                           (.variable LineReader/SECONDARY_PROMPT_PATTERN "%P #_=> ")
                           ;; ! is just a character in Clojure code.
                           (.option LineReader$Option/DISABLE_EVENT_EXPANSION true))]
+          (when-not color?
+            ;; The completion menu's. JLine takes a style that comes out
+            ;; as none for no style at all, and uses its own instead.
+            (doseq [style [LineReader/COMPLETION_STYLE_STARTING LineReader/COMPLETION_STYLE_DESCRIPTION
+                           LineReader/COMPLETION_STYLE_GROUP]]
+              (.variable builder style "fg:default")))
           (when history-file
             (.variable builder LineReader/HISTORY_FILE (str history-file)))
           (when complete
