@@ -134,11 +134,11 @@
 
 (defn- open
   "Opens file at line with the :editor-command, with the terminal :suspended
-  for it. Returns what to print, as command-output does."
+  for it. Returns nil, or a message saying why it couldn't."
   [{:keys [editor-command suspended]} file line]
   (cond
-    (str/blank? editor-command) (out "Set EDITOR, or VISUAL, to the editor to open")
-    (not (.isFile (io/file file))) (out (str "Can't open " file))
+    (str/blank? editor-command) "Set EDITOR, or VISUAL, to the editor to open"
+    (not (.isFile (io/file file))) (str "Can't open " file)
     :else (let [command (editor-command-line editor-command file line)
                 status (suspended #(let [editor (-> (ProcessBuilder. ^java.util.List command) .inheritIO .start)]
                                      (try
@@ -148,27 +148,28 @@
                                        (catch InterruptedException e
                                          (.destroy editor)
                                          (throw e)))))]
-            (if (zero? status)
-              {}
-              (out (str "The editor exited with status " status))))))
+            (when-not (zero? status)
+              (str "The editor exited with status " status)))))
 
 (defn- edit
-  "Opens the definition of sym in the editor, as open does."
+  "Opens the definition of sym in the editor, as open does. Returns what to
+  print, as command-output does."
   [{:keys [client] :as state} sym]
   (let [{:keys [found none]} (lookups/run "where" client state sym)]
-    (if none
-      (out none)
-      (open state (:file found) (:line found)))))
+    (if-let [message (or none (open state (:file found) (:line found)))]
+      (out message)
+      {})))
 
 (defn- open-frame
   "Opens the source of frame, from features/last-error, at its line, as open
-  does: its :path, or the file its :var is in."
+  does: its :path, or the file its :var is in. Returns nil, or a message
+  saying why it couldn't."
   [{:keys [client] :as state} {:keys [path var line] :as frame}]
   (if-let [found (if path
                    {:file path}
                    (when var (:found (lookups/run "where" client state var))))]
     (open state (:file found) (or line (:line found)))
-    (out (str "No source to open for " (render/frame-text frame)))))
+    (str "No source to open for " (render/frame-text frame))))
 
 (defn- inspect-cause
   "Inspects the cause at index of the error last-error found, or its ex-data
@@ -188,7 +189,7 @@
       (ex-message e))))
 
 (defn- browse-error
-  "Shows the last error, letting the user :browse it, open the frame they
+  "Shows the last error, letting the user :browse it, open the frames they
   pick, and inspect its causes, or prints it when there's no browsing: the
   errors of the last test run, its :test-errors, if it had any and no
   evaluation failed since, or the error ,pst finds, whose causes the server
@@ -199,7 +200,7 @@
                           (let [{:keys [frame inspect ex-data? view]}
                                 (stacktrace/browse browse errors {:inspect? inspect? :view view})]
                             (cond
-                              frame (open-frame state frame)
+                              frame (recur (assoc view :message (open-frame state frame)))
                               inspect (recur (assoc view :message (inspect-cause state inspect ex-data?)))
                               :else {}))))]
     (if-let [failures @test-errors]

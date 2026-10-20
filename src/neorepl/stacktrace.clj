@@ -57,16 +57,16 @@
 
 (defn handle
   "view after key, as editor/full-screen has keys, or (reduced x), x being
-  what the user picked: the :frame to open, the cause, by its index, to
-  :inspect, or its ex-data if :ex-data?, with the :view to come back to,
-  if inspect?, or nil when they're done."
+  what the user picked, with the :view to come back to: the :frame to open,
+  or the cause, by its index, to :inspect, or its ex-data if :ex-data?, if
+  inspect?, or nil when they're done."
   [{:keys [errors all?] :as view} key inspect?]
   (let [view (dissoc view :message)
         [_ [e i j]] (browser/selected-value view)]
     (or (browser/moved view key)
         (case key
           :enter (if j
-                   (reduced {:frame (get-in errors [e :causes i :stacktrace j])})
+                   (reduced {:frame (get-in errors [e :causes i :stacktrace j]) :view view})
                    view)
           ("i" "d") (cond
                       (not (and inspect? i)) view

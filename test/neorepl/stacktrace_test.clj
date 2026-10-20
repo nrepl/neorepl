@@ -54,14 +54,15 @@
               "help"]
              (screen view 12))))
     (testing "picking a frame of the second"
-      (is (= {:frame {:name "clojure.lang.Numbers/divide" :file "Numbers.java" :line 190}}
-             @(stacktrace/handle (press view :down :down) :enter false))))))
+      (is (= {:name "clojure.lang.Numbers/divide" :file "Numbers.java" :line 190}
+             (:frame @(stacktrace/handle (press view :down :down) :enter false)))))))
 
 (deftest handle-test
   (let [view (stacktrace/error-view [{:causes causes}])]
     (testing "picking a frame to open"
-      (is (= {:frame {:name "user/g" :file "x.clj" :line 3 :var "user/g"}}
-             @(stacktrace/handle (press view :down) :enter false))))
+      (let [view (press view :down)]
+        (is (= {:frame {:name "user/g" :file "x.clj" :line 3 :var "user/g"} :view view}
+               @(stacktrace/handle view :enter false)))))
     (testing "the causes, when they can be inspected"
       (testing "by the index of the one the frame's in"
         (is (= {:inspect 1 :ex-data? false}
