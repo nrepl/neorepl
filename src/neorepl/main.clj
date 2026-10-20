@@ -980,7 +980,7 @@ drops."
          #(when-not session
             ;; There's nothing to close when the connection is gone.
             (try (nrepl/close-session client id) (catch Exception _ nil)))
-         #(do (start client id (-> (select-keys ctx [:dir :history-dir :terminal :editor-command :sessions-file])
+         #(do (start client id (-> (select-keys ctx [:dir :history-dir :terminal :editor-command :sources-dir :sessions-file])
                                    (assoc :session-name session)))
               0))))))
 
@@ -1140,7 +1140,8 @@ version."))
   "Runs the neorepl command line args and returns the exit status. ctx has
   the :dir to look for port files in, the :sessions-file, the REPL's
   :history-dir, the :terminal options for its line editor, without which the
-  REPL is the plain kind, and the :editor-command ,edit uses."
+  REPL is the plain kind, and the :editor-command ,edit uses, with the
+  :sources-dir to copy files out of jars into for it."
   [args ctx]
   (let [[command & more] args
         ;; Without a command, it's the REPL, options and all.
@@ -1175,6 +1176,7 @@ version."))
                           :history-dir (io/file (xdg/state-home) "neorepl" "history")
                           ;; See https://no-color.org.
                           :terminal {:color? (str/blank? (System/getenv "NO_COLOR"))}
-                          :editor-command (some #(not-empty (System/getenv %)) ["VISUAL" "EDITOR"])})]
+                          :editor-command (some #(not-empty (System/getenv %)) ["VISUAL" "EDITOR"])
+                          :sources-dir (io/file (xdg/cache-home) "neorepl" "sources")})]
     (flush)
     (System/exit status)))

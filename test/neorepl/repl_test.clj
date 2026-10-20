@@ -10,7 +10,8 @@
             [neorepl.repl :as repl]
             [neorepl.sessions :as sessions]
             [neorepl.test-server :as test-server :refer [*port* call-with-temp-dir lf with-client]])
-  (:import (java.io ByteArrayInputStream ByteArrayOutputStream PipedInputStream PipedOutputStream)))
+  (:import (java.io ByteArrayInputStream ByteArrayOutputStream PipedInputStream PipedOutputStream)
+           (java.util.zip ZipEntry ZipOutputStream)))
 
 (use-fixtures :once (test-server/fixture))
 
@@ -530,3 +531,41 @@
                (testing "which a Java frame hasn't"
                  (is (= "No source to open for clojure.lang.Numbers/divide (Numbers.java:190)"
                         (str/replace (open #(str/starts-with? (:name %) "clojure.lang.Numbers/")) #"\d+\)" "190)"))))))))))))
+
+(deftest edit-test
+  ;; The editor's a shell script.
+  (when-not (test-server/windows?)
+    (testing "a file in a jar opens as a copy"
+      (call-with-temp-dir
+       (fn [dir]
+         (let [jar (io/file dir "demo.jar")
+               edited (io/file dir "edited")
+               editor (doto (test-server/spit-file dir "vi" (str "#!/bin/sh\necho \"$@\" > '" edited "'\n"))
+                        (.setExecutable true))
+               sources (io/file dir "sources")
+               state {:editor-command (str editor) :suspended #(%) :sources-dir sources}
+               spit-jar (fn [jar code]
+                          (io/make-parents jar)
+                          (with-open [zip (ZipOutputStream. (io/output-stream jar))]
+                            (.putNextEntry zip (ZipEntry. "st/demo.clj"))
+                            (.write zip (.getBytes ^String code "UTF-8"))))
+               open #(#'repl/open state (str "jar:" (.toURI ^java.io.File %1) "!/" %2) 2)
+               ;; The copy the editor got, at line 2.
+               opened #(second (re-matches #"\+2 (.*)\n" (slurp edited)))]
+           (spit-jar jar "(ns st.demo)\n(def x 1)\n")
+           (is (nil? (open jar "st/demo.clj")))
+           (let [copy (opened)]
+             (is (str/starts-with? copy (str sources "/demo.jar-")))
+             (is (str/ends-with? copy "/st/demo.clj"))
+             (is (= "(ns st.demo)\n(def x 1)\n" (slurp copy)))
+             (testing "again"
+               (is (nil? (open jar "st/demo.clj")))
+               (is (= copy (opened))))
+             (testing "and another jar with the same name gets copies of its own"
+               (let [other (io/file dir "elsewhere" "demo.jar")]
+                 (spit-jar other "(ns st.demo)\n(def x 2)\n")
+                 (is (nil? (open other "st/demo.clj")))
+                 (is (not= copy (opened)))
+                 (is (= "(ns st.demo)\n(def x 2)\n" (slurp (opened)))))))
+           (testing "unless it isn't there"
+             (is (str/starts-with? (open jar "st/gone.clj") "Can't open jar:file:")))))))))
