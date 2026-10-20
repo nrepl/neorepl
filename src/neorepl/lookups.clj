@@ -4,6 +4,7 @@
   reads as text and what it says when there's nothing to find."
   (:require [clojure.string :as str]
             [neorepl.features :as features]
+            [neorepl.nrepl :as nrepl]
             [neorepl.render :as render]))
 
 (defn- untraceable?
@@ -79,6 +80,16 @@
     :text render/error-text
     :none (fn [{:keys [session-name]} _]
             (str "No error yet" (some->> session-name (str " in session "))))}])
+
+(defn context
+  "The context to look things up in, from the commands and the MCP tools:
+  the session with id, if there's one, called session-name, so that the
+  lookups go to the server in the session's language, and the namespace ns,
+  or the session's without one, or user."
+  [client id session-name ns]
+  (if id
+    {:session id :session-name session-name :ns (or ns (nrepl/evaluation-ns client id))}
+    {:ns (or ns "user")}))
 
 (defn lookup [name]
   (some #(when (= name (:name %)) %) all))

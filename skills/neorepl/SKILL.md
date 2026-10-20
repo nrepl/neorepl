@@ -101,7 +101,10 @@ neorepl apropos update
 neorepl macroexpand --all '(-> x (f) (g))'
 ```
 
-They resolve names in `user`, or the namespace `--ns` names.
+They resolve names in `user`, or the namespace `--ns` names, apropos aside.
+With `-s agent` they look as your session sees things, in its namespace, and
+in ClojureScript when it's in ClojureScript, where you name the namespace
+with `--ns`.
 
 ## Exit status
 

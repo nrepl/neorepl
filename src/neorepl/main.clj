@@ -540,11 +540,26 @@ something doesn't or a file can't be read and 2 on usage errors."
         (if (every? :fixed problems) 0 1)))))
 
 (def ^:private ns-option
-  {:long "--ns" :arg "NS" :parse not-empty :default "user"
-   :doc "Look symbols up in the namespace NS (default: user)"})
+  {:long "--ns" :arg "NS" :parse not-empty
+   :doc "Look symbols up in the namespace NS (default: user, or the session's)"})
+
+(def ^:private lookup-session-option
+  (-> session-option
+      (dissoc :default)
+      (assoc :doc "Look symbols up as the session called NAME sees them, ClojureScript too")))
 
 (def ^:private lookup-options
-  (concat connection-options [ns-option] common-options))
+  (concat connection-options [ns-option lookup-session-option] common-options))
+
+(defn- with-lookup-context
+  "Calls (f client ctx) with a client connected the way options say and the
+  context they say to look symbols up in, as lookups/context makes it, and
+  returns what it does, the exit status, as with-named-session does for
+  their :session, when they name one."
+  [{:keys [ns session] :as options} {:keys [dir] :as ctx} f]
+  (if session
+    (with-named-session options ctx #(f %1 (lookups/context %1 %2 session ns)))
+    (with-client options dir #(f % (lookups/context % nil nil ns)))))
 
 (defn- the-arg
   "The one argument in args, named name in the usage."
@@ -587,10 +602,10 @@ when there's no server to talk to."
   them when it takes several."
   [name]
   (let [{arg-name :arg :keys [args?]} (lookups/lookup name)]
-    (fn [{:keys [ns format] :as options} args {:keys [dir]}]
+    (fn [{:keys [format] :as options} args ctx]
       (let [arg (if args? args (the-arg args arg-name))]
-        (with-client options dir
-          #(report-lookup format name % {:ns ns} arg))))))
+        (with-lookup-context options ctx
+          #(report-lookup format name %1 %2 arg))))))
 
 (def ^:private source-help
   (help-text
@@ -615,11 +630,11 @@ them."
   neorepl complete str/
   neorepl complete --ns my.app --format json ma"))
 
-(defn- complete-command [{:keys [ns format] :as options} args {:keys [dir]}]
+(defn- complete-command [{:keys [format] :as options} args ctx]
   (let [prefix (the-arg args "PREFIX")]
-    (with-client options dir
-      (fn [client]
-        (print-rows format (juxt :candidate (comp str :type)) (features/complete client prefix {:ns ns}))
+    (with-lookup-context options ctx
+      (fn [client ctx]
+        (print-rows format (juxt :candidate (comp str :type)) (features/complete client prefix ctx))
         0))))
 
 (def ^:private apropos-options
@@ -639,7 +654,8 @@ errors and 3 when there's no server to talk to."
 
 (def ^:private macroexpand-options
   (concat connection-options
-          [(assoc ns-option :doc "Expand in the namespace NS (default: user)")
+          [(assoc ns-option :doc "Expand in the namespace NS (default: user, or the session's)")
+           lookup-session-option
            {:long "--all"
             :doc "Expand every macro in FORM, not just FORM itself"}]
           common-options))
@@ -655,10 +671,10 @@ errors and 3 when there's no server to talk to."
   neorepl macroexpand '(when x (println x))'
   neorepl macroexpand --all '(-> x f (g y))'"))
 
-(defn- macroexpand-command [{:keys [ns all format] :as options} args {:keys [dir]}]
+(defn- macroexpand-command [{:keys [all format] :as options} args ctx]
   (let [form (the-arg args "FORM")]
-    (with-client options dir
-      #(report-lookup format (if all "macroexpand-all" "macroexpand") % {:ns ns} form))))
+    (with-lookup-context options ctx
+      #(report-lookup format (if all "macroexpand-all" "macroexpand") %1 %2 form))))
 
 (def ^:private where-help
   (help-text

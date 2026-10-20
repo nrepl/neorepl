@@ -115,8 +115,11 @@
 
 (defn- lookup
   "Does the lookup called name, see neorepl.lookups, on arg, in the context
-  (ctx client) makes, the :ns args name by default."
-  ([server args name arg] (lookup server args name arg (constantly {:ns (:ns args)})))
+  (ctx client) makes, by default the one lookups/context makes of the
+  :session and :ns args name."
+  ([{:keys [sessions-file] :as server} {:keys [session ns] :as args} name arg]
+   ;; Without that session yet, in user.
+   (lookup server args name arg #(lookups/context % (get (sessions/named sessions-file %) session) session ns)))
   ([server {:keys [port]} name arg ctx]
    (with-client server port
      (fn [client]
@@ -167,7 +170,7 @@
              :description "Seconds before interrupting it"}})
 
 (def ^:private ns-arg
-  {:ns {:type "string" :description "The namespace to resolve in (default: user)"}})
+  {:ns {:type "string" :description "The namespace to resolve in (default: the session's, or user)"}})
 
 (defn- schema
   "An object schema with properties, required being the names of the ones
@@ -180,7 +183,7 @@
   {:name name
    :description description
    :inputSchema (schema (merge {:symbol {:type "string" :description "The symbol, qualified or as the ns sees it"}}
-                               ns-arg port-arg)
+                               ns-arg session-arg port-arg)
                         "symbol")
    :run (fn [server {:keys [symbol] :as args} _] (lookup server args name symbol))})
 
@@ -216,12 +219,12 @@
     :description "Find vars whose names match a regex, with the first line of their docs."
     :inputSchema (schema (merge {:regex {:type "string" :description "A Java regex, matched against the names"}} port-arg)
                          "regex")
-    :run (fn [server {:keys [regex] :as args} _] (wrap (lookup server args "apropos" regex) :vars))}
+    :run (fn [server {:keys [regex] :as args} _] (wrap (lookup server args "apropos" regex (constantly {})) :vars))}
    {:name "macroexpand"
     :description "Expand the macro a form calls, or every macro in it with all."
     :inputSchema (schema (merge {:form {:type "string" :description "The form, as code"}
                                  :all {:type "boolean" :description "Expand every macro, not just the outermost"}}
-                                ns-arg port-arg)
+                                ns-arg session-arg port-arg)
                          "form")
     :run (fn [server {:keys [form all] :as args} _]
            (lookup server args (if all "macroexpand-all" "macroexpand") form))}
@@ -313,7 +316,7 @@
           (error message)
           (try
             ;; The skill has the CLI use the session called agent too.
-            (run server (merge {:session "agent" :ns "user"} arguments) on-send)
+            (run server (merge {:session "agent"} arguments) on-send)
             (catch clojure.lang.ExceptionInfo e
               (error (ex-message e)))))]
     {:content [{:type "text" :text (if (str/blank? text) "(nothing)" text)}]

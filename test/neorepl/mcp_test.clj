@@ -179,6 +179,11 @@
        (let [{{:keys [isError structuredContent]} :result} (receive)]
          (is (false? isError))
          (is (= "not-found" (:status structuredContent))))
+       (testing "where the session is, its namespace"
+         (send (tool-call 11 "eval" {:code "(ns neorepl.mcp-looking) (defn hello \"Hi.\" [])"}))
+         (receive)
+         (send (tool-call 12 "doc" {:symbol "hello"}))
+         (is (str/starts-with? (text (receive)) "neorepl.mcp-looking/hello")))
        (send (tool-call 10 "apropos" {:regex "^mapcat$"}))
        (is (= "clojure.core/mapcat" (get-in (receive) [:result :structuredContent :vars 0 :name])))))))
 
