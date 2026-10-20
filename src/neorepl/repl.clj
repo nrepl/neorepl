@@ -15,7 +15,8 @@
             [neorepl.sessions :as sessions]
             [neorepl.shutdown :as shutdown]
             [neorepl.stacktrace :as stacktrace])
-  (:import (java.security MessageDigest)
+  (:import (java.lang ProcessBuilder$Redirect)
+           (java.security MessageDigest)
            (sun.misc Signal SignalHandler)))
 
 (defn- eval-msg
@@ -511,6 +512,20 @@
       (when (seq lines)
         (str/join "\n" lines)))))
 
+(defn- echoes-ctrl-c?
+  "Whether standard input is a terminal that echoes the ^C that interrupts,
+  as terminals do, but not Emacs' M-x shell, which turns echo off."
+  []
+  (try
+    (let [stty (-> (ProcessBuilder. ["stty" "-a"])
+                   (.redirectInput ProcessBuilder$Redirect/INHERIT)
+                   (.redirectError ProcessBuilder$Redirect/DISCARD)
+                   .start)
+          flags (set (str/split (slurp (.getInputStream stty)) #"[\s;]+"))]
+      (and (zero? (.waitFor stty))
+           (every? flags ["echo" "echoctl"])))
+    (catch Exception _ false)))
+
 (defn- plain
   "A REPL without a line editor, for when there's no terminal to edit on:
   pipes, Emacs' M-x shell and the like. Reads from *in* and prints prompts and
@@ -518,8 +533,17 @@
   [client session opts]
   (let [{:keys [interrupt] :as interruptions} (interruptions)
         print-response (evaluation/text-printer)
-        ;; With nothing to interrupt, Ctrl-C is for the REPL.
-        previous (on-sigint #(when-not (interrupt) (System/exit 130)))]
+        echoes? (delay (echoes-ctrl-c?))
+        previous (on-sigint #(do
+                               ;; Ends the line the terminal echoed ^C on, before
+                               ;; the interrupt, which waits for the server.
+                               (when @echoes?
+                                 (binding [*out* *err*]
+                                   (newline)
+                                   (flush)))
+                               ;; With nothing to interrupt, Ctrl-C is for the REPL.
+                               (when-not (interrupt)
+                                 (System/exit 130))))]
     (try
       (run-loop client session interruptions
                 (assoc opts
