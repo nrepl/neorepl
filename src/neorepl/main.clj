@@ -657,6 +657,8 @@ and 3 when there's no server to talk to."
 them."
    lookup-options
    discovery-note
+   "Exit status: 0 when there are completions, 1 when there are none, 2 on usage
+errors and 3 when there's no server to talk to."
    "Examples:
   neorepl complete str/
   neorepl complete --ns my.app --format json ma"))
@@ -665,8 +667,14 @@ them."
   (let [prefix (the-arg args "PREFIX")]
     (with-lookup-context options ctx
       (fn [client ctx]
-        (print-rows format (juxt :candidate (comp str :type)) (features/complete client prefix ctx))
-        0))))
+        (let [completions (features/complete client prefix ctx)]
+          (cond
+            (nil? completions) (throw (ex-info "The server can't complete names, which takes cider-nrepl or nREPL 0.8"
+                                               {:type ::features/failed}))
+            (seq completions) (do (print-rows format (juxt :candidate (comp str :type)) completions)
+                                  0)
+            :else (do (report format {:status "not-found" :message (str "No completions for " prefix)})
+                      1)))))))
 
 (def ^:private apropos-options
   (concat connection-options common-options))
@@ -698,6 +706,8 @@ errors and 3 when there's no server to talk to."
 --all, it expands every macro in FORM instead, all the way down."
    macroexpand-options
    discovery-note
+   "Exit status: 0 when FORM expands, 1 when it doesn't read or expanding it
+fails, 2 on usage errors and 3 when there's no server to talk to."
    "Examples:
   neorepl macroexpand '(when x (println x))'
   neorepl macroexpand --all '(-> x f (g y))'"))
