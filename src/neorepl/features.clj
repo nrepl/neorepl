@@ -22,6 +22,11 @@
 (defn- supports? [client op]
   (contains? (:ops client) op))
 
+(defn- no-namespace
+  "The exception saying there's no namespace called ns."
+  [ns]
+  (ex-info (str "No namespace called " ns) {:type ::failed}))
+
 (defn- ask
   "Sends msg and returns its responses, throwing ::failed when the server
   reports an error: a status ending in error, as eval-error and
@@ -29,6 +34,8 @@
   [client msg opts]
   (let [responses (nrepl/request client msg opts)
         statuses (into #{} (mapcat :status) responses)]
+    (when (statuses "namespace-not-found")
+      (throw (no-namespace (:ns msg))))
     (when (some #(and (str/ends-with? % "error") (not= "no-error" %)) statuses)
       (throw (ex-info (str "The server couldn't do " (:op msg)
                            (when-let [err (some-> (keep :err responses) seq str/join str/trim)]
@@ -52,13 +59,17 @@
   "eval-data with the code evaluated as if in the namespace ns names, which
   needn't refer clojure.core, made by in-ns, say: it's compiled in user,
   after requiring the namespaces requires names, a top-level form of its
-  own so that the code compiles after, with *ns* bound to that one."
+  own so that the code compiles after, with *ns* bound to that one. Throws
+  ::failed when there's no such namespace."
   [client ns requires template args opts]
-  (eval-data client {:ns "user"}
-             (str "(do " (when (seq requires) (str "(require " (str/join " " (map #(str "'" %) requires)) ") "))
-                  "(binding [*ns* (the-ns (symbol %s))] " template "))")
-             (cons ns args)
-             opts))
+  (let [value (eval-data client {:ns "user"}
+                         (str "(do " (when (seq requires) (str "(require " (str/join " " (map #(str "'" %) requires)) ") "))
+                              "(if-let [n (find-ns (symbol %s))] (binding [*ns* n] " template ") :neorepl.features/no-namespace))")
+                         (cons ns args)
+                         opts)]
+    (if (= ::no-namespace value)
+      (throw (no-namespace ns))
+      value)))
 
 (defn- lookup-msg
   "msg, looking something up where ctx says."
@@ -142,6 +153,21 @@
       (seq forms) (assoc :forms (mapv #(if (string? %) % (str "(" (str/join " " (map form-text %)) ")")) forms))
       forms-str (assoc :forms (str/split-lines forms-str)))))
 
+(defn- evaluated-info
+  "info, found by evaluating code, for servers without info or lookup."
+  [client sym ctx opts]
+  (some-> (eval-in client (:ns ctx) [] "(when-let [m (meta (resolve (symbol %s)))]
+                                       {:ns (str (:ns m))
+                                        :name (str (:name m))
+                                        :arglists-str (some->> (:arglists m) (map pr-str) (interpose \"\\n\") (apply str))
+                                        :doc (:doc m)
+                                        :file (:file m)
+                                        :line (:line m)
+                                        :column (:column m)
+                                        :macro (:macro m)})"
+                   [sym] opts)
+          normalize-info))
+
 (defn info
   "What the server knows about sym, a symbol's text, as seen from where ctx
   says: a map with its :ns and :name, :arglists, :doc and where it
@@ -157,23 +183,20 @@
          (normalize-info info)))
 
      (supports? client "lookup")
-     (let [info (some :info (ask client (lookup-msg {:op "lookup" :sym sym} ctx) opts))]
-       ;; Nothing found comes back as an empty list.
-       (when (map? info)
-         (normalize-info info)))
+     (try
+       (let [info (some :info (ask client (lookup-msg {:op "lookup" :sym sym} ctx) opts))]
+         ;; Nothing found comes back as an empty list.
+         (when (map? info)
+           (normalize-info info)))
+       (catch clojure.lang.ExceptionInfo e
+         ;; As it says for a namespace that isn't there, which evaluating
+         ;; says.
+         (if (contains? (:statuses (ex-data e)) "lookup-error")
+           (evaluated-info client sym ctx opts)
+           (throw e))))
 
      :else
-     (some-> (eval-in client (:ns ctx) [] "(when-let [m (meta (resolve (symbol %s)))]
-                                          {:ns (str (:ns m))
-                                           :name (str (:name m))
-                                           :arglists-str (some->> (:arglists m) (map pr-str) (interpose \"\\n\") (apply str))
-                                           :doc (:doc m)
-                                           :file (:file m)
-                                           :line (:line m)
-                                           :column (:column m)
-                                           :macro (:macro m)})"
-                      [sym] opts)
-             normalize-info))))
+     (evaluated-info client sym ctx opts))))
 
 (defn complete
   "The completions for prefix where ctx says, as maps with the :candidate
@@ -232,6 +255,12 @@
   the server says, the :type and :doc."
   ([client regex] (apropos client regex {}))
   ([client regex opts]
+   ;; Rather than the server's stack trace for one that doesn't parse.
+   (try
+     (re-pattern regex)
+     (catch java.util.regex.PatternSyntaxException e
+       (throw (ex-info (str "Not a regex: " (.getDescription e) ", at index " (.getIndex e) " of " regex)
+                       {:type ::failed}))))
    (if (supports? client "apropos")
      (->> (ask client {:op "apropos" :query regex} opts)
           (some :apropos-matches)
@@ -834,6 +863,15 @@
   (when-not (supports? client "inspect-push")
     (throw (ex-info "Inspecting values takes cider-nrepl or babashka on the server" {:type ::failed}))))
 
+(defn- trace-summary
+  "err, an exception's stack trace as cider-nrepl's inspector prints it for
+  code that throws, cut down to what eval would say: its first line, and
+  the line of its root cause."
+  [err]
+  (let [lines (some-> err str/split-lines)
+        cause (last (filter #(str/starts-with? % "Caused by: ") lines))]
+    (str (str/join "\n" (remove nil? [(first lines) cause])) "\n")))
+
 (defn checked-text
   "The text of file, which is there, after checking its delimiters balance,
   as neorepl check does, since the server's reader would place where they
@@ -861,19 +899,27 @@
   (check-inspector client)
   (let [;; The last value's view, or ::failed.
         view (atom nil)
+        ;; cider-nrepl's stack trace for code that throws, which comes as
+        ;; :err with the :ex, and how much less to say.
+        trace (atom nil)
+        summary #(cond-> % (and (:ex %) (:err %)) (update :err trace-summary))
         {:keys [status] :as result}
         (evaluate-for client
                       (cond-> {:op "eval" :session session :code code :inspect "true"}
                         page-size (assoc :page-size page-size))
                       ;; It would cut the view short, which is the value.
-                      (dissoc opts :max-output :page-size)
+                      (cond-> (dissoc opts :max-output :page-size)
+                        (:on-response opts) (update :on-response comp summary))
                       #(cond
                          (:value %) (reset! view (:value %))
                          ;; cider-nrepl's way of saying eval-error.
-                         (nrepl/status? % "inspect-eval-error") (reset! view ::failed)))]
+                         (nrepl/status? % "inspect-eval-error") (do (reset! view ::failed)
+                                                                     (when (and (:ex %) (:err %))
+                                                                       (reset! trace (:err %))))))]
     (cond
       (not= "ok" status) result
-      (= ::failed @view) (assoc result :status "eval-error")
+      (= ::failed @view) (cond-> (assoc result :status "eval-error")
+                           @trace (update :err str/replace @trace (trace-summary @trace)))
       @view (assoc result :lines (inspector-lines @view))
       :else (throw (ex-info "The server didn't inspect the value" {:type ::failed})))))
 
