@@ -112,6 +112,25 @@
         (type "(do (future (Thread/sleep 200) (print \"a\") (flush) (print \"b\") (flush) (println \"c\")) nil)\r")
         ;; The prompt gets redrawn below, which screen doesn't see.
         (is (screen #"abc\nuser=> $")))))
+  (testing "and the start of a line, a moment after"
+    (call-with-repl {}
+      (fn [type screen]
+        (type "(do (future (Thread/sleep 200) (print \"Sure? \") (flush)) nil)\r")
+        (is (screen #"Sure\? \nuser=> $")))))
+  (testing "but not when it ends in time"
+    (call-with-repl {}
+      (fn [type screen]
+        (type "(do (future (Thread/sleep 200) (dotimes [i 6] (print (str \"step\" i \"...\")) (flush) (Thread/sleep 100) (println \"done\"))) nil)\r")
+        (is (= 6 (count (re-seq #"step\d\.\.\.done\n" (screen #"step5\.\.\.done\nuser=> $"))))))))
+  (testing "or before what's printed next, if that's sooner"
+    (call-with-repl {}
+      (fn [type screen]
+        (type "(do (future (Thread/sleep 50) (print \"partial\") (flush)) nil)\r")
+        (screen #"nil\nuser=> $")
+        ;; Past the print, but well within the moment.
+        (Thread/sleep 150)
+        (type "1\r")
+        (is (re-find #"partial\n" (screen #"(?m)^1\nuser=> $"))))))
   (testing "messages from the server"
     (with-client [client {:port *port*}]
       (call-with-repl {}
