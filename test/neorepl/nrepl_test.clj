@@ -68,7 +68,14 @@
                   (.write (.getBytes "HTTP/1.1 400 Bad Request\r\n\r\n"))
                   (.flush))))
       (let [e (is (thrown? clojure.lang.ExceptionInfo (nrepl/connect {:port (.getLocalPort socket)})))]
-        (is (= ::nrepl/no-server (:type (ex-data e))))))))
+        (is (= ::nrepl/no-server (:type (ex-data e)))))))
+  (testing "a host that doesn't answer, for no longer than the connect timeout"
+    (with-redefs [nrepl/connect-timeout-ms 200]
+      (let [started (System/currentTimeMillis)
+            ;; Reserved for documentation, so nothing answers there.
+            e (is (thrown? clojure.lang.ExceptionInfo (nrepl/connect {:host "192.0.2.1" :port 7888})))]
+        (is (= ::nrepl/no-server (:type (ex-data e))))
+        (is (< (- (System/currentTimeMillis) started) 5000))))))
 
 (deftest request-test
   (with-client [client {:port *port*}]
