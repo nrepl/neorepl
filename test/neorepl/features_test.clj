@@ -546,6 +546,45 @@
       (finally
         (server/stop-server srv)))))
 
+(deftest frames-test
+  (testing "the frames of what runs the code, Clojure's REPL among them"
+    (are [name tooling?] (= tooling? (boolean (#'features/tooling? {:name name})))
+      "clojure.main$repl$read_eval_print__9248/invoke" true
+      "clojure.core$eval/invokeStatic" true
+      "clojure.lang.AFn/applyToHelper" true
+      "clojure.lang.Compiler/eval" true
+      "nrepl.middleware.interruptible_eval$evaluate/invokeStatic" true
+      "clojure.core$map/invoke" false
+      "my.app$f/invoke" false))
+  (testing "a function's frame, after one of its anonymous fn's, which has its var"
+    (is (= [nil nil]
+           (map :flags (:stacktrace (first (#'features/normalize-causes
+                                            [{:class "java.lang.ArithmeticException"
+                                              :stacktrace [{:name "user$outer$inner__1/invoke" :file "NO_SOURCE_FILE" :line 1}
+                                                           {:name "user$outer/invokeStatic" :file "NO_SOURCE_FILE" :line 1}]}])))))))
+  (testing "duplicates by their function, not the file and line cider-nrepl goes by, which a REPL's share"
+    (is (= [nil ["dup"] nil]
+           (map :flags (:stacktrace (first (#'features/normalize-causes
+                                            [{:class "java.lang.ArithmeticException"
+                                              :stacktrace [{:name "user$inner/invokeStatic" :file "NO_SOURCE_FILE" :line 1
+                                                            :var "user/inner"}
+                                                           {:name "user$inner/invoke" :file "NO_SOURCE_FILE" :line 1
+                                                            :var "user/inner" :flags ["dup"]}
+                                                           {:name "user$outer/invokeStatic" :file "NO_SOURCE_FILE" :line 1
+                                                            :var "user/outer" :flags ["dup"]}]}]))))))
+    (testing "and babashka's, whose names are their vars"
+      (is (= [nil nil]
+             (map :flags (:stacktrace (first (#'features/normalize-causes
+                                              [{:class "java.lang.ArithmeticException"
+                                                :stacktrace [{:name "user/inner" :ns "user" :file "NO_SOURCE_PATH" :line 1}
+                                                             {:name "user/outer" :ns "user" :file "NO_SOURCE_PATH" :line 1}]}]))))))
+      (testing "with its cider-nrepl's frames as tooling, which its flags leave out"
+        (is (= ["clj" "tooling"]
+               (:flags (first (:stacktrace (first (#'features/normalize-causes
+                                                   [{:class "java.lang.ArithmeticException"
+                                                     :stacktrace [{:name "cider.nrepl.middleware.util.eval/fn"
+                                                                   :flags ["clj"]}]}])))))))))))
+
 (deftest trace-summary-test
   (testing "cider-nrepl's stack trace for inspected code that throws, as eval would say it"
     (is (= (str "clojure.lang.Compiler$CompilerException: Syntax error compiling at (1:1).\n"

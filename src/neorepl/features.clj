@@ -324,10 +324,14 @@
     x))
 
 (defn- dups
-  "Flags the frames that call on from one before them in the same function,
-  the way cider-nrepl does, as dup."
+  "Flags the frames that call on from one before them in the same function
+  as dup, the way cider-nrepl means to: by the class, which tells a
+  function's anonymous fns apart from it, as user$f$fn__1, or by the :var,
+  for babashka's, named after their vars rather than a class."
   [frames]
-  (let [fn-of #(first (str/split (str (:name %)) #"/"))]
+  (let [fn-of (fn [{:keys [name var]}]
+                (let [class (first (str/split (str name) #"/"))]
+                  (if (str/includes? class "$") class (or var class))))]
     (into (vec (take 1 frames))
           (map (fn [previous frame]
                  (cond-> frame (= (fn-of previous) (fn-of frame)) (update :flags (fnil conj []) "dup")))
@@ -365,16 +369,30 @@
              (assoc (cause (peek via)) :stacktrace (mapv frame trace)))))")
 
 (defn- tooling?
-  "Whether frame, from causes-code, is one of what runs the code rather than
-  of the code itself, which servers with analyze-last-stacktrace flag."
+  "Whether frame is one of what runs the code rather than of the code
+  itself: the ones orchard flags, the REPL's eval among them, by their
+  classes, for every server's frames, which don't all flag them."
   [{:keys [name]}]
-  (re-find #"^(clojure\.lang\.Compiler|clojure\.main|nrepl\..+|java\.lang\.Thread)/" (str name)))
+  (re-find #"^(clojure\.lang\.(Compiler|LazySeq|Var|MultiFn|AFn|RestFn|RT)[$/]|clojure\.core\$(eval|apply|with_bindings|binding_conveyor_fn)|clojure\.core\.protocols|clojure\.main[$/]|nrepl\.|cider\.|java\.lang\.Thread/)"
+           (str name)))
 
 (defn- stacktrace-causes
   "The causes in the responses to msg, an analyze-last-stacktrace or
   test-stacktrace, which answer with one each."
   [client msg opts]
   (filter :class (ask client msg opts)))
+
+(defn- frame-flags
+  "frame's flags, as the server has them, if any: without cider-nrepl's dup,
+  which goes by the file and line, which a REPL's functions all share, and
+  with tooling for the frames of what runs the code, which bb's server
+  leaves off its cider-nrepl's."
+  [{:keys [flags] :as frame}]
+  (->> (concat flags (when (tooling? frame) ["tooling"]))
+       (remove #{"dup"})
+       distinct
+       vec
+       not-empty))
 
 (defn- normalize-causes
   "causes, as analyze-last-stacktrace and test-stacktrace have them, or
@@ -384,13 +402,14 @@
           {:class class
            :message (blank->nil message)
            :data (blank->nil data)
-           :stacktrace (dups (mapv (fn [{:keys [file-url flags] :as frame}]
+           :stacktrace (dups (mapv (fn [{:keys [file-url] :as frame}]
                                      (let [var (frame-var frame)
                                            ;; cider-nrepl's, for the exact file the line's in.
                                            path (when (and (string? file-url) (str/starts-with? file-url "file:"))
-                                                  (source-file file-url))]
-                                       (cond-> (select-keys frame [:name :file :line :flags])
-                                         (and (nil? flags) (tooling? frame)) (assoc :flags ["tooling"])
+                                                  (source-file file-url))
+                                           flags (frame-flags frame)]
+                                       (cond-> (select-keys frame [:name :file :line])
+                                         flags (assoc :flags flags)
                                          var (assoc :var var)
                                          path (assoc :path path))))
                                    stacktrace))})
