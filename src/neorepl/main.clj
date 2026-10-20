@@ -108,9 +108,16 @@ when it times out.")
 
 (defn- existing-file ^File [path]
   (let [file (io/file path)]
-    (if (.isFile file)
-      file
-      (throw (usage-error (str "No such file: " path))))))
+    (cond
+      (not (.isFile file)) (throw (usage-error (str "No such file: " path)))
+      (not (.canRead file)) (throw (usage-error (str "Can't read the file " path)))
+      :else file)))
+
+(defn- file-text
+  "The text of the file at path, an existing-file, checked as
+  features/checked-text checks it."
+  [path]
+  (features/checked-text (existing-file path) path "neorepl check --fix"))
 
 (defn- connect [{:keys [url host port]} dir]
   (cond
@@ -347,7 +354,7 @@ printed as it arrives and each value on a line of its own."
 (defn- read-code [file args]
   (cond
     (and file (seq args)) (throw (usage-error "Give either CODE or --file, not both"))
-    file (slurp (existing-file file))
+    file (file-text file)
     (= ["-"] args) (slurp *in*)
     (= 1 (count args)) (first args)
     (empty? args) (throw (usage-error "Nothing to evaluate"))
@@ -383,12 +390,13 @@ an ns form switches the session to that namespace."
   neorepl load --timeout 60 --format json src/my/app.clj"))
 
 (defn- load-command [options args ctx]
-  (let [file (case (count args)
+  (let [path (case (count args)
                0 (throw (usage-error "Nothing to load"))
-               1 (existing-file (first args))
-               (throw (usage-error "Load one file at a time")))]
+               1 (first args)
+               (throw (usage-error "Load one file at a time")))
+        file (io/file path)]
     (report-evaluation {:op "load-file"
-                        :file (slurp file)
+                        :file (file-text path)
                         :file-path (.getAbsolutePath file)
                         :file-name (.getName file)}
                        options

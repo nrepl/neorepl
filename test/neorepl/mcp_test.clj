@@ -294,6 +294,17 @@
                  {:file (str *dir* "/missing.clj") :message "No such file"}]
                 (:problems structuredContent)))
          (is (str/starts-with? (text {:result result}) (str bad ":2:1: Unclosed ("))))
+       (testing "and loading only what can be read"
+         (let [unreadable (spit-file *dir* "unreadable.clj" "(ns unreadable)")]
+           ;; Where that can be had: not on Windows, nor as root.
+           (when (and (.setReadable unreadable false) (not (.canRead unreadable)))
+             (send (tool-call 5 "load" {:file (str unreadable)}))
+             (is (= (str "Can't read the file " unreadable) (text (receive)))))))
+       (testing "and loading only what balances"
+         (send (tool-call 4 "load" {:file bad}))
+         (let [{:keys [result]} (receive)]
+           (is (:isError result))
+           (is (= (str bad ":2:1: Unclosed (, which check with fix can repair") (text {:result result})))))
        (send (tool-call 2 "check" {:files [good]}))
        (is (= "Every delimiter balances" (text (receive))))
        (testing "and repairing them"
