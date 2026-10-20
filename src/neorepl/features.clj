@@ -11,6 +11,7 @@
   :timeout-ms. They throw ::failed when the server reports an error, which
   isn't the same as finding nothing."
   (:require [clojure.edn :as edn]
+            [clojure.java.io :as io]
             [clojure.main :as main]
             [clojure.string :as str]
             [neorepl.evaluation :as evaluation]
@@ -183,12 +184,47 @@
           (some :completions)
           (mapv #(select-keys % [:candidate :type :ns]))))))
 
+(defn- definition?
+  "Whether form, as text, is a list whose head defines something: def, defn,
+  defmacro and the like."
+  [form]
+  (let [[head] (some-> (re-find #"^\((.*)\)$" (str/replace form #"\s+" " ")) second lexer/forms)]
+    (boolean (some-> head (str/includes? "def")))))
+
+(defn- form-at
+  "The text of the definition at line and column of file, a path or a URL
+  like jar:file:...!/clojure/core.clj, read as far as it goes, or nil when
+  this machine can't read the file, or there's no definition there, as for
+  the macros ClojureScript takes from Clojure, whose lines cider-nrepl has
+  from somewhere else."
+  [file line column]
+  (try
+    (with-open [r (io/reader file)]
+      (when-let [[first-line & more] (seq (drop (dec line) (line-seq r)))]
+        (loop [lines [(subs first-line (min (count first-line) (dec (or column 1))))]
+               more more]
+          (let [text (str/join "\n" lines)]
+            (if (and (lexer/incomplete? text) (seq more))
+              (recur (conj lines (first more)) (rest more))
+              (let [form (first (lexer/forms text))]
+                (when (some-> form definition?)
+                  form)))))))
+    (catch Exception _ nil)))
+
 (defn source
-  "The source of the var sym names in the namespace ctx has, or nil when the
-  server can't find it."
+  "The source of the var sym names where ctx says, or nil when it can't be
+  found: read from the file and line info finds, as CIDER does, which works
+  in ClojureScript and for a file loaded from anywhere, or else, when this
+  machine can't read the file, with clojure.repl/source-fn, which reads
+  files on the server's classpath."
   ([client sym ctx] (source client sym ctx {}))
   ([client sym ctx opts]
-   (eval-in client (:ns ctx) ['clojure.repl] "(clojure.repl/source-fn (symbol %s))" [sym] opts)))
+   (when-let [{:keys [file line column class]} (info client sym ctx opts)]
+     ;; A Java class's source isn't a form.
+     (when-not class
+       (or (when (and file line)
+             (form-at file line column))
+           (eval-in client (:ns ctx) ['clojure.repl] "(clojure.repl/source-fn (symbol %s))" [sym] opts))))))
 
 (defn apropos
   "The vars whose names match the regex, as maps with the :name and, when
