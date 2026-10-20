@@ -176,7 +176,8 @@
 
   Optional callbacks, both called on the reader thread: :on-unclaimed gets
   every response no request claims, :on-error every exception a response
-  handler throws (by default it's printed to stderr).
+  handler throws (by default it's printed to stderr). And :timeout-ms, how
+  long the server gets to describe itself, as request takes it.
 
   The client carries what describe reports: the server's :ops, a set of op
   names, and its :versions, a sorted map of names such as :clojure and
@@ -193,7 +194,7 @@
                  (open (assoc where :host host) on-unclaimed on-error)
                  (catch Exception e (throw (no-server e))))]
     (try
-      (let [{:keys [ops versions]} (apply merge (request client {:op "describe"}))]
+      (let [{:keys [ops versions]} (apply merge (request client {:op "describe"} (select-keys opts [:timeout-ms])))]
         (assoc client
                :address address
                ;; The transport turns op names into keywords: cider/info into :cider/info.
