@@ -88,7 +88,15 @@
     (let [{:keys [status out]} (run "--format" "json" "(+ 1 2) \"s\"")]
       (is (zero? status))
       (is (str/starts-with? out "{\"status\":\"ok\",\"values\":[\"3\",\"\\\"s\\\"\"],"))
-      (is (str/ends-with? out "}\n")))))
+      (is (str/ends-with? out "}\n"))))
+  (testing "failures too, where scripts look for them"
+    (let [port (test-server/free-port)]
+      (is (= {:status 3 :out (str "{\"status\":\"no-server\",\"message\":\"No nREPL server answering at 127.0.0.1:" port "\"}\n")
+              :err ""}
+             (run-in *dir* "" "eval" "-p" (str port) "--format" "json" "1")))))
+  (testing "a usage error, in json"
+    (is (= {:status 2 :out "{\"status\":\"usage\",\"message\":\"Give a SYM\"}\n" :err ""}
+           (run-in *dir* "" "doc" "-p" "1" "--format" "json")))))
 
 (deftest session-test
   (testing "a session keeps its namespace between calls"
