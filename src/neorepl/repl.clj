@@ -132,24 +132,52 @@
       (concat (str/split (str/trim editor-command) #"\s+") args)
       (concat ["sh" "-c" (str editor-command " \"$@\"") "sh"] args))))
 
+(defn- extracted
+  "The file url, a jar: URL, points to, copied out of its jar into dir, for
+  an editor to open, or nil when it can't be read. The copies of a jar's
+  files go under its name and a hash of its path, since jars in different
+  places can share a name."
+  [dir url]
+  (when-let [[_ jar entry] (and dir (re-matches #"jar:(file:.+)!/(.+)" url))]
+    (try
+      (let [jar (io/file (java.net.URI. jar))
+            file (io/file dir (str (.getName jar) "-" (Integer/toHexString (.hashCode (.getAbsolutePath jar)))) entry)]
+        ;; A jar can change and keep its path, as a snapshot's does.
+        (when (< (.lastModified file) (.lastModified jar))
+          (io/make-parents file)
+          (.setWritable file true)
+          (try
+            (with-open [in (io/input-stream url)]
+              (io/copy in file))
+            (catch Exception e
+              ;; Rather than part of it, which would pass for all of it after.
+              (.delete file)
+              (throw e)))
+          ;; Changing it changes nothing, so the editor might as well say so.
+          (.setReadOnly file))
+        (str file))
+      (catch Exception _ nil))))
+
 (defn- open
   "Opens file at line with the :editor-command, with the terminal :suspended
-  for it. Returns nil, or a message saying why it couldn't."
-  [{:keys [editor-command suspended]} file line]
-  (cond
-    (str/blank? editor-command) "Set EDITOR, or VISUAL, to the editor to open"
-    (not (.isFile (io/file file))) (str "Can't open " file)
-    :else (let [command (editor-command-line editor-command file line)
-                status (suspended #(let [editor (-> (ProcessBuilder. ^java.util.List command) .inheritIO .start)]
-                                     (try
-                                       (.waitFor editor)
-                                       ;; Ctrl-C stops waiting, for an editor with a
-                                       ;; window of its own that doesn't take it.
-                                       (catch InterruptedException e
-                                         (.destroy editor)
-                                         (throw e)))))]
-            (when-not (zero? status)
-              (str "The editor exited with status " status)))))
+  for it. A file in a jar, as a jar: URL, opens as a copy in the
+  :sources-dir. Returns nil, or a message saying why it couldn't."
+  [{:keys [editor-command suspended sources-dir]} file line]
+  (let [path (if (str/starts-with? file "jar:") (extracted sources-dir file) file)]
+    (cond
+      (str/blank? editor-command) "Set EDITOR, or VISUAL, to the editor to open"
+      (not (some-> path io/file .isFile)) (str "Can't open " file)
+      :else (let [command (editor-command-line editor-command path line)
+                  status (suspended #(let [editor (-> (ProcessBuilder. ^java.util.List command) .inheritIO .start)]
+                                       (try
+                                         (.waitFor editor)
+                                         ;; Ctrl-C stops waiting, for an editor with a
+                                         ;; window of its own that doesn't take it.
+                                         (catch InterruptedException e
+                                           (.destroy editor)
+                                           (throw e)))))]
+              (when-not (zero? status)
+                (str "The editor exited with status " status))))))
 
 (defn- edit
   "Opens the definition of sym in the editor, as open does. Returns what to
@@ -306,15 +334,15 @@
   "Runs the command called name with arg, and returns what to print, as a
   response for the REPL's printer, or :quit. state has the :client and
   where the REPL is, as run-loop's read-code gets it, for the lookups, the
-  :editor-command and a function to run it with the terminal :suspended,
-  for ,edit, a function that :evaluates the way the REPL does, for ,test
-  and ,inspect, and one to :browse what ,inspect and ,stacktrace find, as
-  browser/browse does, partly applied to the editor, if the REPL can, an
-  atom with the last test run's :test-errors, functions that have the REPL
-  :show-traces and :hide-traces, and the :sessions-file and the REPL's :own
-  session, where it started, for ,sessions. What to print can have the :ns
-  the REPL goes on in, or the :session and its :session-name too, as
-  switch-session says."
+  :editor-command, a function to run it with the terminal :suspended and
+  the :sources-dir, for ,edit, a function that :evaluates the way the REPL
+  does, for ,test and ,inspect, and one to :browse what ,inspect and
+  ,stacktrace find, as browser/browse does, partly applied to the editor,
+  if the REPL can, an atom with the last test run's :test-errors, functions
+  that have the REPL :show-traces and :hide-traces, and the :sessions-file
+  and the REPL's :own session, where it started, for ,sessions. What to
+  print can have the :ns the REPL goes on in, or the :session and its
+  :session-name too, as switch-session says."
   [{:keys [client] :as state} name arg]
   (let [{arg-name :arg :keys [code? args? optional?] :as command} (command name)]
     (cond
@@ -606,6 +634,7 @@
     :dir          the project's directory when the client doesn't say
     :editor-command
                   the command line ,edit opens files with, like EDITOR's
+    :sources-dir  where ,edit copies the files in jars it opens to
     :sessions-file
                   the named sessions' file, for ,sessions
     :session-name session's name in it, if it has one"

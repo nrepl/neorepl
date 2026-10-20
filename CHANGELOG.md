@@ -52,6 +52,7 @@
 - [#32](https://github.com/nrepl/neorepl/pull/32): What another thread prints without ending its line shows up above the prompt, rather than once the line is done or stuck to the start of the next value.
 - [#32](https://github.com/nrepl/neorepl/pull/32): Ctrl-R and Ctrl-S show the history search's prompt, which eldoc's tip used to hide.
 - [#32](https://github.com/nrepl/neorepl/pull/32): `,stacktrace` stays open on a frame it can't open, saying why, and comes back after the editor exits, rather than leaving for the prompt either way.
+- [#32](https://github.com/nrepl/neorepl/pull/32): `,edit`, and opening a frame in `,stacktrace`, open a definition in a jar as a copy, rather than saying they can't.
 
 ## 0.3.0 (2026-10-17)
 

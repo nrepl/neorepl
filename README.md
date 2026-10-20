@@ -30,7 +30,7 @@ the cursor and C-x C-d shows the documentation of what's at the cursor.
 Commands start with a comma, the CIDER way: `,doc`, `,source`, `,apropos`,
 `,macroexpand`, `,pst` for the last error's stack trace, `,stacktrace` to
 browse it, `,reload`, `,test`, `,inspect`, `,trace`, `,edit` to open a definition in
-your `$EDITOR`, `,ns` to switch namespaces, loading the one you name if it
+your `$EDITOR`, a copy of it for one in a jar, `,ns` to switch namespaces, loading the one you name if it
 isn't yet, `,sessions` to step into another session, like an agent's, and
 `,help` for the rest.
 Without a terminal, say in a pipe or Emacs' `M-x shell`, it works like
