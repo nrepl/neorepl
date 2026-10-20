@@ -123,16 +123,12 @@
            (is (not (.isAlive ^Process process)))
            (is (not-any? #(.isAlive %) children))))))))
 
-(defn- on-path? [program]
-  (some #(.canExecute (io/file % program))
-        (str/split (System/getenv "PATH") (re-pattern java.io.File/pathSeparator))))
-
 (defn- process-group [pid]
   (str/trim (:out (shell/sh "ps" "-o" "pgid=" "-p" (str pid)))))
 
 (deftest npx-test
   ;; Node is up to whoever runs the tests.
-  (when (and (not (windows?)) (on-path? "npx"))
+  (when (and (not (windows?)) (jack-in/on-path? "npx"))
     (call-with-temp-dir
      (fn [dir]
        (let [with-server #(jack-in/with-server dir ["npx" "-c" "echo 'nREPL server started on port 1 on host x'; sleep 60"]
@@ -175,6 +171,9 @@
                                  (fn [_]))))
          (testing "after what it said"
            (is (= [":oops"] @lines))))
+       (testing "one whose build tool isn't installed"
+         (is (thrown-with-msg? clojure.lang.ExceptionInfo #"^Couldn't start the server: neorepl-no-such-tool isn't installed, or isn't on the PATH$"
+                               (jack-in/with-server dir ["neorepl-no-such-tool"] (fn [_]) (fn [_])))))
        (testing "one that can't start"
          (is (= ::jack-in/failed
                 (:type (ex-data (is (thrown? clojure.lang.ExceptionInfo

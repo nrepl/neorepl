@@ -7,7 +7,8 @@
             [clojure.string :as str]
             [neorepl.discovery :as discovery]
             [neorepl.shutdown :as shutdown])
-  (:import (java.io BufferedReader IOException)))
+  (:import (java.io BufferedReader File IOException)
+           (java.util.regex Pattern)))
 
 (def versions
   "What goes on the server's classpath: nREPL, newer than what the build tool
@@ -128,6 +129,19 @@
 (def ^:private windows?
   (str/starts-with? (System/getProperty "os.name") "Windows"))
 
+(defn on-path?
+  "Whether program is on the PATH, with one of the extensions Windows runs
+  programs by there."
+  [program]
+  (let [extensions (if windows?
+                     (cons "" (str/split (or (System/getenv "PATHEXT") ".COM;.EXE;.BAT;.CMD") #";"))
+                     [""])]
+    (boolean (some (fn [dir]
+                     (some #(let [file (io/file dir (str program %))]
+                              (and (.isFile file) (.canExecute file)))
+                           extensions))
+                   (str/split (or (System/getenv "PATH") "") (re-pattern (Pattern/quote File/pathSeparator)))))))
+
 (def ^:private detached
   "A Node script running the command in its arguments in a session of its
   own, where the terminal's signals don't reach it. It ignores SIGINT
@@ -176,13 +190,18 @@ for (const signal of ['SIGHUP', 'SIGTERM', 'SIGQUIT'])
   returns. Throws ::failed when the server can't start, or ends before it's
   up. Ctrl-C in the terminal doesn't stop it, see launch-command."
   [dir command on-line f]
-  (let [process (try
+  (let [;; Rather than the shell's word for it, exit status 127, or Java's.
+        missing #(when-not (on-path? (first command))
+                   (ex-info (str "Couldn't start the server: " (first command) " isn't installed, or isn't on the PATH")
+                            {:type ::failed}))
+        process (try
                   (-> (ProcessBuilder. ^java.util.List (vec (launch-command command)))
                       (.directory (io/file dir))
                       (.redirectErrorStream true)
                       .start)
                   (catch IOException e
-                    (throw (ex-info (str "Couldn't start the server: " (ex-message e)) {:type ::failed}))))
+                    (throw (or (missing)
+                               (ex-info (str "Couldn't start the server: " (ex-message e)) {:type ::failed})))))
         up (promise)
         output (doto (Thread. (fn []
                                 (with-open [^BufferedReader r (io/reader (.getInputStream process))]
@@ -208,5 +227,7 @@ for (const signal of ['SIGHUP', 'SIGTERM', 'SIGQUIT'])
        (.start output)
        (if-let [address @up]
          (f (assoc address :process process))
-         (throw (ex-info (str "The server ended before it started, with exit status " (.waitFor process))
-                         {:type ::failed})))))))
+         (let [status (.waitFor process)]
+           (throw (or (when (= 127 status) (missing))
+                      (ex-info (str "The server ended before it started, with exit status " status)
+                               {:type ::failed})))))))))
