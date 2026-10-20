@@ -1,5 +1,6 @@
 (ns neorepl.render-test
-  (:require [clojure.test :refer [are deftest is testing]]
+  (:require [clojure.java.io :as io]
+            [clojure.test :refer [are deftest is testing]]
             [neorepl.render :as render]))
 
 (deftest doc-text-test
@@ -12,6 +13,20 @@
            (render/doc-text {:name "if" :forms ["(if test then else?)"] :special-form true})))
     (is (= "let\n  (let [bindings*] exprs*)\nSpecial Form"
            (render/doc-text {:name "let" :forms ["(let [bindings*] exprs*)"] :special-form true :macro true})))))
+
+(deftest failure-heading-test
+  (let [dir (str (io/file "/work/app"))]
+    (testing "where, relative to the directory neorepl runs in when it's in there"
+      (is (= (str "FAIL in my.app-test/adds (" (io/file "test/my/app_test.clj") ":12)")
+             (render/failure-heading {:type "fail" :ns "my.app-test" :var "adds" :line 12
+                                      :file (str (io/file dir "test/my/app_test.clj"))}
+                                     dir)))
+      (is (= (str "ERROR in my.app-test/adds (" (io/file "/elsewhere/helper.clj") ":3)")
+             (render/failure-heading {:type "error" :ns "my.app-test" :var "adds" :line 3
+                                      :file (str (io/file "/elsewhere/helper.clj"))}
+                                     dir))))
+    (testing "and nowhere, for a fixture outside the tests"
+      (is (= "ERROR in my.app-test" (render/failure-heading {:type "error" :ns "my.app-test"} dir))))))
 
 (deftest eldoc-text-test
   (are [info text] (= text (render/eldoc-text info))
