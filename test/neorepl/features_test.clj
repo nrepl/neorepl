@@ -35,6 +35,25 @@
                "if" (transport/respond-to msg :status "done" :name "if" :special-form "true"
                                           :forms-str "(if test then else?)")
                "broken" (transport/respond-to msg :status ["done" "info-error"])
+               ;; Java members come without a name, with their Javadoc in fragments.
+               "Thread/sleep" (transport/respond-to msg :status "done" :class "java.lang.Thread" :member "sleep"
+                                                    :arglists-str "[millis]\n[millis nanos]"
+                                                    :doc "Causes {@code this}."
+                                                    :doc-fragments [{:type "text" :content "Causes the "}
+                                                                    {:type "html" :content "<pre>Thread</pre> "}
+                                                                    {:type "text" :content "to sleep, "}
+                                                                    {:type "html" :content "a&nbsp;&lt;b&gt; &amp; c"}])
+               ;; A namespace's names it twice, unlike a var named like its namespace.
+               "clojure.string" (transport/respond-to msg :status "done" :ns "clojure.string" :name "clojure.string"
+                                                      :doc "Strings." :line 1)
+               "hello" (transport/respond-to msg :status "done" :ns "hello" :name "hello" :arglists-str "[]"
+                                             :line 2 :column 1)
+               ;; A Java field has no arglists.
+               "Integer/MAX_VALUE" (transport/respond-to msg :status "done" :class "java.lang.Integer"
+                                                         :member "MAX_VALUE" :arglists-str "nil" :doc "Biggest.")
+               "String" (transport/respond-to msg :status "done" :class "java.lang.String" :name "String"
+                                              :file "jar:file:/x/src.zip!/java/lang/String.java" :line 142
+                                              :doc-fragments [{:type "text" :content "Strings."}])
                ;; Says which session it was asked in.
                "session" (transport/respond-to msg :status "done" :ns "user" :name "session"
                                                :doc (:session msg))
@@ -369,6 +388,18 @@
           (is (= [{:name "clojure.core/map" :type "function" :doc "Cider's map.\nMore."}]
                  (features/apropos client "map")))
           (is (= "Cider's macroexpand-all" (features/expand client "(when x y)" user true)))
+          (testing "Java members and classes, with their Javadoc as text"
+            (is (= {:ns "java.lang.Thread" :name "sleep" :class "java.lang.Thread" :arglists ["[millis]" "[millis nanos]"]
+                    :doc "Causes the Thread to sleep, a <b> & c"}
+                   (features/info client "Thread/sleep" user)))
+            (is (= {:name "java.lang.String" :class "java.lang.String" :doc "Strings."
+                    :file "jar:file:/x/src.zip!/java/lang/String.java" :line 142}
+                   (features/info client "String" user)))
+            (is (= {:ns "java.lang.Integer" :name "MAX_VALUE" :class "java.lang.Integer" :doc "Biggest."}
+                   (features/info client "Integer/MAX_VALUE" user))))
+          (testing "a namespace, named once, unlike a var named like its namespace"
+            (is (= {:name "clojure.string" :doc "Strings."} (features/info client "clojure.string" user)))
+            (is (= "hello" (:ns (features/info client "hello" user)))))
           (is (= {:reloaded ["changed.ns"] :output "Reflection warning, changed/ns.clj:3:1\n"}
                  (features/reload client [])))
           (reset! refresh-fails? true)
