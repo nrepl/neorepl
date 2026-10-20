@@ -248,6 +248,18 @@
                  (not (str/includes? text "#=")))
     (throw (ex-info "Give one form to expand, without #=" {:type ::failed}))))
 
+(defn- in-copy
+  "(f ctx) with ctx's :session, if it has one, swapped for a copy of it, in
+  its language, that goes away after: for ops that evaluate, and would leave
+  the session's *1 changed."
+  [client {:keys [session] :as ctx} f]
+  (if-let [copy (some->> session (nrepl/clone-session client))]
+    (try
+      (f (assoc ctx :session copy))
+      (finally
+        (try (nrepl/close-session client copy) (catch Exception _ nil))))
+    (f ctx)))
+
 (defn expand
   "The form in text with macros expanded where ctx says, pretty printed: just
   the form itself, the way macroexpand-1 does, or every macro in it with
@@ -256,14 +268,15 @@
   ([client text ctx all? opts]
    (one-form text)
    (if (supports? client "macroexpand")
-     (->> (ask client (lookup-msg {:op "macroexpand"
-                                   :code text
-                                   :expander (if all? "macroexpand-all" "macroexpand-1")
-                                   ;; Without the namespaces of what the namespace refers.
-                                   :display-namespaces "tidy"}
-                                  ctx)
-               opts)
-          (some :expansion))
+     (in-copy client ctx
+              #(->> (ask client (lookup-msg {:op "macroexpand"
+                                             :code text
+                                             :expander (if all? "macroexpand-all" "macroexpand-1")
+                                             ;; Without the namespaces of what the namespace refers.
+                                             :display-namespaces "tidy"}
+                                            %)
+                         opts)
+                    (some :expansion)))
      (some-> (eval-in client (:ns ctx) ['clojure.pprint 'clojure.walk]
                       "(with-out-str
                          (clojure.pprint/pprint
