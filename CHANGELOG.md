@@ -50,6 +50,7 @@
 - [#31](https://github.com/nrepl/neorepl/pull/31): `reload` recovers from a namespace whose file is gone, which cider-nrepl kept trying to reload until it restarted.
 - [#31](https://github.com/nrepl/neorepl/pull/31): `,trace` and `neorepl trace` won't trace what the server's own tools call, like `clojure.core/map`, which took the server down.
 - [#32](https://github.com/nrepl/neorepl/pull/32): What another thread prints without ending its line shows up above the prompt, rather than once the line is done or stuck to the start of the next value.
+- [#32](https://github.com/nrepl/neorepl/pull/32): Ctrl-R and Ctrl-S show the history search's prompt, which eldoc's tip used to hide.
 
 ## 0.3.0 (2026-10-17)
 
