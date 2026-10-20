@@ -26,7 +26,8 @@ can see) and starts a REPL. Enter evaluates the input once its forms are
 complete, Ctrl-C interrupts an evaluation and Ctrl-D exits. Code gets
 highlighted, values get pretty printed and the history is kept per project.
 TAB completes, the arglists of the function you're calling show up after
-the cursor and C-x C-d shows the documentation of what's at the cursor.
+the cursor, C-x C-d shows the documentation of what's at the cursor, C-x
+C-s its source and C-x C-a the vars whose names have it in them.
 Commands start with a comma, the CIDER way: `,doc`, `,source`, `,apropos`,
 `,macroexpand`, `,pst` for the last error's stack trace, `,stacktrace` to
 browse it, `,reload`, `,test`, `,inspect`, `,trace`, `,edit` to open a definition in

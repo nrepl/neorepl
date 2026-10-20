@@ -221,9 +221,11 @@
                    being called
     :eldoc?        false to show nothing there after all
     :doc           (doc text cursor) for the documentation C-x C-d shows
+    :source        (source text cursor) for the code C-x C-s shows
+    :apropos       (apropos text cursor) for what C-x C-a shows
     :input, :output, :width and :type
                    a terminal on these streams instead, for tests"
-  [{:keys [history-file color? incomplete? complete eldoc eldoc? doc input]
+  [{:keys [history-file color? incomplete? complete eldoc eldoc? input]
     :or {color? true incomplete? lexer/incomplete? eldoc? true}
     :as opts}]
   (when (or input (maybe-terminal?))
@@ -280,15 +282,19 @@
                                      (finally
                                        (.setAutosuggestion reader LineReader$SuggestionType/TAIL_TIP)))
                                    true)))))
-            (when doc
-              (let [doc (safely doc)]
-                (bind-widget reader "neorepl-doc" (str (KeyMap/ctrl \X) (KeyMap/ctrl \D))
-                             #(let [buffer (.getBuffer reader)]
-                                (when-let [text (doc (str buffer) (.cursor buffer))]
-                                  ;; Straight to JLine: widgets run with its lock held,
-                                  ;; and print-text would take the editor's on top.
-                                  (.printAbove reader ^String text))
-                                true))))
+            ;; rebel-readline's keys, which babashka's REPL has too.
+            (doseq [[k key code?] [[:doc \D] [:source \S true] [:apropos \A]]
+                    :let [f (some-> (k opts) safely)]
+                    :when f]
+              (bind-widget reader (str "neorepl-" (name k)) (str (KeyMap/ctrl \X) (KeyMap/ctrl key))
+                           #(let [buffer (.getBuffer reader)]
+                              (when-let [text (f (str buffer) (.cursor buffer))]
+                                ;; Straight to JLine: widgets run with its lock held,
+                                ;; and print-text would take the editor's on top.
+                                (.printAbove reader ^AttributedString (if code?
+                                                                        (highlight styles text)
+                                                                        (AttributedString. ^CharSequence text))))
+                              true)))
             editor))))))
 
 (defn close [{:keys [^Terminal terminal]}]

@@ -17,6 +17,7 @@
             [neorepl.stacktrace :as stacktrace])
   (:import (java.lang ProcessBuilder$Redirect)
            (java.security MessageDigest)
+           (java.util.regex Pattern)
            (sun.misc Signal SignalHandler)))
 
 (defn- eval-msg
@@ -593,10 +594,10 @@
          ". Ctrl-D or :repl/quit exits.\n")))
 
 (defn- lookups
-  "What the line editor's completion, eldoc and C-x C-d need, looking names
+  "What the line editor's completion, eldoc and C-x keys need, looking names
   up where the REPL is, plus :in-ns, to say where that is, as run-loop's
-  read-code gets it. Lookups get cached until then, since evaluating code
-  can change what names mean."
+  read-code gets it. Lookups for eldoc and docs get cached until then, since
+  evaluating code can change what names mean."
   [client]
   (let [ctx (atom nil)
         ;; Short timeouts, since these happen as the user types. Failures
@@ -608,18 +609,25 @@
                 (catch clojure.lang.ExceptionInfo _ nil))
         token-at (fn [f text cursor]
                    (when-let [token (f (lexer/lex text) cursor)]
-                     (assoc token :text (lexer/text text token))))]
+                     (assoc token :text (lexer/text text token))))
+        symbol-at #(let [token (token-at lexer/symbol-at %1 %2)]
+                     (when (= :symbol (:type token))
+                       (:text token)))
+        ;; Keywords and constants have no docs, but the call they're in might.
+        subject #(or (symbol-at %1 %2) (:text (token-at lexer/enclosing-op %1 %2)))
+        ;; Asked for with a key, so worth waiting longer for.
+        asked {:timeout-ms 5000}]
     {:complete #(features/complete client % @ctx {:timeout-ms 2000})
      :eldoc (fn [text cursor]
               (when-let [{:keys [end text]} (token-at lexer/enclosing-op text cursor)]
                 ;; Not while the function's name is still being typed.
                 (when (< end cursor)
                   (some-> (info text) render/eldoc-text))))
-     :doc (fn [text cursor]
-            (let [at (token-at lexer/symbol-at text cursor)
-                  ;; Keywords and constants have no docs, but the call they're in might.
-                  token (if (= :symbol (:type at)) at (token-at lexer/enclosing-op text cursor))]
-              (some-> token :text info render/doc-text)))
+     :doc #(some-> (subject %1 %2) info render/doc-text)
+     :source #(when-let [sym (subject %1 %2)]
+                (features/source client sym @ctx asked))
+     :apropos #(when-let [sym (symbol-at %1 %2)]
+                 (some-> (features/apropos client (Pattern/quote sym) asked) not-empty render/apropos-text))
      :in-ns (fn [place]
               (reset! ctx place)
               (reset! cached (memoize lookup)))}))
@@ -673,7 +681,7 @@
   [client session {:keys [terminal history-dir dir] :as opts}]
   (let [{:keys [in-ns] :as lookups} (lookups client)]
     (if-let [editor (some-> terminal
-                            (merge (select-keys lookups [:complete :eldoc :doc])
+                            (merge (select-keys lookups [:complete :eldoc :doc :source :apropos])
                                    {:incomplete? incomplete?
                                     :history-file (history-file history-dir (or (:project-dir client) dir))})
                             editor/open)]
