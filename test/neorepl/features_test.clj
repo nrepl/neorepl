@@ -64,6 +64,10 @@
                "String" (transport/respond-to msg :status "done" :class "java.lang.String" :name "String"
                                               :file "jar:file:/x/src.zip!/java/lang/String.java" :line 142
                                               :doc-fragments [{:type "text" :content "Strings."}])
+               ;; Where the test that errs is.
+               "neorepl.sample-suite/erring" (transport/respond-to msg :status "done" :ns "neorepl.sample-suite"
+                                                                   :name "erring" :file "file:/src/neorepl/sample_suite.clj"
+                                                                   :line 14)
                ;; Says which session it was asked in.
                "session" (transport/respond-to msg :status "done" :ns "user" :name "session"
                                                :doc (:session msg))
@@ -100,11 +104,13 @@
                                                        :var "failing" :context "with a context"
                                                        :message "adds up" :expected "3\n" :actual "2\n"
                                                        :file "sample_suite.clj" :line 12}]
+                                           ;; With the file of the frame that threw, as cider-nrepl
+                                           ;; gives it, and the test's line.
                                            "erring" [{:type "error" :index 0 :ns "neorepl.sample-suite"
                                                       :var "erring" :context [] :message ""
                                                       :expected "(= 1 (throw (ex-info \"boom\" {})))\n"
                                                       :error "clojure.lang.ExceptionInfo: boom {}"
-                                                      :file "sample_suite.clj" :line 15}]}})
+                                                      :file "Numbers.java" :line 15}]}})
           (transport/respond-to msg :status "done"))
       "refresh" (if @refresh-fails?
                   ;; cider-nrepl prints the error, as the REPL would.
@@ -462,7 +468,7 @@
                                             :stacktrace [{:name "neorepl.sample_suite$fn__1/invokeStatic"
                                                           :var "neorepl.sample-suite/fn" :file "sample_suite.clj"
                                                           :line 15 :flags ["project" "clj"]}]}]
-                                  :file "sample_suite.clj" :line 15}
+                                  :file (str (io/file "/src/neorepl/sample_suite.clj")) :line 15}
                                  {:type "fail" :ns "neorepl.sample-suite" :var "failing" :context "with a context"
                                   :message "adds up" :expected "3" :actual "2"
                                   :file "sample_suite.clj" :line 12}]
@@ -478,6 +484,16 @@
                       {:op "test-var-query" :var-query {:ns-query {:project? "true"}} :stream "true"}
                       {:op "retest" :stream "true"}]
                      (remove (comp #{"test-stacktrace"} :op) @test-requests)))
+              (testing "a failure's file, on babashka, where it's whichever file the session loaded last"
+                (is (= (str (io/file "/src/neorepl/sample_suite.clj"))
+                       (:file (first (#'features/locate (assoc client :versions {:babashka "1.13.226"}) session true
+                                                        [{:type "fail" :ns "neorepl.sample-suite" :var "erring"
+                                                          :file "/elsewhere/loaded.clj" :line 3}])))))
+                (testing "but not from clojure.test's report, whose errors' are where they threw, in a helper, say"
+                  (is (= "helper.clj"
+                         (:file (first (#'features/locate client session false
+                                                          [{:type "error" :ns "neorepl.sample-suite" :var "erring"
+                                                            :file "helper.clj" :line 3}])))))))
               (testing "every test in the project, its namespaces loaded first, as orchard finds them"
                 ;; One that's never there, since one that threw is loaded as far
                 ;; as require is concerned, its ns form having said so.
