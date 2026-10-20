@@ -56,6 +56,23 @@
         (when @#'nrepl/quickack
           (is (< elapsed 2000)))))))
 
+(deftest busy-test
+  (with-client [client {:port *port*}]
+    (let [session (nrepl/clone-session client)
+          ;; As from a client that went away.
+          before (future (nrepl/request client {:op "eval" :session session :code "(Thread/sleep 5000)"}
+                                        {:timeout-ms nil}))]
+      (try
+        (Thread/sleep 300)
+        (testing "a timeout waiting behind another evaluation says so"
+          (let [{:keys [status message]} (evaluation/evaluate client {:op "eval" :code ":after" :session session}
+                                                              {:timeout 0.3})]
+            (is (= "timeout" status))
+            (is (str/includes? message "waiting behind an evaluation from before"))))
+        (finally
+          (nrepl/interrupt client session nil)
+          (deref before 5000 nil))))))
+
 (deftest read-line-test
   (with-client [client {:port *port*}]
     (testing "a read from *in* that blocks doesn't outlast the timeout"
