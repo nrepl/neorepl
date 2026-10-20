@@ -15,6 +15,11 @@
 
 (def ^:private refresh-fails? (atom false))
 
+(def ^:private refresh-lost?
+  "What wrap-fake-cider's refresh can't find, of gone.ns, until refresh-clear:
+  :gone, its own file, or :dependency, one it requires, or nothing."
+  (atom nil))
+
 (def ^:private source-file
   "The file wrap-fake-cider says from-a-file is in, on line 2."
   (atom nil))
@@ -112,12 +117,23 @@
                                                       :error "clojure.lang.ExceptionInfo: boom {}"
                                                       :file "Numbers.java" :line 15}]}})
           (transport/respond-to msg :status "done"))
-      "refresh" (if @refresh-fails?
+      "refresh-clear" (do (reset! refresh-lost? nil)
+                          (transport/respond-to msg :status "done"))
+      "refresh" (cond
+                  @refresh-lost?
+                  (do (transport/respond-to msg :err (str "Could not locate "
+                                                          (if (= :gone @refresh-lost?) "gone/ns" "nope/core")
+                                                          "__init.class on classpath.\n"))
+                      (transport/respond-to msg :status "error" :error-ns "gone.ns")
+                      (transport/respond-to msg :status "done"))
+
+                  @refresh-fails?
                   ;; cider-nrepl prints the error, as the REPL would.
                   (do (transport/respond-to msg :reloading ["broken.ns"])
                       (transport/respond-to msg :err "Syntax error compiling at (broken/ns.clj:1:1).\n")
                       (transport/respond-to msg :status "error" :error-ns "broken.ns")
                       (transport/respond-to msg :status "done"))
+                  :else
                   (do (transport/respond-to msg :reloading ["changed.ns"])
                       (transport/respond-to msg :err "Reflection warning, changed/ns.clj:3:1\n")
                       (transport/respond-to msg :status ["ok" "done"])))
@@ -149,7 +165,7 @@
 
 (middleware/set-descriptor! #'wrap-fake-cider {:handles {"info" {} "complete" {} "apropos" {} "ns-list" {} "cider-version" {}
                                                          "macroexpand" {} "analyze-last-stacktrace" {} "test-stacktrace" {}
-                                                         "refresh" {} "test-var-query" {} "retest" {}
+                                                         "refresh" {} "refresh-clear" {} "test-var-query" {} "retest" {}
                                                          "inspect-last-exception" {}}})
 
 (def ^:private user
@@ -458,6 +474,18 @@
             (is (str/starts-with? (features/source client "mapv" user) "(defn mapv")))
           (is (= {:reloaded ["changed.ns"] :output "Reflection warning, changed/ns.clj:3:1\n"}
                  (features/reload client [])))
+          (testing "after forgetting a namespace whose file is gone, which cider-nrepl keeps after"
+            (reset! refresh-lost? :gone)
+            (is (= {:reloaded ["changed.ns"] :output "Reflection warning, changed/ns.clj:3:1\n"}
+                   (features/reload client [])))
+            (is (nil? @refresh-lost?))
+            (testing "but not for one it requires, when forgetting them all reloads them all for nothing"
+              (reset! refresh-lost? :dependency)
+              (try
+                (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Could not locate nope/core" (features/reload client [])))
+                (is (= :dependency @refresh-lost?))
+                (finally
+                  (reset! refresh-lost? nil)))))
           (reset! refresh-fails? true)
           (try
             (is (thrown-with-msg? clojure.lang.ExceptionInfo #"refresh: Syntax error compiling at \(broken/ns\.clj"

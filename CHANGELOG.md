@@ -47,6 +47,7 @@
 - [#30](https://github.com/nrepl/neorepl/pull/30): `eval -f`, `load` and the MCP `load` tool check a file's delimiters first, saying where they don't balance rather than the reader's `REPL:9:1`, and say when a file can't be read.
 - [#30](https://github.com/nrepl/neorepl/pull/30): A namespace that isn't there, a regex that doesn't parse and inspected code that throws get a message saying so, rather than the server's exception.
 - [#31](https://github.com/nrepl/neorepl/pull/31): `pst` and `,stacktrace` show the frames that matter on every server: without cider-nrepl, not the REPL's own, and with it and babashka, not hiding a REPL's functions as duplicates, nor showing babashka's cider-nrepl frames.
+- [#31](https://github.com/nrepl/neorepl/pull/31): `reload` recovers from a namespace whose file is gone, which cider-nrepl kept trying to reload until it restarted.
 
 ## 0.3.0 (2026-10-17)
 

@@ -40,7 +40,7 @@
       (throw (ex-info (str "The server couldn't do " (:op msg)
                            (when-let [err (some-> (keep :err responses) seq str/join str/trim)]
                              (str ": " err)))
-                      {:type ::failed :statuses statuses})))
+                      {:type ::failed :statuses statuses :responses responses})))
     responses))
 
 (defn- eval-data
@@ -468,7 +468,21 @@
                  opts)]
 
            (supports? client "refresh")
-           (let [responses (ask client {:op "refresh"} opts)]
+           (let [refresh #(ask client {:op "refresh"} opts)
+                 responses (try
+                             (refresh)
+                             (catch clojure.lang.ExceptionInfo e
+                               ;; cider-nrepl keeps trying to reload a namespace
+                               ;; whose file is gone, until it forgets them all,
+                               ;; which reloads the rest too, so only then.
+                               (if-let [ns (some :error-ns (:responses (ex-data e)))]
+                                 (if (str/includes? (ex-message e) (str "Could not locate "
+                                                                        (-> ns (str/replace "-" "_") (str/replace "." "/"))
+                                                                        "__init.class"))
+                                   (do (ask client {:op "refresh-clear"} opts)
+                                       (refresh))
+                                   (throw e))
+                                 (throw e))))]
              [(vec (some :reloading responses)) responses])
 
            :else
