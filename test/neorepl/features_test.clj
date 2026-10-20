@@ -673,6 +673,15 @@
                   {:name "nope" :status "not-found"}
                   {:var "trace.me/m" :status "not-traceable"}]
                  (features/trace client ["f" "nope" "m"] {:ns "trace.me"} true))))
+        (testing "but not the functions the server's own tools call, which would take it down"
+          (is (= [{:var "clojure.core/map" :status "refused"}
+                  {:ns "clojure.string" :status "refused"}]
+                 (features/trace client ["map" "clojure.string"] {:ns "trace.me"} true)))
+          (testing "only those: macros aren't traced anyway, and the likes of clojure.core.async can be"
+            (is (= [{:var "clojure.core/when" :status "not-traceable"}
+                    {:name "clojure.core.not-there" :status "not-found"}]
+                   (features/trace client ["when" "clojure.core.not-there"] {:ns "trace.me"} true))))
+          (is (= {:nses [] :vars ["trace.me/f"]} (features/traced client))))
         (testing "only when they aren't traced yet"
           (is (= [{:var "trace.me/f" :status "already-traced"}]
                  (features/trace client ["trace.me/f"] {:ns "user"} true)))

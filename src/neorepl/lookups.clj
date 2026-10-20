@@ -8,9 +8,9 @@
             [neorepl.render :as render]))
 
 (defn- untraceable?
-  "Whether tracing, or untracing, didn't find something to trace."
+  "Whether tracing, or untracing, didn't do what it was asked to."
   [{:keys [results]}]
-  (boolean (some #(#{"not-found" "not-traceable"} (:status %)) results)))
+  (boolean (some #(#{"not-found" "not-traceable" "refused"} (:status %)) results)))
 
 (def all
   "Each lookup takes the :arg it names, unless it has none: :code-arg? says

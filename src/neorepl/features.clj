@@ -1048,17 +1048,41 @@
         (do (nrepl/request client msg opts)
             {:var (var-name the-var) :status (if on? "already-traced" "not-traced")})))))
 
+(def ^:private tooling-nses
+  "The namespaces the server's own tools call, which traced take the server
+  down, tracing calls into tracing."
+  #"^(clojure\.(core|core\.protocols|string|walk|set|java\.io|pprint|main|edn|repl|zip)$|(nrepl|cider|orchard)(\.|$))")
+
+(defn- refused
+  "What trace does for name, resolved in ns, when it's a function in a
+  namespace tooling-nses matches, as the :var or :ns with the :status
+  refused, or nil, for trace-one to have it, as when it's a macro, which
+  tracing leaves alone, or there's no telling."
+  [client name ns opts]
+  (let [{found-ns :ns found-name :name :keys [macro]} (try
+                                                         (info client name {:ns ns} opts)
+                                                         (catch clojure.lang.ExceptionInfo _ nil))
+        ;; A var's, or a namespace's, whose info has only the name.
+        target (or found-ns found-name name)]
+    (when (and (re-find tooling-nses target) (not macro))
+      (if found-ns
+        {:var (str found-ns "/" found-name) :status "refused"}
+        {:ns target :status "refused"}))))
+
 (defn trace
   "Traces the functions names name, vars resolved in ctx's :ns or
   namespaces, when on?, or stops tracing them, with cider-nrepl. Returns
   what happened to each: the :var, qualified, the :ns, or the :name when
   there's nothing called that, and the :status: traced, untraced,
   already-traced or not-traced when it was that way already, not-traceable,
-  as macros are, or not-found."
+  as macros are, refused, for the functions the server's own tools call,
+  or not-found."
   ([client names ctx on?] (trace client names ctx on? {}))
   ([client names {:keys [ns]} on? opts]
    (check-tracer client "toggle-trace-var")
-   (mapv #(trace-one client % ns on? opts) names)))
+   (mapv #(or (when on? (refused client % ns opts))
+              (trace-one client % ns on? opts))
+         names)))
 
 (defn traced
   "What's traced: the :nses, and the :vars outside them, qualified."

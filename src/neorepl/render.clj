@@ -177,6 +177,8 @@
                                "already-traced" (str "Already tracing " what)
                                "not-traced" (str "Wasn't tracing " what)
                                "not-traceable" (str "Can't trace " var ", which is a macro or not a function")
+                               "refused" (str "Won't trace " what ", which the server's own tools call: tracing it"
+                                              " would take the server down")
                                "not-found" (str "No var or namespace called " name))))
     (= 0 untraced) "Nothing was traced"
     untraced (str "Stopped tracing " (counted untraced "function"))
