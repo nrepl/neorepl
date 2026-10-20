@@ -201,8 +201,9 @@ for (const signal of ['SIGHUP', 'SIGTERM', 'SIGQUIT'])
   called port-file in dir, goes too if it's left behind, as when the
   server gets killed. Each line it prints goes to (on-line line), on a
   thread of its own, the last of them before this returns. Throws ::failed
-  when the server can't start, or ends before it's up. Ctrl-C in the
-  terminal doesn't stop it, see launch-command."
+  when the server can't start, or ends before it's up, and ::stopped when
+  that's neorepl exiting, on Ctrl-C, say, which it doesn't stop by itself,
+  see launch-command."
   [dir command port-file on-line f]
   (let [;; Rather than the shell's word for it, exit status 127, or Java's.
         missing #(when-not (on-path? (first command))
@@ -245,9 +246,10 @@ for (const signal of ['SIGHUP', 'SIGTERM', 'SIGQUIT'])
                 (.delete file)))))
      (fn []
        (.start output)
-       (if-let [address @up]
-         (f (assoc address :process process))
-         (let [status (.waitFor process)]
-           (throw (or (when (= 127 status) (missing))
-                      (ex-info (str "The server ended before it started, with exit status " status)
-                               {:type ::failed})))))))))
+       (cond
+         @up (f (assoc @up :process process))
+         (shutdown/exiting?) (throw (ex-info "Stopped the server" {:type ::stopped}))
+         :else (let [status (.waitFor process)]
+                 (throw (or (when (= 127 status) (missing))
+                            (ex-info (str "The server ended before it started, with exit status " status)
+                                     {:type ::failed})))))))))

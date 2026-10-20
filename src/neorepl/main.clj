@@ -1187,6 +1187,8 @@ version."))
                                       (= "text" format) (str "\nRun neorepl " (when spec (str command " ")) "--help for usage.")))
             (::nrepl/no-server ::nrepl/disconnected ::nrepl/timeout) (fail (name type) 3 message)
             (::features/failed ::jack-in/failed ::jack-in/no-project ::server-running) (fail "error" 1 message)
+            ;; Nothing failed: neorepl's exiting, on Ctrl-C, and stopped it.
+            ::jack-in/stopped 130
             (throw e)))))))
 
 (defn -main [& args]
