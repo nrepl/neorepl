@@ -103,11 +103,20 @@
         (throw (EOFError. -1 -1 "Incomplete form")))
       (parsed-line line cursor))))
 
+(defn- cut
+  "text cut to columns, with an ellipsis for what's left out."
+  [^String text columns]
+  (cond
+    (<= (count text) columns) text
+    (< columns 2) ""
+    :else (str (subs text 0 (dec columns)) "…")))
+
 (defn- highlighter
   "Highlights code, and has (eldoc text cursor) say what to show after the
-  cursor. JLine highlights on every redisplay, so eldoc sees every change to
-  the line, whatever made it."
-  [styles raw? eldoc]
+  cursor, cut to what's left of the line after the prompt, the one in the
+  atom prompt. JLine highlights on every redisplay, so eldoc sees every
+  change to the line, whatever made it."
+  [styles raw? prompt eldoc]
   (reify Highlighter
     (highlight [_ reader buffer]
       (if @raw?
@@ -117,7 +126,17 @@
                 (.setTailTip ^LineReader reader
                              ;; JLine only shows it with the cursor at the end.
                              (or (when (= cursor (count buffer))
-                                   (eldoc buffer cursor))
+                                   (let [;; Continuation lines' prompts are as wide as the first's.
+                                         line (subs buffer (inc (or (str/last-index-of buffer "\n") -1)))
+                                         width (.getWidth (.getTerminal ^LineReader reader))
+                                         tip (eldoc buffer cursor)]
+                                     ;; It has to fit after the cursor, on the row the line
+                                     ;; has wrapped onto, and the space JLine puts before
+                                     ;; it, or it wraps onto the rows below. A terminal
+                                     ;; without a width has room for everything.
+                                     (if (and tip (pos? width))
+                                       (cut tip (- width (mod (+ (count @prompt) (count line)) width) 2))
+                                       tip)))
                                  ""))))
             (highlight styles buffer))))
     (setErrorPattern [_ _])
@@ -213,12 +232,13 @@
         (do (.close terminal)
             nil)
         (let [raw? (atom false)
+              prompt (atom "")
               styles (if color? colors {})
               builder (-> (LineReaderBuilder/builder)
                           (.terminal terminal)
                           (.appName "neorepl")
                           (.parser (parser raw? incomplete?))
-                          (.highlighter (highlighter styles raw? (when eldoc? (some-> eldoc safely))))
+                          (.highlighter (highlighter styles raw? prompt (when eldoc? (some-> eldoc safely))))
                           (.variable LineReader/SECONDARY_PROMPT_PATTERN "%P #_=> ")
                           ;; ! is just a character in Clojure code.
                           (.option LineReader$Option/DISABLE_EVENT_EXPANSION true))]
@@ -230,6 +250,7 @@
                 editor {:terminal terminal
                         :reader reader
                         :raw? raw?
+                        :prompt prompt
                         :styles styles
                         :lock (Object.)
                         :suspended? (atom false)
@@ -384,6 +405,7 @@
 (defn- read-with
   "Reads a line with prompt. JLine always ends that line."
   [{:keys [^Terminal terminal ^LineReader reader line lock] :as editor} prompt]
+  (reset! (:prompt editor) prompt)
   ;; Whatever eldoc showed last time is stale.
   (.setTailTip reader "")
   (try
