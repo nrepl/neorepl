@@ -45,6 +45,7 @@
 - [#30](https://github.com/nrepl/neorepl/pull/30): A named session the server lost, as when it restarts, says so: where a new one takes its place, on stderr or in the MCP result, and where it doesn't, like `pst` and `sessions close`.
 - [#30](https://github.com/nrepl/neorepl/pull/30): A timeout while an evaluation from before still runs in the session says so, rather than that interrupting failed.
 - [#30](https://github.com/nrepl/neorepl/pull/30): `eval -f`, `load` and the MCP `load` tool check a file's delimiters first, saying where they don't balance rather than the reader's `REPL:9:1`, and say when a file can't be read.
+- [#30](https://github.com/nrepl/neorepl/pull/30): A namespace that isn't there, a regex that doesn't parse and inspected code that throws get a message saying so, rather than the server's exception.
 
 ## 0.3.0 (2026-10-17)
 

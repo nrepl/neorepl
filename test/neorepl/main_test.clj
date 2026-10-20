@@ -472,10 +472,9 @@
   (testing "nothing matching"
     (is (= {:status 1 :out "" :err "neorepl: Nothing matches ^nope-nope$\n"}
            (run-command "apropos" "^nope-nope$"))))
-  (testing "a regex the server can't make sense of"
-    (let [{:keys [status err]} (run-command "apropos" "(")]
-      (is (= 1 status))
-      (is (str/includes? err "The server couldn't do eval")))))
+  (testing "a regex that doesn't parse, said before it goes out"
+    (is (= {:status 1 :out "" :err "neorepl: Not a regex: Unclosed group, at index 1 of (\n"}
+           (run-command "apropos" "(")))))
 
 (deftest macroexpand-test
   (is (= {:status 0 :out "(if x (do y))\n" :err ""} (run-command "macroexpand" "(when x y)")))

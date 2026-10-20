@@ -230,6 +230,11 @@
     (testing "from a namespace that doesn't refer clojure.core"
       (nrepl/request client {:op "eval" :ns "user" :code "(in-ns 'neorepl.bare)"})
       (is (= "(if x (do y))" (features/expand client "(clojure.core/when x y)" {:ns "neorepl.bare"} false))))
+    (testing "or one that isn't there, which says so"
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"^No namespace called no.such.ns$"
+                            (features/expand client "(when x y)" {:ns "no.such.ns"} false)))
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"^No namespace called no.such.ns$"
+                            (features/info client "map" {:ns "no.such.ns"}))))
     (testing "one form, only ever read, not evaluated"
       (are [text] (= ::features/failed
                      (:type (ex-data (is (thrown? clojure.lang.ExceptionInfo (features/expand client text user false))))))
@@ -540,6 +545,17 @@
             (is (= [{:op "inspect-last-exception" :index 1 :ex-data "true" :page-size 10}] @test-requests)))))
       (finally
         (server/stop-server srv)))))
+
+(deftest trace-summary-test
+  (testing "cider-nrepl's stack trace for inspected code that throws, as eval would say it"
+    (is (= (str "clojure.lang.Compiler$CompilerException: Syntax error compiling at (1:1).\n"
+                "Caused by: java.lang.RuntimeException: Unable to resolve symbol: nosuch in this context\n")
+           (#'features/trace-summary
+            (str "clojure.lang.Compiler$CompilerException: Syntax error compiling at (1:1).\n"
+                 "#:clojure.error{:phase :compile-syntax-check, :line 1, :column 1}\n"
+                 " at clojure.lang.Compiler.analyze (Compiler.java:7397)\n"
+                 "Caused by: java.lang.RuntimeException: Unable to resolve symbol: nosuch in this context\n"
+                 " at clojure.lang.Util.runtimeException (Util.java:221)\n"))))))
 
 (deftest inspect-test
   (with-client [client {:port *port*}]
