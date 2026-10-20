@@ -113,14 +113,25 @@
   (concat (frame-lines stacktrace "  at ")
           (causes-lines more "  at " 1)))
 
+(defn- relative
+  "path relative to dir, when it's in there, or else as it is."
+  [path dir]
+  (let [p (.toPath (java.io.File. ^String path))
+        d (.toPath (java.io.File. ^String dir))]
+    (if (.startsWith p d)
+      (str (.relativize d p))
+      path)))
+
 (defn failure-heading
   "The first line of a test that didn't pass, from a run-tests report, as
-  clojure.test prints it: what it is and where."
-  [{:keys [type ns var file line]}]
-  (str (str/upper-case type)
-       ;; Not in a test, when a fixture fails.
-       (some->> (not-empty (str/join "/" (remove nil? [ns var]))) (str " in "))
-       (when file (str " (" (location-text {:file file :line line}) ")"))))
+  clojure.test prints it: what it is and where, relative to the directory
+  neorepl runs in when it's in there, as the project's files are."
+  ([failure] (failure-heading failure (System/getProperty "user.dir")))
+  ([{:keys [type ns var file line]} dir]
+   (str (str/upper-case type)
+        ;; Not in a test, when a fixture fails.
+        (some->> (not-empty (str/join "/" (remove nil? [ns var]))) (str " in "))
+        (when file (str " (" (location-text {:file (relative file dir) :line line}) ")")))))
 
 (defn failure-text
   "A test that didn't pass, from a run-tests report, as clojure.test prints it."
