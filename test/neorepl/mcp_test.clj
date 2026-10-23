@@ -1,5 +1,5 @@
 (ns neorepl.mcp-test
-  "neorepl mcp over pipes, against the test server."
+  "neorepl mcp against the test server."
   (:require [clojure.java.io :as io]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing use-fixtures]]
@@ -11,7 +11,7 @@
             [neorepl.test-server :as test-server :refer [*port* call-with-temp-dir spit-file with-client]])
   (:import (clojure.lang LineNumberingPushbackReader)
            (java.io BufferedReader InputStreamReader OutputStreamWriter PipedInputStream PipedOutputStream PrintWriter
-                    StringReader StringWriter)
+                    StringReader StringWriter Writer)
            (java.util.concurrent LinkedBlockingQueue TimeUnit)))
 
 (use-fixtures :once (test-server/fixture))
@@ -33,13 +33,17 @@
         port *port*
         to-server (PipedOutputStream.)
         server-in (BufferedReader. (InputStreamReader. (PipedInputStream. to-server) "UTF-8"))
-        server-out (PipedOutputStream.)
-        from-server (BufferedReader. (InputStreamReader. (PipedInputStream. server-out) "UTF-8"))
         received (LinkedBlockingQueue.)
-        reader (future
-                 (doseq [line (line-seq from-server)]
-                   (.put received (json/read-str line))))
-        done (future (mcp/serve server-in (OutputStreamWriter. server-out "UTF-8")
+        ;; Not a pipe, which fails its reader once the thread that last wrote
+        ;; to it is gone, as the server's threads for calls are when it ends.
+        ;; The server writes a message a line, with one write each.
+        server-out (proxy [Writer] []
+                     (write [s]
+                       (doseq [line (str/split-lines s)]
+                         (.put received (json/read-str line))))
+                     (flush [])
+                     (close []))
+        done (future (mcp/serve server-in server-out
                                 {:version main/version :dir (str *dir*) :sessions-file (sessions-file)
                                  :timeout 10 :max-output 1000
                                  :connect #(nrepl/connect {:port (or % port)})}))
@@ -51,9 +55,7 @@
            ([timeout-ms] (.poll received timeout-ms TimeUnit/MILLISECONDS))))
       (finally
         (.close writer)
-        (deref done 10000 :timeout)
-        (.close server-out)
-        (deref reader 1000 nil)))))
+        (deref done 10000 :timeout)))))
 
 (defn- tool-call [id name arguments]
   {:id id :method "tools/call" :params {:name name :arguments arguments}})
