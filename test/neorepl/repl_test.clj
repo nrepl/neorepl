@@ -121,7 +121,9 @@
   (testing "but not when it ends in time"
     (call-with-repl {}
       (fn [type screen]
-        (type "(do (future (Thread/sleep 200) (dotimes [i 6] (print (str \"step\" i \"...\")) (flush) (Thread/sleep 100) (println \"done\"))) nil)\r")
+        ;; Well within the quarter of a second, which a slow machine
+        ;; stretched 100ms to.
+        (type "(do (future (Thread/sleep 200) (dotimes [i 6] (print (str \"step\" i \"...\")) (flush) (Thread/sleep 20) (println \"done\"))) nil)\r")
         (is (= 6 (count (re-seq #"step\d\.\.\.done\n" (screen #"step5\.\.\.done\nuser=> $"))))))))
   (testing "or before what's printed next, if that's sooner"
     (call-with-repl {}
