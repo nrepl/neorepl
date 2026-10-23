@@ -312,6 +312,19 @@
           ;; Uncut, which it is only after the line wraps.
           (is (screen #"\[f\] \[f & colls\]")))
         (type "\u0003"))))
+  (testing "eldoc keeps a special form's shape whole"
+    (call-with-repl {:eldoc? true}
+      (fn [type screen]
+        ;; Ctrl-L, so the line's drawn in one go, rather than as the
+        ;; characters inserted before the tip already there.
+        (type "(if x")
+        (screen #"\(if test then else\?\)")
+        (type "\u000c")
+        (is (screen #"user=> \(if x \(if test then else\?\)$"))
+        (testing "with a dash in the word typed, which JLine puts a space before itself"
+          (type "-y\u000c")
+          (is (screen #"user=> \(if x-y \(if test then else\?\)$")))
+        (type "\u0003"))))
   (testing "eldoc for something that isn't a function"
     (call-with-repl {:eldoc? true}
       (fn [type screen]

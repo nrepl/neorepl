@@ -111,6 +111,23 @@
     (< columns 2) ""
     :else (str (subs text 0 (dec columns)) "…")))
 
+(defn- tail-tip
+  "tip as the tail tip for buffer, with the cursor at its end. After
+  anything but a space, JLine puts a space before a tip that starts with [,
+  as arglists do, and takes any other tip's first word off, for
+  TailTipWidgets' commands, unless the buffer's last dash comes after its
+  last space, where it puts the space before it instead. So a special
+  form's shape gets a space of its own, which keeps it whole."
+  [^String buffer ^String tip]
+  (let [space (str/last-index-of buffer " ")
+        dash (str/last-index-of buffer "-")]
+    (if (or (str/blank? tip)
+            (str/starts-with? tip "[")
+            (str/ends-with? buffer " ")
+            (and space dash (< space dash)))
+      tip
+      (str " " tip))))
+
 (defn- highlighter
   "Highlights code, and has (eldoc text cursor) say what to show after the
   cursor, cut to what's left of the line after the prompt, the one in the
@@ -131,12 +148,13 @@
                                          width (.getWidth (.getTerminal ^LineReader reader))
                                          tip (eldoc buffer cursor)]
                                      ;; It has to fit after the cursor, on the row the line
-                                     ;; has wrapped onto, and the space JLine puts before
-                                     ;; it, or it wraps onto the rows below. A terminal
-                                     ;; without a width has room for everything.
-                                     (if (and tip (pos? width))
-                                       (cut tip (- width (mod (+ (count @prompt) (count line)) width) 2))
-                                       tip)))
+                                     ;; has wrapped onto, and the space before it, or it
+                                     ;; wraps onto the rows below. A terminal without a
+                                     ;; width has room for everything.
+                                     (some->> (if (and tip (pos? width))
+                                                (cut tip (- width (mod (+ (count @prompt) (count line)) width) 2))
+                                                tip)
+                                              (tail-tip buffer))))
                                  ""))))
             (highlight styles buffer))))
     (setErrorPattern [_ _])

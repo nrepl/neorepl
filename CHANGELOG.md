@@ -67,6 +67,7 @@
 - [#33](https://github.com/nrepl/neorepl/pull/33): A server neorepl started that dies says how it ended, and takes the port file it leaves behind with it, rather than leaving it to point at nothing.
 - [#33](https://github.com/nrepl/neorepl/pull/33): Ctrl-C while a server starts no longer has neorepl say the server ended before it started.
 - [#33](https://github.com/nrepl/neorepl/pull/33): The REPL in a project inside another one says when it's using the other project's server, its own having none, which it used to without a word.
+- [#36](https://github.com/nrepl/neorepl/pull/36): Eldoc shows a special form's whole shape, like `(if test then else?)`, which used to lose its first word once the arguments were being typed.
 
 ## 0.3.0 (2026-10-17)
 
