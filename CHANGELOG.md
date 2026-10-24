@@ -2,6 +2,10 @@
 
 ## main (unreleased)
 
+## 0.4.0 (2026-10-24)
+
+The REPL, round two.
+
 ### Features
 
 - [#17](https://github.com/nrepl/neorepl/pull/17): `,trace` and `neorepl trace` trace functions, or whole namespaces, with cider-nrepl, and the REPL shows calls from other threads too.
