@@ -2,6 +2,10 @@
 
 ## main (unreleased)
 
+### Bug fixes
+
+- [#39](https://github.com/nrepl/neorepl/pull/39): `doc` of a Java class or member lays its Javadoc out with its lists, tables and code blocks, and entities like `&#92;` spelled out, where tables used to come out as runs of blank lines.
+
 ## 0.4.0 (2026-10-24)
 
 The REPL, round two.

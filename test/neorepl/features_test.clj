@@ -50,14 +50,49 @@
                ;; As for the macros ClojureScript takes from Clojure.
                "on-a-wrong-line" (transport/respond-to msg :status "done" :ns "user" :name "on-a-wrong-line"
                                                        :file (str (.toURI (io/file @source-file))) :line 5)
-               ;; Java members come without a name, with their Javadoc in fragments.
+               ;; Java members come without a name, with their Javadoc in fragments,
+               ;; as orchard makes them: the text with the whitespace it needs, the
+               ;; HTML with a space between everything in it.
                "Thread/sleep" (transport/respond-to msg :status "done" :class "java.lang.Thread" :member "sleep"
                                                     :arglists-str "[millis]\n[millis nanos]"
                                                     :doc "Causes {@code this}."
                                                     :doc-fragments [{:type "text" :content "Causes the "}
                                                                     {:type "html" :content "<pre>Thread</pre> "}
-                                                                    {:type "text" :content "to sleep, "}
-                                                                    {:type "html" :content "a&nbsp;&lt;b&gt; &amp; c"}])
+                                                                    {:type "text" :content " to sleep.  Unlike "}
+                                                                    {:type "html" :content "<i> wait </i>"}
+                                                                    {:type "text" :content ", it keeps its\n"}
+                                                                    {:type "html" :content "<pre>Map<K, V></pre> "}
+                                                                    {:type "text" :content " "}
+                                                                    {:type "html" :content "&amp;"}
+                                                                    {:type "text" :content " monitors, as\n"}
+                                                                    {:type "html" :content "<pre> \n the docs </pre>"}
+                                                                    {:type "text" :content " say."}])
+               "Character" (transport/respond-to msg :status "done" :class "java.lang.Character" :name "Character"
+                                                 :doc-fragments
+                                                 [{:type "text" :content "Characters:\n"}
+                                                  {:type "html" :content (str "<ul> \n  <li> in <i> words </i> , like\n Fahrvergn &uuml; gen </li> \n"
+                                                                              "  <li> and codes\n  <ul> <li> &#92; u0130 </li> </ul> </li> \n</ul>")}
+                                                  {:type "text" :content "\n\nCases:\n"}
+                                                  {:type "html" :content (str "<table> \n <caption style=\"display:none\"> Hidden </caption> \n"
+                                                                              " <tr> <th> Lower </th> <th> Upper </th> </tr> \n"
+                                                                              " <tr> <td> </td> <td> &#x130; </td> </tr> \n"
+                                                                              " <tr> <td> i\n </td> <td> I </td> </tr> \n</table>")}
+                                                  {:type "text" :content "\nIn code:\n"}
+                                                  {:type "html" :content "<blockquote> <pre> \n     if (a  &lt;  b)\n       up(a);\n  </pre> </blockquote>"}
+                                                  ;; As {@code} has it, inside a pre of its own.
+                                                  {:type "text" :content "\nOr:\n"}
+                                                  {:type "html" :content "<pre>   <pre>\n   Map<K, V> m = new HashMap<>();\n     m.clear();\n </pre>  </pre>"}])
+               ;; As an orchard that joins its HTML without spaces and escapes code has it.
+               "Object" (transport/respond-to msg :status "done" :class "java.lang.Object" :name "Object"
+                                              :doc-fragments
+                                              [{:type "text" :content "As of JDK"}
+                                               {:type "html" :content "&nbsp;"}
+                                               {:type "text" :content "1.1, "}
+                                               {:type "html" :content "<CODE>a &amp; b</CODE><!-- a note -->"}
+                                               {:type "text" :content " are:\n"}
+                                               {:type "html" :content "<ul>\n<li><p>one &#x1F600;</p></li>\n<li><p>and <pre>List&lt;B&gt;</pre> </p></li>\n</ul>"}
+                                               {:type "text" :content "\nLike so:\n"}
+                                               {:type "html" :content "<pre>\n  a();\n  foo(<pre>bar</pre> );\n</pre>"}])
                ;; A namespace's names it twice, unlike a var named like its namespace.
                "clojure.string" (transport/respond-to msg :status "done" :ns "clojure.string" :name "clojure.string"
                                                       :doc "Strings." :line 1)
@@ -166,7 +201,9 @@
 (middleware/set-descriptor! #'wrap-fake-cider {:handles {"info" {} "complete" {} "apropos" {} "ns-list" {} "cider-version" {}
                                                          "macroexpand" {} "analyze-last-stacktrace" {} "test-stacktrace" {}
                                                          "refresh" {} "refresh-clear" {} "test-var-query" {} "retest" {}
-                                                         "inspect-last-exception" {}}})
+                                                         "inspect-last-exception" {}}
+                                          ;; As cider-nrepl says which it is.
+                                          :describe-fn (fn [_] {:cider-version {:version-string "0.63.1"}})})
 
 (def ^:private user
   {:ns "user"})
@@ -451,8 +488,39 @@
               (is (not (some #{copy} (some :sessions (nrepl/request client {:op "ls-sessions"})))))))
           (testing "Java members and classes, with their Javadoc as text"
             (is (= {:ns "java.lang.Thread" :name "sleep" :class "java.lang.Thread" :arglists ["[millis]" "[millis nanos]"]
-                    :doc "Causes the Thread to sleep, a <b> & c"}
+                    :doc "Causes the Thread to sleep. Unlike wait, it keeps its\n  Map<K, V> & monitors, as\n  the docs say."}
                    (features/info client "Thread/sleep" user)))
+            (testing "laid out as a browser would, indented as a docstring is"
+              (is (= (str "Characters:\n\n"
+                          "  - in words, like\n"
+                          "    Fahrvergn\u00fcgen\n"
+                          "  - and codes\n"
+                          "    - \\u0130\n\n"
+                          "  Cases:\n\n"
+                          "  Lower | Upper\n"
+                          "   | \u0130\n"
+                          "  i | I\n\n"
+                          "  In code:\n\n"
+                          "      if (a < b)\n"
+                          "        up(a);\n\n"
+                          "  Or:\n\n"
+                          "      Map<K, V> m = new HashMap<>();\n"
+                          "        m.clear();")
+                     (:doc (features/info client "Character" user))))
+              (testing "but for the spaces around an entity, from a cider-nrepl that doesn't add them"
+                (is (= "0.63.1" (:cider-version client)))
+                (doseq [version ["0.64.0-alpha2" nil]]
+                  (is (str/includes? (:doc (features/info (assoc client :cider-version version) "Character" user))
+                                     "Fahrvergnügen")))
+                (is (str/includes? (:doc (features/info (assoc client :cider-version "0.64.0") "Character" user))
+                                   "Fahrvergn ü gen"))
+                (is (= (str "As of JDK 1.1, a & b are:\n\n"
+                            "  - one 😀\n\n"
+                            "  - and List<B>\n\n"
+                            "  Like so:\n\n"
+                            "      a();\n"
+                            "      foo(bar );")
+                       (:doc (features/info (assoc client :cider-version "0.64.0") "Object" user))))))
             (is (= {:name "java.lang.String" :class "java.lang.String" :doc "Strings."
                     :file "jar:file:/x/src.zip!/java/lang/String.java" :line 142}
                    (features/info client "String" user)))

@@ -22,6 +22,15 @@
 (defn- supports? [client op]
   (contains? (:ops client) op))
 
+(defn- orchard-spaces?
+  "Whether the server's cider-nrepl puts a space either side of each entity
+  in a Javadoc's HTML, as those before 0.64.0 do, 0.64.0 being the one to
+  have orchard#438."
+  [{:keys [cider-version]}]
+  (let [[_ major minor patch prerelease] (some->> cider-version (re-find #"^(\d+)\.(\d+)\.(\d+)(-)?"))]
+    (or (nil? major)
+        (neg? (compare (conj (mapv #(Long/parseLong %) [major minor patch]) (if prerelease 0 1)) [0 64 0 1])))))
+
 (defn- no-namespace
   "The exception saying there's no namespace called ns."
   [ns]
@@ -109,26 +118,179 @@
     (str/starts-with? file "file:") (str (java.io.File. (java.net.URI. file)))
     :else file))
 
-(defn- html-text
-  "Javadoc's HTML as plain text, near enough: without its tags, and with the
-  entities it uses most spelled out."
-  [html]
-  (-> html
-      (str/replace #"<[^>]*>" "")
-      (str/replace "&nbsp;" " ")
-      (str/replace "&lt;" "<")
-      (str/replace "&gt;" ">")
-      (str/replace "&quot;" "\"")
-      (str/replace "&amp;" "&")))
+(def ^:private html-token
+  "A comment, a tag Javadoc's HTML has, with the / of a closing one, its name
+  and its attributes, or the text up to the next one. Only those tags, the
+  one-letter ones only in lower case, so that code like Map<K, V> and List<B>
+  stays text, as orchard has it in its HTML (orchard#438)."
+  #"<!--[\s\S]*?-->|<(/?)((?i:big|blockquote|br|caption|cite|code|dd|dfn|div|dl|dt|em|h[1-6]|hr|img|kbd|li|ol|p|pre|samp|small|span|strong|sub|sup|table|tbody|td|tfoot|th|thead|tr|tt|ul|var)|b|i|u)(\s[^>]*)?/?>|[^<]+|<")
+
+(def ^:private entities
+  "The named entities the JDK's Javadoc uses, all but a few. A no-break space
+  stays one, so that it isn't run together with the whitespace around it."
+  {"nbsp" " " "thinsp" " " "lt" "<" "gt" ">" "amp" "&" "quot" "\"" "apos" "'"
+   "ldquo" "“" "rdquo" "”" "rsquo" "’" "times" "×" "plusmn" "±" "minus" "−" "le" "≤" "ge" "≥"
+   "ne" "≠" "rarr" "→" "hellip" "…" "mdash" "—" "middot" "·" "lfloor" "⌊" "rfloor" "⌋"
+   "pi" "π" "beta" "β" "theta" "θ" "sigma" "σ" "tau" "τ" "trade" "™" "copy" "©"
+   "eacute" "é" "uuml" "ü" "Uuml" "Ü"})
+
+(def ^:private entity
+  "An entity, with its name or number."
+  #"&(#[xX]\p{XDigit}+|#\d+|\w+);")
+
+(def ^:private spaced-entity
+  "An entity with the space orchard puts either side of it in HTML, as of
+  everything it joins there, up to cider-nrepl 0.64.0."
+  (re-pattern (str " ?(" entity ") ?")))
+
+(defn- unescape
+  "text with its entities spelled out, but for those it doesn't know."
+  [text]
+  (str/replace text entity
+               (fn [[match name]]
+                 (if-let [[_ hex decimal] (re-matches #"#[xX](.+)|#(.+)" name)]
+                   (try
+                     (str/join (Character/toChars (if hex (Integer/parseInt hex 16) (Integer/parseInt decimal))))
+                     (catch IllegalArgumentException _ match))
+                   (get entities name match)))))
+
+(defn- line-breaks
+  "out ending in n line breaks, or the ones it has if they're more, without
+  spaces around them. Unless it ends in a list item's dash, which what the
+  item starts with goes after."
+  [out n]
+  (if (re-matches #" *- " (subs out (inc (or (str/last-index-of out "\n") -1))))
+    out
+    (let [text (str/trimr out)]
+      (str text (str/join (repeat (max n (count (filter #{\newline} (subs out (count text))))) "\n"))))))
+
+(defn- without-spaces
+  "out without the spaces it ends with."
+  [out]
+  (loop [n (count out)]
+    (if (and (pos? n) (= \space (nth out (dec n))))
+      (recur (dec n))
+      (subs out 0 n))))
+
+(defn- row-end
+  "out without the bars of the empty cells its table row ends with."
+  [out]
+  (let [out (without-spaces out)]
+    (if (str/ends-with? out " |")
+      (recur (subs out 0 (- (count out) 2)))
+      out)))
+
+(defn- code-block
+  "A pre's code as lines indented by 4, rather than as they were."
+  [code]
+  (let [lines (str/split-lines (str/replace (str/replace code "\t" "    ") #"^\s*\n|\n\s*\z" ""))
+        indent (apply min (map #(count (re-find #"^ *" %)) (remove str/blank? lines)))]
+    (str/join "\n" (for [line lines]
+                     (if (str/blank? line) "" (str "    " (subs line indent)))))))
+
+(defn- element
+  "The tokens up to the one closing tag, the tag they follow, nested ones of
+  its own counted, and the tokens after that."
+  [tag tokens]
+  (loop [[token & more] tokens
+         depth 0
+         content []]
+    (let [[_ close name] token
+          tag? (= tag (some-> name str/lower-case))]
+      (cond
+        (nil? token) [content nil]
+        (and tag? (seq close) (zero? depth)) [content more]
+        :else (recur more (cond (not tag?) depth (seq close) (dec depth) :else (inc depth)) (conj content token))))))
+
+(defn- gap
+  "What whitespace comes to between text: a line break where it has one, so
+  that the source's lines stay, a space otherwise, and nothing for none."
+  [whitespace]
+  (cond
+    (str/includes? whitespace "\n") :newline
+    (seq whitespace) :space))
+
+(defn- wider [gap other]
+  (if (some #{:newline} [gap other]) :newline (or gap other)))
+
+(defn- javadoc-text
+  "The tokens of Javadoc's fragments as plain text, laid out about the way a
+  browser would lay out the HTML: paragraphs, list items and table rows on
+  lines of their own, list items after a dash, a table's cells between bars,
+  code blocks, a pre whose code starts and ends a line, as they are, and the
+  rest's whitespace run together. Text fragments have the whitespace they
+  need, so the HTML's next to them doesn't count."
+  [tokens]
+  (loop [[[token close tag attrs text?] & more] tokens
+         out ""
+         {:keys [lists cell? cells? space] :as state} {:lists 0}]
+    (let [tag (some-> tag str/lower-case)
+          start? (empty? close)
+          indent #(str/join (repeat (* 2 %) " "))]
+      (cond
+        (nil? token) out
+        text? (cond
+                (not (str/blank? token)) (let [text (str/replace token #"(\S) {2,}" "$1 ")]
+                                           (recur more
+                                                  (str out (cond-> text
+                                                             (or (= "" out) (str/ends-with? out "\n")) (str/replace #"^ +" "")))
+                                                  (dissoc state :space)))
+                ;; A <p> orchard took for one that doesn't close.
+                (str/includes? token "\n") (recur more (line-breaks out 2) (dissoc state :space))
+                :else (recur more out (assoc state :space (wider space :space))))
+        (str/starts-with? token "<!--") (recur more out state)
+        (nil? tag) (let [[_ lead text trail] (re-matches #"(?s)(\s*)(.*?)(\s*)" (unescape token))]
+                     (if (= "" text)
+                       (recur more out (assoc state :space (wider space (gap lead))))
+                       (let [text (if cell?
+                                    (str/replace text #"\s+" " ")
+                                    (-> text
+                                        (str/replace #"[^\S\n]+" " ")
+                                        (str/replace #" ?\n\s*" (str "\n" (indent lists)))))
+                             ;; orchard's spaces either side of a tag go before punctuation too.
+                             space (when-not (re-find #"^[.,;:!?)]" text) (wider space (gap lead)))
+                             sep (cond
+                                   (or (= "" out) (str/blank? (subs out (dec (count out))))) ""
+                                   (and (= :newline space) (not cell?)) (str "\n" (indent lists))
+                                   space " "
+                                   :else "")]
+                         (recur more (str out sep text) (assoc state :space (gap trail))))))
+        (and (= "pre" tag) start?) (let [[content after] (element "pre" more)
+                                         code (str/join (for [[token _ tag] content
+                                                              :when (and (nil? tag) (not (str/starts-with? token "<!--")))]
+                                                          token))]
+                                     (if (re-find #"^[ \t]*\n\s*\S[^\n]*\n" code)
+                                       (recur after (str (line-breaks out 2) (code-block (unescape code)) "\n\n")
+                                              (dissoc state :space))
+                                       (recur more out state)))
+        (and (= "caption" tag) start? (re-find #"display:\s*none" (str attrs))) (recur (second (element "caption" more)) out state)
+        (#{"ul" "ol"} tag) (recur more (line-breaks out (if (= lists (if start? 0 1)) 2 1))
+                                  (-> state (update :lists (if start? inc dec)) (dissoc :space)))
+        (and (= "li" tag) start?) (recur more (str (line-breaks out 1) (indent (dec lists)) "- ") (dissoc state :space))
+        (#{"tr" "table"} tag) (recur more (line-breaks (row-end out) (if (= "table" tag) 2 1))
+                                     (assoc state :cell? false :cells? false :space nil))
+        (#{"td" "th"} tag) (recur more (cond-> out (and start? cells?) (-> without-spaces (str " | ")))
+                                  (assoc state :cell? start? :cells? true :space nil))
+        (or (#{"p" "blockquote" "hr"} tag) (re-matches #"h\d" tag)) (recur more (line-breaks out 2) (dissoc state :space))
+        (#{"br" "caption" "div" "dl" "dt" "dd"} tag) (recur more (line-breaks out 1) (dissoc state :space))
+        :else (recur more out state)))))
 
 (defn- fragments-text
-  "cider-nrepl's doc fragments for a Java class or member as text, with the
-  spaces between the HTML and the text around it run together."
-  [fragments]
-  (-> (str/join (for [{:keys [type content]} fragments]
-                  (if (= "html" type) (html-text content) content)))
-      (str/replace #"(\S) {2,}" "$1 ")
-      str/trim))
+  "cider-nrepl's doc fragments for a Java class or member as text, indented
+  past the first line as a docstring is. With spaced?, their HTML has
+  orchard's spaces around its entities, which go."
+  [fragments spaced?]
+  (-> (javadoc-text (mapcat (fn [{:keys [type content]}]
+                              (if (= "html" type)
+                                (re-seq html-token (cond-> content spaced? (str/replace spaced-entity "$1")))
+                                [[content nil nil nil true]]))
+                            fragments))
+      (str/replace #"[ \t]+\n" "\n")
+      (str/replace #"\n{3,}" "\n\n")
+      (str/replace #"^\n+" "")
+      str/trimr
+      (str/replace #"\n(?=.)" "\n  ")
+      (str/replace " " " ")))
 
 (defn- normalize-info
   "info and lookup responses in one shape: :ns, :name, :doc, where it is as
@@ -137,12 +299,12 @@
   member has its :class as the :ns and the :member as the :name, and for a
   class, the :class as the :name, with its Javadoc as text either way. Its
   for a namespace, which names it twice, has no :ns."
-  [{:keys [file arglists-str forms forms-str macro special-form class member doc-fragments column] :as info}]
+  [client {:keys [file arglists-str forms forms-str macro special-form class member doc-fragments column] :as info}]
   (let [file (source-file file)
         info (cond-> info
                member (assoc :ns class :name member)
                (and class (not member)) (assoc :name class)
-               (seq doc-fragments) (assoc :doc (fragments-text doc-fragments))
+               (seq doc-fragments) (assoc :doc (fragments-text doc-fragments (orchard-spaces? client)))
                ;; Unlike a var named like its namespace, it has neither.
                (and (= (:ns info) (:name info)) (nil? column) (str/blank? arglists-str)) (dissoc :ns))]
     (cond-> (select-keys info [:ns :name :doc :class])
@@ -156,7 +318,7 @@
 (defn- evaluated-info
   "info, found by evaluating code, for servers without info or lookup."
   [client sym ctx opts]
-  (some-> (eval-in client (:ns ctx) [] "(when-let [m (meta (resolve (symbol %s)))]
+  (some->> (eval-in client (:ns ctx) [] "(when-let [m (meta (resolve (symbol %s)))]
                                        {:ns (str (:ns m))
                                         :name (str (:name m))
                                         :arglists-str (some->> (:arglists m) (map pr-str) (interpose \"\\n\") (apply str))
@@ -166,7 +328,7 @@
                                         :column (:column m)
                                         :macro (:macro m)})"
                    [sym] opts)
-          normalize-info))
+          (normalize-info client)))
 
 (defn info
   "What the server knows about sym, a symbol's text, as seen from where ctx
@@ -180,14 +342,14 @@
      (let [info (apply merge (ask client (lookup-msg {:op "info" :sym sym} ctx) opts))]
        ;; Java members come without a name.
        (when (or (:name info) (:member info))
-         (normalize-info info)))
+         (normalize-info client info)))
 
      (supports? client "lookup")
      (try
        (let [info (some :info (ask client (lookup-msg {:op "lookup" :sym sym} ctx) opts))]
          ;; Nothing found comes back as an empty list.
          (when (map? info)
-           (normalize-info info)))
+           (normalize-info client info)))
        (catch clojure.lang.ExceptionInfo e
          ;; As it says for a namespace that isn't there, which evaluating
          ;; says.
