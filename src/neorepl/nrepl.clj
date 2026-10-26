@@ -180,9 +180,9 @@
   long the server gets to describe itself, as request takes it.
 
   The client carries what describe reports: the server's :ops, a set of op
-  names, and its :versions, a sorted map of names such as :clojure and
-  :nrepl to version strings. And its :address (host:port or the socket
-  path)."
+  names, its :versions, a sorted map of names such as :clojure and :nrepl
+  to version strings, and the :cider-version, when it has cider-nrepl. And
+  its :address (host:port or the socket path)."
   [{:keys [url on-unclaimed on-error]
     :or {on-unclaimed (fn [_])
          on-error #(binding [*out* *err*] (println "neorepl: response handler failed:" (str %)))}
@@ -194,7 +194,7 @@
                  (open (assoc where :host host) on-unclaimed on-error)
                  (catch Exception e (throw (no-server e))))]
     (try
-      (let [{:keys [ops versions]} (apply merge (request client {:op "describe"} (select-keys opts [:timeout-ms])))]
+      (let [{:keys [ops versions aux]} (apply merge (request client {:op "describe"} (select-keys opts [:timeout-ms])))]
         (assoc client
                :address address
                ;; The transport turns op names into keywords: cider/info into :cider/info.
@@ -205,7 +205,8 @@
                                (for [[k v] versions
                                      :let [version (if (map? v) (:version-string v) v)]
                                      :when version]
-                                 [k version]))))
+                                 [k version]))
+               :cider-version (get-in aux [:cider-version :version-string])))
       (catch Throwable e
         (close client)
         (throw (no-server e))))))
