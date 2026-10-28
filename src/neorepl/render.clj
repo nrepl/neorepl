@@ -189,10 +189,12 @@
     :else "Nothing's traced"))
 
 (defn trace-event-text
-  "A traced call, or its return, the way orchard prints them, a line under
-  the calls it's in: the call, with the arguments, or └─→ and the value."
-  [{:keys [phase name args value depth]}]
+  "A traced call, its return or what it threw, the way orchard prints them,
+  a line under the calls it's in: the call, with the arguments, └─→ and the
+  value, or └─✗ and the exception's class and message."
+  [{:keys [phase name args value error depth]}]
   (str (str/join (repeat depth "│ "))
-       (if (= "call" phase)
-         (str "(" (str/join " " (cons name args)) ")")
+       (case phase
+         "call" (str "(" (str/join " " (cons name args)) ")")
+         "throw" (str "└─✗ " error)
          (str "└─→ " value))))

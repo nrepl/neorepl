@@ -2,6 +2,10 @@
 
 ## main (unreleased)
 
+### Features
+
+- [#40](https://github.com/nrepl/neorepl/pull/40): `,trace` shows a traced call that throws, as `└─✗` and the exception, with an orchard that sends it.
+
 ### Changes
 
 - [#40](https://github.com/nrepl/neorepl/pull/40): The REPL takes its trace subscription without waiting for its `done`, which cider-nrepl is to send when the subscription ends, rather than straight away.
