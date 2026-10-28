@@ -24,12 +24,14 @@
 
 (defn- orchard-spaces?
   "Whether the server's cider-nrepl puts a space either side of each entity
-  in a Javadoc's HTML, as those before 0.64.0 do, 0.64.0 being the one to
-  have orchard#438."
+  in a Javadoc's HTML, as those before 0.64.0-alpha3 do, the first with
+  orchard#438."
   [{:keys [cider-version]}]
-  (let [[_ major minor patch prerelease] (some->> cider-version (re-find #"^(\d+)\.(\d+)\.(\d+)(-)?"))]
+  (let [[_ major minor patch prerelease] (some->> cider-version (re-find #"^(\d+)\.(\d+)\.(\d+)(?:-(\w+))?"))]
     (or (nil? major)
-        (neg? (compare (conj (mapv #(Long/parseLong %) [major minor patch]) (if prerelease 0 1)) [0 64 0 1])))))
+        (let [release (mapv #(Long/parseLong %) [major minor patch])]
+          (or (neg? (compare release [0 64 0]))
+              (and (= [0 64 0] release) (contains? #{"alpha1" "alpha2"} prerelease)))))))
 
 (defn- no-namespace
   "The exception saying there's no namespace called ns."
