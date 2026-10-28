@@ -150,4 +150,6 @@
   (are [event text] (= text (render/trace-event-text event))
     {:phase "call" :name "my.app/f" :depth 0 :args ["1" "\"a\""]} "(my.app/f 1 \"a\")"
     {:phase "call" :name "my.app/g" :depth 2 :args []} "│ │ (my.app/g)"
-    {:phase "return" :name "my.app/g" :depth 1 :value "{:a 1}"} "│ └─→ {:a 1}"))
+    {:phase "return" :name "my.app/g" :depth 1 :value "{:a 1}"} "│ └─→ {:a 1}"
+    {:phase "throw" :name "my.app/g" :depth 1 :error "clojure.lang.ExceptionInfo: Boom"}
+    "│ └─✗ clojure.lang.ExceptionInfo: Boom"))
