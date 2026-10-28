@@ -2,6 +2,10 @@
 
 ## main (unreleased)
 
+### Changes
+
+- [#40](https://github.com/nrepl/neorepl/pull/40): The REPL takes its trace subscription without waiting for its `done`, which cider-nrepl is to send when the subscription ends, rather than straight away.
+
 ### Bug fixes
 
 - [#39](https://github.com/nrepl/neorepl/pull/39): `doc` of a Java class or member lays its Javadoc out with its lists, tables and code blocks, and entities like `&#92;` spelled out, where tables used to come out as runs of blank lines.

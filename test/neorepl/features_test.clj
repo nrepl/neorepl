@@ -780,14 +780,23 @@
         (features/untrace-all client)
         (testing "events instead of printing, while subscribed"
           (features/trace client ["trace.me/f"] {:ns "user"} true)
-          (let [subscription (features/subscribe-traces client)]
-            (is (string? subscription))
-            (is (= "2" (some :value (nrepl/request client {:op "eval" :code "(trace.me/f 1)"}))))
-            (is (= [{:phase "call" :name "trace.me/f" :depth 0 :args ["1"]}
-                    {:phase "return" :name "trace.me/f" :depth 0 :value "2"}]
-                   @events))
-            (features/unsubscribe-traces client subscription)
-            (is (zero? (test-server/trace-subscribers)))))
+          (doseq [done-at-end? [false true]]
+            (testing (if done-at-end? "with the subscription's done when it ends" "with its done straight away")
+              (reset! events [])
+              (reset! test-server/trace-subscriptions-done-at-end? done-at-end?)
+              (try
+                (let [start (System/nanoTime)
+                      subscription (features/subscribe-traces client)]
+                  (is (string? subscription))
+                  (is (< (- (System/nanoTime) start) 5e9) "without waiting for its done")
+                  (is (= "2" (some :value (nrepl/request client {:op "eval" :code "(trace.me/f 1)"}))))
+                  (is (= [{:phase "call" :name "trace.me/f" :depth 0 :args ["1"]}
+                          {:phase "return" :name "trace.me/f" :depth 0 :value "2"}]
+                         @events))
+                  (features/unsubscribe-traces client subscription)
+                  (is (zero? (test-server/trace-subscribers))))
+                (finally
+                  (reset! test-server/trace-subscriptions-done-at-end? false))))))
         (finally
           (features/untrace-all client))))))
 

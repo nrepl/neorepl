@@ -178,6 +178,12 @@
   "Whether wrap-fake-tracer answers trace-subscribe with an error."
   (atom false))
 
+(def trace-subscriptions-done-at-end?
+  "Whether wrap-fake-tracer sends a trace-subscribe's done when the
+  subscription ends, as cider-nrepl should, rather than with its answer, as it
+  does."
+  (atom false))
+
 (defn- traced-call
   "Calls f, the var called name traces, with args, saying so the way
   cider-nrepl does: printing the call and its value, unless there are
@@ -249,10 +255,14 @@
         (transport/respond-to msg :status ["done" "trace-subscribe-error"])
         (let [id (str (java.util.UUID/randomUUID))]
           (swap! trace-subscriptions assoc id msg)
-          (transport/respond-to msg "cider/trace-subscribe" id :status "done")))
+          (if @trace-subscriptions-done-at-end?
+            (transport/respond-to msg "cider/trace-subscribe" id)
+            (transport/respond-to msg "cider/trace-subscribe" id :status "done"))))
       "cider/trace-unsubscribe"
-      (do (swap! trace-subscriptions dissoc subscription)
-          (transport/respond-to msg "cider/trace-unsubscribe" subscription :status "done"))
+      (let [[old] (swap-vals! trace-subscriptions dissoc subscription)]
+        (when-let [subscribed (and @trace-subscriptions-done-at-end? (get old subscription))]
+          (transport/respond-to subscribed :status "done"))
+        (transport/respond-to msg "cider/trace-unsubscribe" subscription :status "done"))
       (handler msg))))
 
 (def trace-ops

@@ -1271,13 +1271,21 @@
   "Has the server send client trace events instead of printing what traced
   functions do, when it has cider-nrepl 0.60 or later, and returns the
   subscription, for unsubscribe-traces, or nil when it can't. The events
-  are responses with a :cider/trace-event, which come after the
-  subscription's done, so they go where the client's unclaimed responses
-  go. Printing what traced functions do is for the whole server, and stays
-  off until the last subscription ends."
+  are responses with a :cider/trace-event, which go where the client's
+  unclaimed responses go, whether they come after the subscription's done,
+  as cider-nrepl sends them, or before, as it should. Printing what traced
+  functions do is for the whole server, and stays off until the last
+  subscription ends."
   [client]
   (when (supports? client "cider/trace-subscribe")
-    (some :cider/trace-subscribe (ask client {:op "cider/trace-subscribe"} {}))))
+    (let [subscription (promise)]
+      (nrepl/send! client {:op "cider/trace-subscribe"}
+                   #(if-let [id (:cider/trace-subscribe %)]
+                      (deliver subscription id)
+                      (if (nrepl/done? %)
+                        (deliver subscription nil)
+                        (nrepl/unclaimed client %))))
+      (deref subscription 10000 nil))))
 
 (defn unsubscribe-traces [client subscription]
   (ask client {:op "cider/trace-unsubscribe" :subscription subscription} {}))
