@@ -509,11 +509,12 @@
                      (:doc (features/info client "Character" user))))
               (testing "but for the spaces around an entity, from a cider-nrepl that doesn't add them"
                 (is (= "0.63.1" (:cider-version client)))
-                (doseq [version ["0.64.0-alpha2" nil]]
+                (doseq [version ["0.62.2" "0.64.0-alpha1" "0.64.0-alpha2" nil]]
                   (is (str/includes? (:doc (features/info (assoc client :cider-version version) "Character" user))
                                      "Fahrvergnügen")))
-                (is (str/includes? (:doc (features/info (assoc client :cider-version "0.64.0") "Character" user))
-                                   "Fahrvergn ü gen"))
+                (doseq [version ["0.64.0-alpha3" "0.64.0" "0.65.0-SNAPSHOT"]]
+                  (is (str/includes? (:doc (features/info (assoc client :cider-version version) "Character" user))
+                                     "Fahrvergn ü gen")))
                 (is (= (str "As of JDK 1.1, a & b are:\n\n"
                             "  - one 😀\n\n"
                             "  - and List<B>\n\n"
