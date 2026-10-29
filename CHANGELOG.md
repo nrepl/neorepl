@@ -8,6 +8,7 @@
 
 ### Changes
 
+- [#41](https://github.com/nrepl/neorepl/pull/41): Jack-in brings cider-nrepl 0.64.0, with which `neorepl test` shows what the tests print, and ClojureScript tests run on shadow-cljs.
 - [#40](https://github.com/nrepl/neorepl/pull/40): The REPL takes its trace subscription without waiting for its `done`, which cider-nrepl is to send when the subscription ends, rather than straight away.
 
 ### Bug fixes
