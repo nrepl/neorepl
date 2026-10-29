@@ -18,7 +18,7 @@
   only gets cider-nrepl, since it comes with the nREPL it's made for and
   runs ClojureScript REPLs itself."
   {:nrepl "1.8.0"
-   :cider-nrepl "0.63.1"
+   :cider-nrepl "0.64.0"
    :piggieback "0.8.0"})
 
 (defn- builds-with-project?
