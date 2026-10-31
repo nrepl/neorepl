@@ -2,6 +2,10 @@
 
 ## main (unreleased)
 
+### Features
+
+- [#45](https://github.com/nrepl/neorepl/pull/45): The REPL shows the delimiter that pairs with the one at the cursor, and a closer that pairs with nothing, or with the wrong kind, in red, rather than JLine moving the cursor to the opener for half a second.
+
 ### Changes
 
 - [#45](https://github.com/nrepl/neorepl/pull/45): The REPL shows more of what reads like a special form as one: the forms macros expand into, like `let*`, and the defining, binding and threading macros, `deftest`, `->` and `with-open` among them.

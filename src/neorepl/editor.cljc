@@ -22,8 +22,9 @@
   (.foreground AttributedStyle/DEFAULT (int color)))
 
 (def ^:private colors
-  "Styles for lexer token types, for :err output and :notice messages, and
-  for the :headings of full-screen views."
+  "Styles for lexer token types, for :err output and :notice messages, for
+  the delimiter that pairs with the one at the cursor, its :match, and for
+  the :headings of full-screen views."
   (let [faint (.faint AttributedStyle/DEFAULT)
         green (fg AttributedStyle/GREEN)
         magenta (fg AttributedStyle/MAGENTA)
@@ -41,6 +42,7 @@
      :reader-macro yellow
      :macro-char yellow
      :err (fg AttributedStyle/RED)
+     :match (.inverse AttributedStyle/DEFAULT)
      :notice faint
      :heading (.bold AttributedStyle/DEFAULT)}))
 
@@ -61,20 +63,39 @@
 (defn- style ^AttributedStyle [styles k]
   (styles k AttributedStyle/DEFAULT))
 
-(defn- highlight
-  "code as an AttributedString, with its tokens styled."
-  ^AttributedString [styles ^String code]
+(defn- styled
+  "The lexed code as an AttributedString, with its tokens styled, and the
+  ones marks has, by where they start, in the style it says."
+  ^AttributedString [styles {:keys [^String text tokens]} marks]
   (let [sb (AttributedStringBuilder.)
         end (reduce (fn [pos {:keys [type start end]}]
-                      (let [text (subs code start end)]
-                        (.append sb (subs code pos start))
-                        (.styled sb (style styles (if (and (= :symbol type) (specials text)) :special type))
-                                 text)
+                      (let [token (subs text start end)]
+                        (.append sb (subs text pos start))
+                        (.styled sb (style styles (or (marks start)
+                                                      (if (and (= :symbol type) (specials token)) :special type)))
+                                 token)
                         end))
                     0
-                    (lexer/tokenize code))]
-    (.append sb (subs code end))
+                    tokens)]
+    (.append sb (subs text end))
     (.toAttributedString sb)))
+
+(defn- highlight
+  "code as an AttributedString, with its tokens styled."
+  ^AttributedString [styles code]
+  (styled styles (lexer/lex code) {}))
+
+(defn- delimiter-marks
+  "The marks for styled that show what the delimiter at the cursor pairs
+  with, as lexer/delimiter-match has it: its :match, or an :err for a
+  closer that pairs with nothing or with the wrong kind. An opener that
+  isn't closed is just unfinished."
+  [{:keys [at match mismatched?]}]
+  (cond
+    mismatched? {(:start at) :err (:start match) :err}
+    match {(:start match) :match}
+    (= :close (:type at)) {(:start at) :err}
+    :else {}))
 
 (defn- parsed-line
   "A ParsedLine for line whose word, the one completion completes, is what's
@@ -134,34 +155,40 @@
       (str " " tip))))
 
 (defn- highlighter
-  "Highlights code, and has (eldoc text cursor) say what to show after the
-  cursor, cut to what's left of the line after the prompt, the one in the
-  atom prompt. JLine highlights on every redisplay, so eldoc sees every
-  change to the line, whatever made it."
+  "Highlights code, with what the delimiter at the cursor pairs with, and
+  has (eldoc text cursor) say what to show after the cursor, cut to what's
+  left of the line after the prompt, the one in the atom prompt. JLine
+  highlights on every redisplay, so eldoc sees every change to the line,
+  whatever made it, and the pair follows the cursor. JLine's last redisplay
+  of the line, once it's done reading it, goes without the pair, so it
+  doesn't stay behind in the scrollback."
   [styles raw? prompt eldoc]
   (reify Highlighter
     (highlight [_ reader buffer]
       (if @raw?
         (AttributedString. buffer)
-        (do (when eldoc
-              (let [cursor (.cursor (.getBuffer ^LineReader reader))]
-                (.setTailTip ^LineReader reader
-                             ;; JLine only shows it with the cursor at the end.
-                             (or (when (= cursor (count buffer))
-                                   (let [;; Continuation lines' prompts are as wide as the first's.
-                                         line (subs buffer (inc (or (str/last-index-of buffer "\n") -1)))
-                                         width (.getWidth (.getTerminal ^LineReader reader))
-                                         tip (eldoc buffer cursor)]
-                                     ;; It has to fit after the cursor, on the row the line
-                                     ;; has wrapped onto, and the space before it, or it
-                                     ;; wraps onto the rows below. A terminal without a
-                                     ;; width has room for everything.
-                                     (some->> (if (and tip (pos? width))
-                                                (cut tip (- width (mod (+ (count @prompt) (count line)) width) 2))
-                                                tip)
-                                              (tail-tip buffer))))
-                                 ""))))
-            (highlight styles buffer))))
+        (let [cursor (.cursor (.getBuffer ^LineReader reader))
+              lexed (lexer/lex buffer)]
+          (when eldoc
+            (.setTailTip ^LineReader reader
+                         ;; JLine only shows it with the cursor at the end.
+                         (or (when (= cursor (count buffer))
+                               (let [;; Continuation lines' prompts are as wide as the first's.
+                                     line (subs buffer (inc (or (str/last-index-of buffer "\n") -1)))
+                                     width (.getWidth (.getTerminal ^LineReader reader))
+                                     tip (eldoc buffer cursor)]
+                                 ;; It has to fit after the cursor, on the row the line
+                                 ;; has wrapped onto, and the space before it, or it
+                                 ;; wraps onto the rows below. A terminal without a
+                                 ;; width has room for everything.
+                                 (some->> (if (and tip (pos? width))
+                                            (cut tip (- width (mod (+ (count @prompt) (count line)) width) 2))
+                                            tip)
+                                          (tail-tip buffer))))
+                             "")))
+          (styled styles lexed (if (.isReading ^LineReader reader)
+                                 (delimiter-marks (lexer/delimiter-match lexed cursor))
+                                 {})))))
     (setErrorPattern [_ _])
     (setErrorIndex [_ _])))
 
@@ -265,6 +292,9 @@
                           (.parser (parser raw? incomplete?))
                           (.highlighter (highlighter styles raw? prompt (when eldoc? (some-> eldoc safely))))
                           (.variable LineReader/SECONDARY_PROMPT_PATTERN "%P #_=> ")
+                          ;; The highlighter shows the pair, rather than JLine
+                          ;; moving the cursor to it after a closer is typed.
+                          (.variable LineReader/BLINK_MATCHING_PAREN 0)
                           ;; ! is just a character in Clojure code.
                           (.option LineReader$Option/DISABLE_EVENT_EXPANSION true))]
           (when-not color?
