@@ -24,7 +24,8 @@ From a checkout, `bbin install .` installs that instead.
 current directory or one of its parents (`neorepl ports` lists the ones it
 can see) and starts a REPL. Enter evaluates the input once its forms are
 complete, Ctrl-C interrupts an evaluation and Ctrl-D exits. Code gets
-highlighted, values get pretty printed and the history is kept per project.
+highlighted, along with the delimiter that pairs with the one at the cursor,
+values get pretty printed and the history is kept per project.
 TAB completes, the arglists of the function you're calling show up after
 the cursor, C-x C-d shows the documentation of what's at the cursor, C-x
 C-s its source and C-x C-a the vars whose names have it in them.
@@ -36,6 +37,17 @@ isn't yet, `,sessions` to step into another session, like an agent's, and
 `,help` for the rest.
 Without a terminal, say in a pipe or Emacs' `M-x shell`, it works like
 `clojure.main`'s REPL instead.
+
+Input longer than 1000 characters, like a big pasted form, shows up plain,
+with no arglists, no matching delimiter and no undo, since JLine, the line
+editor underneath, stops doing all that past its `features-max-buffer-size`.
+The `org.jline.reader.props.features-max-buffer-size` system property
+raises it, and `BABASHKA_PRELOADS` can set that for the babashka `neorepl`
+runs on:
+
+```shell
+export BABASHKA_PRELOADS='(System/setProperty "org.jline.reader.props.features-max-buffer-size" "10000")'
+```
 
 With no server to connect to, `neorepl` starts one for the project, the way
 CIDER's jack-in does, and stops it when the REPL ends. The project's build
