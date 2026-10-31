@@ -40,7 +40,9 @@ bb test                          # on babashka
 bb test neorepl.repl-test        # just these namespaces
 bb test:jvm                      # on the JVM, Clojure 1.12
 bb test:jvm :1.10                # or :1.11
-clj-kondo --lint src test
+bb test:integration              # against real servers, on babashka
+bb test:integration:jvm          # and on the JVM
+clj-kondo --lint src test integration
 ```
 
 Run both runtimes before pushing. CI runs the JVM on Java 17, 21 and 25 with
@@ -88,6 +90,15 @@ The fakes behave like today's cider-nrepl, which says nothing about the next
 one, so anything that depends on a server gets checked against real ones:
 nREPL with cider-nrepl (`neorepl server` jacks one in), `bb nrepl-server`,
 shadow-cljs, and piggieback with Node. Write down the versions in PLAN.md.
+
+The integration tests in `integration/` do that for the first two, each in a
+project of its own: nREPL with the cider-nrepl jack-in brings, and the server
+of the `bb` on the PATH, which has to be 1.13.227 or newer, as older ones
+never answer for a test that throws
+([babashka#2201](https://github.com/babashka/babashka/issues/2201)). They
+need the Clojure CLI. A feature that depends on what a server answers gets a
+test there as well as against the fakes.
+
 Before a release, run [proof](https://github.com/nrepl/proof) against
 neorepl: `proof proxy` between neorepl and a server, and the `proof serve`
 scenarios.
