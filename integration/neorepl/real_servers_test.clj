@@ -146,7 +146,8 @@
        (is (str/includes? out "error: clojure.lang.ExceptionInfo: boom {:x 1}"))
        (is (str/ends-with? out "Ran 3 tests containing 3 assertions.\n1 failure, 1 error.\n"))
        ;; bb sends what tests print under the session's previous message,
-       ;; to a connection that's gone, unless the session's new.
+       ;; to a connection that's gone, unless the session's new
+       ;; (babashka#2265).
        (when (= :cider server)
          (is (str/includes? out "printed by failing-test\n"))))
      (testing "rerunning what didn't pass"
