@@ -45,13 +45,18 @@
      :heading (.bold AttributedStyle/DEFAULT)}))
 
 (def ^:private specials
-  "Symbols highlighted as :special: the special forms and the defining and
-  binding macros that read like them."
+  "Symbols highlighted as :special: the special forms, the ones macros
+  expand into among them, and the defining, binding and threading macros
+  that read like them."
   #{"def" "defn" "defn-" "defmacro" "defmulti" "defmethod" "defprotocol" "defrecord"
-    "deftype" "definterface" "defonce" "fn" "fn*" "let" "letfn" "loop" "recur" "if"
-    "if-let" "if-some" "if-not" "when" "when-let" "when-some" "when-not" "do" "cond"
-    "condp" "case" "ns" "quote" "try" "catch" "finally" "throw" "var" "new" "set!"
-    "binding" "doseq" "dotimes" "for"})
+    "deftype" "definterface" "defonce" "defstruct" "declare" "deftest" "testing"
+    "fn" "fn*" "let" "let*" "letfn" "letfn*" "loop" "loop*" "recur" "if" "if-let"
+    "if-some" "if-not" "when" "when-let" "when-some" "when-not" "when-first" "while"
+    "do" "cond" "condp" "case" "case*" "ns" "quote" "try" "catch" "finally" "throw"
+    "var" "new" "set!" "monitor-enter" "monitor-exit" "locking" "binding" "doseq"
+    "dotimes" "for" "doto" "with-open" "with-redefs" "with-local-vars" "reify"
+    "reify*" "deftype*" "proxy" "extend" "extend-type" "extend-protocol" "->" "->>"
+    "as->" "cond->" "cond->>" "some->" "some->>"})
 
 (defn- style ^AttributedStyle [styles k]
   (styles k AttributedStyle/DEFAULT))
