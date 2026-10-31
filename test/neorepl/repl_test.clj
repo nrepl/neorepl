@@ -89,6 +89,12 @@
         (is (screen #"#_=> $"))
         (type "2)\r")
         (is (screen #"(?m)^3\nuser=> $")))))
+  (testing "special forms in bold, the macros that read like them too"
+    (let [{:keys [out]} (call-with-repl {}
+                          (fn [type screen]
+                            (type "(-> 1 inc)\r")
+                            (screen #"(?m)^2\nuser=> $")))]
+      (is (str/includes? out "\u001b[34;1m->"))))
   (testing "the prompt follows the namespace"
     (call-with-repl {}
       (fn [type screen]

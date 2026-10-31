@@ -2,6 +2,10 @@
 
 ## main (unreleased)
 
+### Changes
+
+- [#45](https://github.com/nrepl/neorepl/pull/45): The REPL shows more of what reads like a special form as one: the forms macros expand into, like `let*`, and the defining, binding and threading macros, `deftest`, `->` and `with-open` among them.
+
 ## 0.4.1 (2026-10-31)
 
 Catching up with cider-nrepl 0.64.
