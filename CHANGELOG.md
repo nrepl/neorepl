@@ -2,6 +2,10 @@
 
 ## main (unreleased)
 
+## 0.4.1 (2026-10-31)
+
+Catching up with cider-nrepl 0.64.
+
 ### Features
 
 - [#40](https://github.com/nrepl/neorepl/pull/40): `,trace` shows a traced call that throws, as `└─✗` and the exception, with an orchard that sends it.
