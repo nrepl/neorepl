@@ -10,4 +10,12 @@
 
   test:jvm {:doc "Run the tests on the JVM. Pass :1.10, :1.11 or :1.12 to pick a Clojure version."
             :requires ([clojure.string :as str])
-            :task (clojure (str "-M:test" (str/join *command-line-args*)))}}}
+            :task (clojure (str "-M:test" (str/join *command-line-args*)))}
+
+  test:integration {:doc "Run the integration tests, against real servers, on babashka. They need the Clojure CLI."
+                    :extra-paths ["test" "integration"]
+                    :requires ([neorepl.test-runner :as runner])
+                    :task (apply runner/-main "--dir" "integration" *command-line-args*)}
+
+  test:integration:jvm {:doc "Run the integration tests on the JVM."
+                        :task (clojure "-M:test:integration")}}}

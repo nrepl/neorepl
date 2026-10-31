@@ -3,12 +3,13 @@
   (:require [clojure.edn :as edn]
             [clojure.java.io :as io]
             [clojure.string :as str]
+            [neorepl.main :as main]
             [neorepl.nrepl :as nrepl]
             [nrepl.middleware :as middleware]
             [nrepl.middleware.print :as print]
             [nrepl.server :as server]
             [nrepl.transport :as transport])
-  (:import (java.io File)
+  (:import (java.io File StringWriter)
            (java.net ServerSocket)
            (java.nio.file Files)
            (java.nio.file.attribute FileAttribute)))
@@ -302,6 +303,19 @@
   "s with \n for the \r\n that println ends lines with on Windows."
   [s]
   (some-> s (str/replace "\r\n" "\n")))
+
+(defn run-in
+  "Runs neorepl with args, and ctx for main/run's, with stdin as standard
+  input. Returns the exit :status and what went to :out and :err, their
+  lines ending in \n."
+  [ctx stdin & args]
+  (let [err (StringWriter.)
+        status (atom nil)
+        out (with-out-str
+              (binding [*err* err]
+                (with-in-str stdin
+                  (reset! status (main/run args ctx)))))]
+    {:status @status :out (lf out) :err (lf (str err))}))
 
 (defn clojure-command
   "The command that runs Clojure the way the tests run, on babashka or the

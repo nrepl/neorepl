@@ -7,6 +7,9 @@
          ;; JLine loads native code, which Java 22+ warns about without this.
          :jvm-opts ["--enable-native-access=ALL-UNNAMED"]
          :main-opts ["-m" "neorepl.test-runner"]}
+  ;; With :test, whose :main-opts it takes over.
+  :integration {:extra-paths ["integration"]
+                :main-opts ["-m" "neorepl.test-runner" "--dir" "integration"]}
   :1.10 {:override-deps {org.clojure/clojure {:mvn/version "1.10.3"}}}
   :1.11 {:override-deps {org.clojure/clojure {:mvn/version "1.11.4"}}}
   :1.12 {:override-deps {org.clojure/clojure {:mvn/version "1.12.5"}}}}}

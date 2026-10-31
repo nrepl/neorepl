@@ -55,6 +55,36 @@ jobs:
           bb: ${{ matrix.bb }}
       - run: bb test
 
+  # Against real servers: nREPL with cider-nrepl, which takes the Clojure CLI,
+  # and babashka's.
+  integration:
+    name: Integration (bb ${{ matrix.task }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        task: ['test:integration', 'test:integration:jvm']
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: DeLaGuardo/setup-clojure@13.7.0
+        with:
+          cli: latest
+          bb: latest
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ~/.m2/repository
+            ~/.gitlibs
+            ~/.deps.clj
+          key: integration-${{ runner.os }}-${{ hashFiles('deps.edn', 'src/neorepl/jack_in.clj') }}
+          restore-keys: integration-${{ runner.os }}-
+      - run: bb ${{ matrix.task }}
+
   lint:
     runs-on: ubuntu-latest
     steps:
@@ -62,4 +92,4 @@ jobs:
       - uses: DeLaGuardo/setup-clojure@13.7.0
         with:
           clj-kondo: latest
-      - run: clj-kondo --lint src test
+      - run: clj-kondo --lint src test integration

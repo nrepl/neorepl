@@ -11,8 +11,7 @@
             [neorepl.nrepl :as nrepl]
             [neorepl.sessions :as sessions]
             [neorepl.test-server :as test-server :refer [*port* call-with-temp-dir lf spit-file with-client]])
-  (:import (java.io StringWriter)
-           (java.util.concurrent TimeUnit)))
+  (:import (java.util.concurrent TimeUnit)))
 
 (def ^:dynamic *dir*
   "A directory without port files, holding the session cache as if it was
@@ -29,16 +28,10 @@
   (fn [f] (call-with-temp-dir #(binding [*dir* %] (f)))))
 
 (defn- run-in
-  "Runs neorepl with args in dir, with stdin as standard input. Returns the
-  exit :status and what went to :out and :err, their lines ending in \n."
+  "Runs neorepl with args in dir, with stdin as standard input, as
+  test-server/run-in does."
   [dir stdin & args]
-  (let [err (StringWriter.)
-        status (atom nil)
-        out (with-out-str
-              (binding [*err* err]
-                (with-in-str stdin
-                  (reset! status (main/run args {:dir dir :sessions-file (sessions-file)})))))]
-    {:status @status :out (lf out) :err (lf (str err))}))
+  (apply test-server/run-in {:dir dir :sessions-file (sessions-file)} stdin args))
 
 (defn- run-command
   "Runs a neorepl command against the test server with args."
