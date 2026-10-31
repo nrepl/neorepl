@@ -274,6 +274,32 @@
         (when (= :symbol (:type head))
           head)))))
 
+(defn delimiter-match
+  "What the delimiter at the cursor in the lexed text pairs with, taking the
+  closing one right before the cursor, or else the opening one the cursor's
+  on: a map with that delimiter's token :at, the :match it pairs with, and
+  :mismatched? when the two are of different kinds, as in (]. Without
+  :match when it pairs with nothing, and nil when there's no delimiter at
+  the cursor."
+  [{s :text :keys [tokens]} cursor]
+  (let [delimiters (filterv #(#{:open :close} (:type %)) tokens)
+        at (or (some #(when (and (= :close (:type %)) (= cursor (:end %))) %) delimiters)
+               (some #(when (and (= :open (:type %)) (<= (:start %) cursor) (< cursor (:end %))) %) delimiters))
+        match (when at
+                (loop [[{:keys [type] :as delimiter} & more] delimiters
+                       opens ()]
+                  (when delimiter
+                    (cond
+                      (= :open type) (recur more (conj opens delimiter))
+                      (= at delimiter) (first opens)
+                      (= at (first opens)) delimiter
+                      :else (recur more (rest opens))))))]
+    (when at
+      (cond-> {:at at}
+        match (assoc :match match
+                     :mismatched? (let [[open close] (if (= :open (:type at)) [at match] [match at])]
+                                    (not= (closer s open) (text s close))))))))
+
 (defn delimiter-error
   "The first delimiter in the lexed text that doesn't balance, or nil when
   they all do. A map with the kind of :error and the tokens involved:

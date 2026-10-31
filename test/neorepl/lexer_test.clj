@@ -201,6 +201,33 @@
     "(ma" 3 "ma"
     "(let [x 1) (" 12 nil))
 
+(deftest delimiter-match-test
+  (let [match (fn [s cursor]
+                (when-let [{:keys [at match mismatched?]} (lexer/delimiter-match (lexer/lex s) cursor)]
+                  [(:start at) (:start match) (boolean mismatched?)]))]
+    (testing "a closer right before the cursor, or an opener under it"
+      (are [s cursor expected] (= expected (match s cursor))
+        "(+ 1 2)" 7 [6 0 false]
+        "(+ 1 2)" 0 [0 6 false]
+        "(+ 1 2)" 3 nil
+        "(a [b] c)" 6 [5 3 false]
+        "(a [b] c)" 3 [3 5 false]
+        "#{1 2}" 0 [0 5 false]
+        "#{1 2}" 1 [0 5 false]
+        "#(inc %)" 8 [7 0 false]))
+    (testing "the closer before the cursor over the opener under it"
+      (is (= [4 0 false] (match "(a b)(c)" 5))))
+    (testing "past the delimiters in strings, chars and comments"
+      (are [s cursor expected] (= expected (match s cursor))
+        "(str \"(\" x)" 11 [10 0 false]
+        "(str \\( x)" 10 [9 0 false]
+        "(a ; (\n b)" 10 [9 0 false]))
+    (testing "the wrong kind"
+      (is (= [2 0 true] (match "(a]" 3))))
+    (testing "nothing to pair with"
+      (is (= [3 nil false] (match "(a))" 4)))
+      (is (= [0 nil false] (match "(a (b)" 0))))))
+
 (deftest delimiter-error-test
   (letfn [(error [s]
             ;; With the tokens' text in place of the tokens.

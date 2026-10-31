@@ -11,6 +11,7 @@
             [neorepl.sessions :as sessions]
             [neorepl.test-server :as test-server :refer [*port* call-with-temp-dir lf with-client]])
   (:import (java.io ByteArrayInputStream ByteArrayOutputStream PipedInputStream PipedOutputStream)
+           (java.util.regex Pattern)
            (java.util.zip ZipEntry ZipOutputStream)))
 
 (use-fixtures :once (test-server/fixture))
@@ -36,7 +37,9 @@
   contents. The named sessions are in opts' :sessions-file, if it has one.
 
   Eldoc is off unless opts say :eldoc? true, since what it shows after the
-  cursor gets in the way of reading the screen."
+  cursor gets in the way of reading the screen, and so are colors unless
+  they say :color? true, since showing the delimiter that pairs with the
+  one at the cursor redraws the line."
   [opts f]
   (call-with-temp-dir
    (fn [dir]
@@ -47,7 +50,7 @@
                                     {:dir dir
                                      :sessions-file (or (:sessions-file opts) (io/file dir "sessions.edn"))
                                      :history-dir (io/file dir "history")
-                                     :terminal (merge {:input in :output out :width 80 :eldoc? false}
+                                     :terminal (merge {:input in :output out :width 80 :eldoc? false :color? false}
                                                       (dissoc opts :sessions-file))}))
              type (fn [s]
                     (.write keys (.getBytes ^String s "UTF-8"))
@@ -72,7 +75,7 @@
 (deftest repl-test
   (testing "evaluating"
     (let [{:keys [out history]}
-          (call-with-repl {}
+          (call-with-repl {:color? true}
             (fn [type screen]
               (type "(+ 40 2)\r")
               (is (screen #"(?m)^42\nuser=> $"))))]
@@ -90,7 +93,7 @@
         (type "2)\r")
         (is (screen #"(?m)^3\nuser=> $")))))
   (testing "special forms in bold, the macros that read like them too"
-    (let [{:keys [out]} (call-with-repl {}
+    (let [{:keys [out]} (call-with-repl {:color? true}
                           (fn [type screen]
                             (type "(-> 1 inc)\r")
                             (screen #"(?m)^2\nuser=> $")))]
@@ -106,6 +109,47 @@
                             (type "42\r")
                             (screen #"(?m)^42\nuser=> $")))]
       (is (not (str/includes? out "\u001b[35m"))))))
+
+(deftest delimiter-pair-test
+  (let [typed (fn [line end]
+                ;; What the REPL wrote, in color, as line was typed and then
+                ;; end, Enter or Ctrl-C.
+                (:out (call-with-repl {:color? true}
+                        (fn [type screen]
+                          (type line)
+                          ;; JLine redraws from the opener the pair
+                          ;; changes, so the line's end is all to go by.
+                          (screen (re-pattern (str (Pattern/quote (subs line (dec (count line)))) "$")))
+                          (type end)
+                          (screen #"\nuser=> $")))))
+        submitted #(typed % "\r")
+        reversed "\u001b[7m("
+        ;; Whether the opener out showed reversed last is drawn again, plain,
+        ;; before the line ends.
+        unreversed? (fn [out]
+                      (let [shown (str/last-index-of out reversed)]
+                        (and shown
+                             (str/includes? (subs out (+ shown (count reversed)) (str/index-of out "\r\n" shown))
+                                            "("))))]
+    (testing "the delimiter that pairs with the one at the cursor shows reversed"
+      (let [out (submitted "(+ 1 2)")]
+        (is (str/includes? out reversed))
+        (testing "until the line's accepted, so it doesn't stay in the scrollback"
+          (is (unreversed? out)))
+        (testing "or given up on"
+          (is (unreversed? (typed "(a (b)" "\u0003"))))))
+    (testing "a closer of the wrong kind shows red, with its opener"
+      (let [out (submitted "(a]")]
+        (is (str/includes? out "\u001b[31m("))
+        (is (str/includes? out "\u001b[31m]"))))
+    (testing "and so does one with nothing to close"
+      (is (str/includes? (submitted ":a)") "\u001b[31m)")))
+    (testing "not without colors"
+      (let [{:keys [out]} (call-with-repl {:color? false}
+                            (fn [type screen]
+                              (type "(+ 1 2)\r")
+                              (screen #"(?m)^3\nuser=> $")))]
+        (is (not (str/includes? out "\u001b[7m")))))))
 
 (deftest output-test
   (testing "stdout and stderr get lines of their own"
