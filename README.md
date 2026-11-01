@@ -38,15 +38,17 @@ isn't yet, `,sessions` to step into another session, like an agent's, and
 Without a terminal, say in a pipe or Emacs' `M-x shell`, it works like
 `clojure.main`'s REPL instead.
 
+The line editor, JLine, takes the readline settings it knows from
+`~/.inputrc`, or the file `$INPUTRC` names, so `set editing-mode vi` there
+gets you vi's keys, and what's for neorepl alone goes under `$if neorepl`.
 Input longer than 1000 characters, like a big pasted form, shows up plain,
-with no arglists, no matching delimiter and no undo, since JLine, the line
-editor underneath, stops doing all that past its `features-max-buffer-size`.
-The `org.jline.reader.props.features-max-buffer-size` system property
-raises it, and `BABASHKA_PRELOADS` can set that for the babashka `neorepl`
-runs on:
+with no arglists, no matching delimiter and no undo, since JLine stops doing
+all that past its `features-max-buffer-size`, which the inputrc can raise:
 
-```shell
-export BABASHKA_PRELOADS='(System/setProperty "org.jline.reader.props.features-max-buffer-size" "10000")'
+```
+$if neorepl
+  set features-max-buffer-size 10000
+$endif
 ```
 
 With no server to connect to, `neorepl` starts one for the project, the way
