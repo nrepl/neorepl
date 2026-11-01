@@ -266,7 +266,13 @@
       (when-not (System/getProperty "babashka.version")
         (testing "with nested shapes and bare symbols"
           (is (= "(Classname/staticMethod args*) Classname/staticField"
-                 (->> (features/info client "." user) :forms (take-last 2) (str/join " ")))))))))
+                 (->> (features/info client "." user) :forms (take-last 2) (str/join " ")))))
+        (testing "with an arity a list, rather than a vector, which bencode makes them both"
+          (is (= ["(fn name? [params*] exprs*)" "(fn name? ([params*] exprs*) +)"]
+                 (:forms (features/info client "fn" user))))))
+      (testing "with an interop form a list"
+        (is (= "(set! (. instance-expr instanceFieldName-symbol) expr)"
+               (second (:forms (features/info client "set!" user)))))))))
 
 (deftest references-test
   (testing "takes cider-nrepl, which cider-test fakes"

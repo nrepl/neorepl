@@ -1,6 +1,7 @@
 (ns neorepl.render-test
   (:require [clojure.java.io :as io]
             [clojure.test :refer [are deftest is testing]]
+            [neorepl.lexer :as lexer]
             [neorepl.render :as render]))
 
 (deftest doc-text-test
@@ -28,11 +29,58 @@
     (testing "and nowhere, for a fixture outside the tests"
       (is (= "ERROR in my.app-test" (render/failure-heading {:type "error" :ns "my.app-test"} dir))))))
 
-(deftest eldoc-text-test
-  (are [info text] (= text (render/eldoc-text info))
-    {:arglists ["[f]" "[f coll]"]} "[f] [f coll]"
-    {:forms ["(if test then else?)"]} "(if test then else?)"
-    {:name "cfg"} nil))
+(defn- eldoc
+  "What render/eldoc-line shows of info for the call that s ends in, with
+  the parameter the cursor's in <in brackets> and what can't take it
+  ~between tildes~."
+  [info s]
+  (some->> (render/eldoc-line info (lexer/call-at (lexer/lex s) (count s)))
+           (map (fn [[text k]] (case k :eldoc-arg (str "<" text ">") :eldoc-faint (str "~" text "~") text)))
+           (apply str)))
+
+(deftest eldoc-line-test
+  (let [map-info {:ns "clojure.core" :name "map" :arglists ["[f]" "[f coll]" "[f c1 c2]" "[f c1 c2 & colls]"]}]
+    (are [s line] (= line (eldoc map-info s))
+      "(map " "clojure.core/map: ([<f>] [<f> coll] [<f> c1 c2] [<f> c1 c2 & colls])"
+      "(map inc" "clojure.core/map: ([<f>] [<f> coll] [<f> c1 c2] [<f> c1 c2 & colls])"
+      "(map inc " "clojure.core/map: (~[f]~ [f <coll>] [f <c1> c2] [f <c1> c2 & colls])"
+      ;; Into the rest, with its &.
+      "(map inc a b c d " "clojure.core/map: (~[f]~ ~[f coll]~ ~[f c1 c2]~ [f c1 c2 <& colls>])")
+    (testing "with its namespace as a piece of its own"
+      (is (= ["clojure.core/" :eldoc-ns] (first (render/eldoc-line map-info {:args [{:kind nil}]}))))))
+  (testing "a function's parameters take any argument, whatever their names"
+    (is (= "user/f: ([<doc-string?> [x]])"
+           (eldoc {:ns "user" :name "f" :arglists ["[doc-string? [x]]"]} "(f [1]"))))
+  (testing "a macro's by its shape"
+    (let [defn-info {:ns "clojure.core" :name "defn" :macro true
+                     :arglists ["[name doc-string? attr-map? [params*] prepost-map? body]"
+                                "[name doc-string? attr-map? ([params*] prepost-map? body) + attr-map?]"]}]
+      (are [s line] (= line (eldoc defn-info s))
+        "(defn f " (str "clojure.core/defn: ([name <doc-string?> attr-map? [params*] prepost-map? body]"
+                        " [name <doc-string?> attr-map? ([params*] prepost-map? body) + attr-map?])")
+        "(defn f \"Doc.\" " (str "clojure.core/defn: ([name doc-string? <attr-map?> [params*] prepost-map? body]"
+                                 " [name doc-string? <attr-map?> ([params*] prepost-map? body) + attr-map?])")
+        ;; The optional parts skipped, and the arity for lists can't take a vector.
+        "(defn f [x] (inc x) " (str "clojure.core/defn: ([name doc-string? attr-map? [params*] prepost-map? <body>]"
+                                    " ~[name doc-string? attr-map? ([params*] prepost-map? body) + attr-map?]~)")
+        "(defn f ^String [x] " (str "clojure.core/defn: ([name doc-string? attr-map? [params*] <prepost-map?> body]"
+                                    " ~[name doc-string? attr-map? ([params*] prepost-map? body) + attr-map?]~)")
+        ;; One list after another.
+        "(defn f ([x] x) ([x y] y) " (str "clojure.core/defn: (~[name doc-string? attr-map? [params*] prepost-map? body]~"
+                                          " [name doc-string? attr-map? <([params*] prepost-map? body)> + attr-map?])"))))
+  (testing "a special form's shapes, without a name of their own"
+    (let [fn-info {:name "fn" :special-form true :forms ["(fn name? [params*] exprs*)" "(fn name? ([params*] exprs*) +)"]}]
+      (are [s line] (= line (eldoc fn-info s))
+        "(fn " "(fn <name?> [params*] exprs*) (fn <name?> ([params*] exprs*) +)"
+        ;; A vector being what comes after the name, the name's left out.
+        "(fn [x] " "(fn name? [params*] <exprs*>) (fn name? <([params*] exprs*)> +)"
+        "(fn g [x] " "(fn name? [params*] <exprs*>) ~(fn name? ([params*] exprs*) +)~"))
+    (is (= "~(if test then else?)~" (eldoc {:name "if" :special-form true :forms ["(if test then else?)"]} "(if a b c ")))
+    (testing "and those that aren't calls"
+      (is (= "(Classname/staticMethod <args*>) ~Classname/staticField~"
+             (eldoc {:name "." :special-form true :forms ["(Classname/staticMethod args*)" "Classname/staticField"]} "(. x ")))))
+  (testing "nothing without arglists"
+    (is (nil? (render/eldoc-line {:name "cfg"} {:args [{:kind nil}]})))))
 
 (deftest apropos-text-test
   (is (= "clojure.core/map     Returns a lazy sequence\nclojure.core/mapcat"

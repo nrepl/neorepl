@@ -274,6 +274,71 @@
         (when (= :symbol (:type head))
           head)))))
 
+(defn- after-form
+  "The tokens after the form the first of tokens starts."
+  [[{:keys [type]} & more]]
+  (if (= :open type)
+    (loop [[token & more] more
+           depth 1]
+      (case (:type token)
+        nil nil
+        :open (recur more (inc depth))
+        :close (if (= 1 depth) more (recur more (dec depth)))
+        (recur more depth)))
+    more))
+
+(defn- form-kind
+  "What the form the tokens start, in s, is, past its prefixes, like ', and
+  the metadata ^ puts on it: a :string, :vector, :map, :list or :set,
+  :other, or nil for a reader conditional, which could be any of them."
+  [s tokens]
+  (loop [[{:keys [type] :as token} & more] tokens]
+    (cond
+      (and (= :reader-macro type) (str/starts-with? (text s token) "#?")) nil
+      (and (= :macro-char type) (= "^" (text s token))) (recur (after-form more))
+      (#{:macro-char :reader-macro} type) (recur more)
+      :else (case type
+              (:string :open-string) :string
+              :open (case (text s token)
+                      "[" :vector
+                      "{" :map
+                      "#{" :set
+                      :list)
+              :other))))
+
+(defn- without-discarded
+  "tokens without the forms #_ discards at their start."
+  [[{:keys [type]} & more :as tokens]]
+  (if (= :discard type)
+    (after-form (without-discarded more))
+    tokens))
+
+(defn call-at
+  "The call the cursor's in, that of the innermost list around it, as a map
+  with its :op, the text of the symbol in operator position, and its :args
+  up to the cursor, the last one the argument the cursor's in, each a map
+  with the :kind of form it is: :string, :vector, :map, :list, :set,
+  :other, or nil when it could be any, like a reader conditional, or the
+  argument at the cursor while nothing of it's typed. Nil outside of
+  lists, when the head isn't a symbol and while it's being typed."
+  [{s :text :as lexed} cursor]
+  (when-let [{:keys [end] :as head} (enclosing-op lexed cursor)]
+    (when (< end cursor)
+      (let [between (subs s end cursor)
+            {:keys [tokens] :as l} (lex between)
+            spans (form-spans l)
+            kind #(form-kind between (drop-while (fn [t] (< (:start t) %)) tokens))
+            done (mapv #(hash-map :kind (kind (first %))) spans)
+            done-end (or (second (peek spans)) 0)
+            started (without-discarded (remove #(or (< (:start %) done-end) (= :comment (:type %))) tokens))]
+        {:op (text s head)
+         :args (cond
+                 ;; Some of one typed, like an opener or a string's start.
+                 (seq started) (conj done {:kind (kind (:start (first started)))})
+                 ;; Right after one, which is still being typed.
+                 (and (seq spans) (= done-end (count between))) done
+                 :else (conj done {:kind nil}))}))))
+
 (defn delimiter-match
   "What the delimiter at the cursor in the lexed text pairs with, taking the
   closing one right before the cursor, or else the opening one the cursor's
@@ -340,19 +405,6 @@
           end))
       (when-let [newline (str/index-of s "\n" start)]
         (recur (inc newline) (inc n))))))
-
-(defn- after-form
-  "The tokens after the form the first of tokens starts."
-  [[{:keys [type]} & more]]
-  (if (= :open type)
-    (loop [[token & more] more
-           depth 1]
-      (case (:type token)
-        nil nil
-        :open (recur more (inc depth))
-        :close (if (= 1 depth) more (recur more (dec depth)))
-        (recur more depth)))
-    more))
 
 (defn- ns-name-token
   "The token naming the namespace in tokens, those of an ns form after ns,

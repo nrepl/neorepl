@@ -4,13 +4,15 @@
   (:refer-clojure :exclude [read-line])
   (:require [clojure.string :as str]
             [neorepl.lexer :as lexer])
-  (:import (java.nio.charset StandardCharsets)
+  (:import (java.lang.reflect Field)
+           (java.nio.charset StandardCharsets)
            (java.util List)
+           (java.util.function Supplier)
            #?@(:bb []
                :clj [(org.jline.reader CompletingParsedLine)])
            (org.jline.keymap BindingReader KeyMap)
            (org.jline.reader Candidate Completer EOFError EndOfFileException Highlighter
-                             LineReader LineReader$Option LineReader$SuggestionType
+                             LineReader LineReader$Option
                              LineReaderBuilder ParsedLine Parser Parser$ParseContext Reference
                              UserInterruptException Widget)
            (org.jline.terminal Attributes Attributes$LocalFlag Size Terminal Terminal$Signal
@@ -24,7 +26,8 @@
 (def ^:private colors
   "Styles for lexer token types, for :err output and :notice messages, for
   the delimiter that pairs with the one at the cursor, its :match, for the
-  REPL's :commands, and for the :headings of full-screen views."
+  REPL's :commands, for the :headings of full-screen views, and for eldoc's
+  pieces, as render/eldoc-line has them."
   (let [faint (.faint AttributedStyle/DEFAULT)
         green (fg AttributedStyle/GREEN)
         magenta (fg AttributedStyle/MAGENTA)
@@ -48,7 +51,11 @@
      ;; theme, as an unknown command is.
      :command special
      :notice faint
-     :heading (.bold AttributedStyle/DEFAULT)}))
+     :heading (.bold AttributedStyle/DEFAULT)
+     ;; Eldoc's parameter for the argument at the cursor, and the arglists
+     ;; that can't take it.
+     :eldoc-arg (.bold AttributedStyle/DEFAULT)
+     :eldoc-faint faint}))
 
 (def ^:private specials
   "Symbols highlighted as :special: the special forms, the ones macros
@@ -133,30 +140,48 @@
         (throw (EOFError. -1 -1 "Incomplete form")))
       (parsed-line line cursor))))
 
-(defn- cut
-  "text cut to columns, with an ellipsis for what's left out."
-  [^String text columns]
-  (cond
-    (<= (count text) columns) text
-    (< columns 2) ""
-    :else (str (subs text 0 (dec columns)) "…")))
+(defn- eldoc-string
+  "pieces, render/eldoc-line's, styled, and cut to fit in columns, if it
+  has any: without the namespace first, then with an ellipsis for what's
+  left out."
+  ^AttributedString [styles pieces columns]
+  (let [styled (fn [pieces]
+                 (let [b (AttributedStringBuilder.)]
+                   (doseq [[text k] pieces]
+                     (.styled b (style styles k) ^CharSequence text))
+                   (.toAttributedString b)))
+        fits? #(or (not (pos? columns)) (<= (.columnLength ^AttributedString %) columns))
+        whole (styled pieces)
+        short (delay (styled (remove #(= :eldoc-ns (second %)) pieces)))]
+    (cond
+      (fits? whole) whole
+      (fits? @short) @short
+      (< columns 2) (AttributedString. "")
+      :else (.toAttributedString (doto (AttributedStringBuilder.)
+                                   (.append (.columnSubSequence ^AttributedString @short 0 (dec columns)))
+                                   (.append "…"))))))
 
-(defn- tail-tip
-  "tip as the tail tip for buffer, with the cursor at its end. After
-  anything but a space, JLine puts a space before a tip that starts with [,
-  as arglists do, and takes any other tip's first word off, for
-  TailTipWidgets' commands, unless the buffer's last dash comes after its
-  last space, where it puts the space before it instead. So a special
-  form's shape gets a space of its own, which keeps it whole."
-  [^String buffer ^String tip]
-  (let [space (str/last-index-of buffer " ")
-        dash (str/last-index-of buffer "-")]
-    (if (or (str/blank? tip)
-            (str/starts-with? tip "[")
-            (str/ends-with? buffer " ")
-            (and space dash (< space dash)))
-      tip
-      (str " " tip))))
+(def ^:private post
+  "LineReaderImpl's post, what it shows under the input, like the
+  completion menu, which only it sets otherwise: there's no setter."
+  (delay (doto (.getDeclaredField (Class/forName "org.jline.reader.impl.LineReaderImpl") "post")
+           (.setAccessible true))))
+
+(defn- show-under
+  "Shows line, an AttributedString, under the input, or nothing for nil,
+  through JLine's post, in the place under, from the editor, unless JLine
+  shows something of its own there, as for a search or the completion
+  menu, or what a widget left there, under :left, along with the input
+  then, until buffer, the input, changes, see leaving-under."
+  [^LineReader reader {:keys [^Supplier supplier shown left]} buffer line]
+  (let [^Field field @post
+        current (.get field reader)
+        [left-post left-buffer] @left]
+    (when (or (nil? current)
+              (identical? supplier current)
+              (and (identical? left-post current) (not= left-buffer buffer)))
+      (reset! shown line)
+      (.set field reader (when line supplier)))))
 
 (defn- command-styled
   "code, with styled-code its tokens styled, with the REPL command it starts
@@ -175,39 +200,31 @@
 
 (defn- highlighter
   "Highlights code, with what the delimiter at the cursor pairs with, and
-  has (eldoc text cursor) say what to show after the cursor, cut to what's
-  left of the line after the prompt, the one in the atom prompt. JLine
-  highlights on every redisplay, so eldoc sees every change to the line,
-  whatever made it, and the pair follows the cursor. JLine's last redisplay
-  of the line, once it's done reading it, goes without the pair, so it
-  doesn't stay behind in the scrollback. The names of the REPL's commands,
-  a set, show as command-styled has them."
-  [styles raw? prompt eldoc commands]
+  has (eldoc text cursor) say what to show under it, as render/eldoc-line's
+  pieces, cut to the terminal's width. JLine highlights on every redisplay,
+  so eldoc sees every change to the line, whatever made it, and the pair
+  follows the cursor. JLine's last redisplay of the line, once it's done
+  reading it, goes without the pair or eldoc, so they don't stay behind in
+  the scrollback. The names of the REPL's commands, a set, show as
+  command-styled has them. under is where eldoc's line goes, see
+  show-under."
+  [styles raw? eldoc commands under]
   (reify Highlighter
     (highlight [_ reader buffer]
       (if @raw?
         (AttributedString. buffer)
-        (let [cursor (.cursor (.getBuffer ^LineReader reader))
-              lexed (lexer/lex buffer)]
+        (let [^LineReader reader reader
+              cursor (.cursor (.getBuffer reader))
+              lexed (lexer/lex buffer)
+              reading? (.isReading reader)]
           (when eldoc
-            (.setTailTip ^LineReader reader
-                         ;; JLine only shows it with the cursor at the end.
-                         (or (when (= cursor (count buffer))
-                               (let [;; Continuation lines' prompts are as wide as the first's.
-                                     line (subs buffer (inc (or (str/last-index-of buffer "\n") -1)))
-                                     width (.getWidth (.getTerminal ^LineReader reader))
-                                     tip (eldoc buffer cursor)]
-                                 ;; It has to fit after the cursor, on the row the line
-                                 ;; has wrapped onto, and the space before it, or it
-                                 ;; wraps onto the rows below. A terminal without a
-                                 ;; width has room for everything.
-                                 (some->> (if (and tip (pos? width))
-                                            (cut tip (- width (mod (+ (count @prompt) (count line)) width) 2))
-                                            tip)
-                                          (tail-tip buffer))))
-                             "")))
+            (show-under reader under buffer
+                        (when-let [pieces (when reading? (eldoc buffer cursor))]
+                          ;; A column to spare, as a terminal can wrap a line
+                          ;; that fills the last one.
+                          (eldoc-string styles pieces (dec (.getWidth (.getTerminal reader)))))))
           (command-styled styles commands buffer
-                          (styled styles lexed (if (.isReading ^LineReader reader)
+                          (styled styles lexed (if reading?
                                                  (delimiter-marks (lexer/delimiter-match lexed cursor))
                                                  {}))))))
     (setErrorPattern [_ _])
@@ -272,6 +289,19 @@
   (reify Widget
     (apply [_] (boolean (f)))))
 
+(defn- leaving-under
+  "Has the widgets that show something under the input and leave it there
+  till the line's done, like C-d's list of completions at its end, say
+  what they leave in under, so it goes once the input changes, for eldoc's
+  line to come back. JLine's tail tip used to clear them."
+  [^LineReader reader {:keys [left]}]
+  (doseq [name [LineReader/LIST_CHOICES LineReader/DELETE_CHAR_OR_LIST LineReader/WHAT_CURSOR_POSITION]
+          :let [^Widget builtin (.get (.getBuiltinWidgets reader) name)]]
+    (.put (.getWidgets reader) name
+          (widget #(let [done (.apply builtin)]
+                     (reset! left [(.get ^Field @post reader) (str (.getBuffer reader))])
+                     done)))))
+
 (defn- bind-widget
   "Adds f as a widget called name, on keys in the Emacs and vi insert keymaps."
   [^LineReader reader name keys f]
@@ -321,9 +351,9 @@
                    line (lexer/incomplete? by default)
     :complete      (complete prefix) for the completions of prefix, as
                    features/complete has them
-    :eldoc         (eldoc text cursor) for the text to show after the
-                   cursor while typing, like the arglists of the function
-                   being called
+    :eldoc         (eldoc text cursor) for what to show under the input
+                   while typing, like the arglists of the function being
+                   called, as render/eldoc-line's pieces
     :eldoc?        false to show nothing there after all
     :doc           (doc text cursor) for the documentation C-x C-d shows
     :source        (source text cursor) for the code C-x C-s shows
@@ -345,13 +375,17 @@
         (do (.close terminal)
             nil)
         (let [raw? (atom false)
-              prompt (atom "")
               styles (if color? colors {})
+              shown (atom nil)
+              under {:shown shown
+                     :supplier (reify Supplier
+                                 (get [_] @shown))
+                     :left (atom nil)}
               builder (-> (LineReaderBuilder/builder)
                           (.terminal terminal)
                           (.appName "neorepl")
                           (.parser (parser raw? incomplete?))
-                          (.highlighter (highlighter styles raw? prompt (when eldoc? (some-> eldoc safely)) commands))
+                          (.highlighter (highlighter styles raw? (when eldoc? (some-> eldoc safely)) commands under))
                           (.variable LineReader/SECONDARY_PROMPT_PATTERN "%P #_=> ")
                           ;; The highlighter shows the pair, rather than JLine
                           ;; moving the cursor to it after a closer is typed.
@@ -374,7 +408,6 @@
                 editor {:terminal terminal
                         :reader reader
                         :raw? raw?
-                        :prompt prompt
                         :styles styles
                         :lock (Object.)
                         :suspended? (atom false)
@@ -395,20 +428,7 @@
                                (.callWidget reader (str "." LineReader/ACCEPT_LINE)))
                              true)))
             (when (and eldoc eldoc?)
-              (.setAutosuggestion reader LineReader$SuggestionType/TAIL_TIP)
-              ;; JLine shows the history search's prompt where the tip goes,
-              ;; and the tip wins, so searching does without it. In their
-              ;; place, since a search goes by the names of the keys' widgets,
-              ;; Ctrl-R again for the next match, say.
-              (doseq [name [LineReader/HISTORY_INCREMENTAL_SEARCH_BACKWARD LineReader/HISTORY_INCREMENTAL_SEARCH_FORWARD]]
-                (.put (.getWidgets reader) name
-                      (widget #(do (.setAutosuggestion reader LineReader$SuggestionType/NONE)
-                                   (try
-                                     ;; JLine's own.
-                                     (.callWidget reader (str "." name))
-                                     (finally
-                                       (.setAutosuggestion reader LineReader$SuggestionType/TAIL_TIP)))
-                                   true)))))
+              (leaving-under reader under))
             ;; bash's and zsh's key for editing what's typed in EDITOR.
             (when edit
               (bind-widget reader "neorepl-edit" (str (KeyMap/ctrl \X) (KeyMap/ctrl \E))
@@ -549,9 +569,6 @@
 (defn- read-with
   "Reads a line with prompt. JLine always ends that line."
   [{:keys [^Terminal terminal ^LineReader reader line lock] :as editor} prompt]
-  (reset! (:prompt editor) prompt)
-  ;; Whatever eldoc showed last time is stale.
-  (.setTailTip reader "")
   (try
     (.readLine reader ^String prompt)
     (catch UserInterruptException e

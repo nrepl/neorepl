@@ -1,7 +1,8 @@
 (ns neorepl.render
   "What the features find, as text."
   (:require [clojure.string :as str]
-            [neorepl.cli :as cli]))
+            [neorepl.cli :as cli]
+            [neorepl.lexer :as lexer]))
 
 (defn doc-text
   "info as text, the way clojure.repl/doc prints it, minus the dashes."
@@ -15,11 +16,106 @@
                            macro ["Macro"])
                          (some->> doc (str "  ") vector))))
 
-(defn eldoc-text
-  "What to show while the function info describes is being called: its
-  arglists, or a special form's shapes. Nil when there are none."
-  [{:keys [arglists forms]}]
-  (some->> (or forms arglists) seq (str/join " ")))
+(defn- parameters
+  "The parameters of an arglist, or of a shape, like (if test then else?),
+  past the special form's name, as maps with their :start and :end in s,
+  their :type and the :kind of form they :want, if they're particular about
+  it. Only macros and special forms are shaped?: their parameters can be
+  optional, ending in ?, like a doc-string? or an attr-map?, which want a
+  string or a map then, or take all the arguments left, like exprs* or a
+  body at the end, and a + or * after one repeats it. Their vectors and
+  lists want those. A function's are what they are, & and all."
+  [^String s shaped? shape?]
+  (when (re-find #"^[\[(]" s)
+    (let [inner (subs s 1 (max 1 (dec (count s))))
+          spans (cond-> (lexer/form-spans (lexer/lex inner)) shape? rest)
+          params (vec (for [[start end] spans
+                            :let [p (subs inner start end)
+                                  kind (when shaped? ({\[ :vector \( :list} (first p)))]]
+                        {:start (inc start)
+                         :end (inc end)
+                         :want (or kind
+                                   (when (and shaped? (str/ends-with? p "?"))
+                                     (cond
+                                       (str/includes? p "string") :string
+                                       (str/includes? p "map") :map)))
+                         :type (cond
+                                 (= "&" p) :rest
+                                 (not shaped?) :one
+                                 kind :one
+                                 (#{"+" "*"} p) :repeat
+                                 (str/ends-with? p "?") :optional
+                                 (re-find #"[*+]$" p) :many
+                                 :else :one)}))]
+      (cond-> params
+        (and shaped? (seq params) (= "body" (let [{:keys [start end]} (peek params)] (subs s start end))))
+        (assoc-in [(dec (count params)) :type] :many)))))
+
+(defn- bound
+  "The index of the parameter in params that the last of args goes into,
+  as parameters has them, or nil when they can't take that many arguments,
+  or arguments of those kinds. An optional parameter is skipped for an
+  argument that doesn't fit it, or that fits the one after it, as a vector
+  after fn's name? goes to its [params*]."
+  [params args]
+  (let [n (count params)]
+    (loop [p 0
+           a 0
+           last-bound nil]
+      (cond
+        (= a (count args)) last-bound
+        (<= n p) nil
+        :else (let [{:keys [type want]} (params p)
+                    kind (:kind (args a))
+                    fits? #(or (nil? %) (nil? kind) (= % kind))
+                    repeats? (= :repeat (:type (get params (inc p))))]
+                (case type
+                  ;; The rest takes all that's left.
+                  :rest (when (< (inc p) n) (inc p))
+                  :many p
+                  :repeat (recur (inc p) a last-bound)
+                  :optional (if (and (fits? want)
+                                     (not (and (nil? want) kind (= kind (:want (get params (inc p)))))))
+                              (recur (inc p) (inc a) p)
+                              (recur (inc p) a last-bound))
+                  :one (cond
+                         (not (fits? want)) (when (and repeats? (= last-bound p))
+                                              (recur (+ p 2) a last-bound))
+                         repeats? (recur p (inc a) p)
+                         :else (recur (inc p) (inc a) p))))))))
+
+(defn- arglist-pieces
+  "s, an arglist or a shape, as eldoc-line's pieces for the call's args."
+  [^String s shaped? shape? args]
+  (let [params (parameters s shaped? shape?)
+        at (when params (bound params args))]
+    (if-let [{:keys [start end]} (some-> at params)]
+      ;; The rest goes with its &.
+      (let [start (if (and (pos? at) (= :rest (:type (params (dec at)))))
+                    (:start (params (dec at)))
+                    start)]
+        [[(subs s 0 start)] [(subs s start end) :eldoc-arg] [(subs s end)]])
+      [[s :eldoc-faint]])))
+
+(defn eldoc-line
+  "What to show of call, from lexer/call-at, while info describes its op:
+  the op's name and arglists, or a special form's shapes, as pieces, [text]
+  or [text style], the style :eldoc-arg for the parameter the argument at
+  the cursor goes into, :eldoc-faint for the arglists that can't take that
+  many arguments, or of those kinds, and :eldoc-ns for the name's
+  namespace, which can go when there's no room. Macros and special forms
+  get matched by their shape, as parameters says. Nil without arglists or
+  shapes."
+  [{:keys [ns name arglists forms macro special-form]} {:keys [args]}]
+  (when-let [lists (seq (or forms arglists))]
+    (let [shaped? (boolean (or forms macro special-form))
+          pieces (apply concat (interpose [[" "]] (map #(arglist-pieces % shaped? (boolean forms) args) lists)))]
+      (if forms
+        (vec pieces)
+        (vec (concat (when ns [[(str ns "/") :eldoc-ns]])
+                     [[(str name ": (")]]
+                     pieces
+                     [[")"]]))))))
 
 (defn apropos-text
   "apropos matches, a line each: the name and the first line of the doc."

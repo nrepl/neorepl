@@ -15,6 +15,8 @@
 - [#59](https://github.com/nrepl/neorepl/pull/59): `neorepl eval --ns NS` evaluates in a namespace, loading it first unless it's there, and leaves the session in its own, as the MCP `eval` tool's `ns` does.
 - [#59](https://github.com/nrepl/neorepl/pull/59): `neorepl eval -f FILE --line N:COL` evaluates only the top-level form at that spot, in the file's namespace, after its `ns` form, and with `-` takes FILE's text from standard input, so an editor can evaluate the form at the cursor in a buffer it hasn't saved.
 - [#59](https://github.com/nrepl/neorepl/pull/59): `doc/editors.md` sets up Neovim, Emacs and Helix to evaluate in neorepl, with the REPL beside them.
+- [#60](https://github.com/nrepl/neorepl/pull/60): Eldoc shows under the input, wherever the cursor is, with the parameter the argument at the cursor goes into in bold and the arglists that can't take that many arguments faint.
+- [#60](https://github.com/nrepl/neorepl/pull/60): Eldoc matches the arguments of macros and special forms by their shape, so in `defn` a docstring goes to `doc-string?` and a map after it to `attr-map?`.
 
 ### Changes
 
