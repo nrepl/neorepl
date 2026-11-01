@@ -809,7 +809,9 @@
                 ;; ClojureScript's is a map, with the stack too.
                 :error (if (map? (:error assertion)) (some-> assertion :error :message blank->nil) (text :error))
                 :file (text :file)
-                :line line
+                ;; ClojureScript's is "NaN" for an error, cljs.test taking
+                ;; it from the JavaScript stack.
+                :line (when (integer? line) line)
                 ;; For test-stacktrace.
                 :index (when (= "error" type) (:index assertion))}))))
 
@@ -818,25 +820,27 @@
   that file's name, as cider-nrepl and clojure.test give it, or missing. From
   a test-op?, errors too, whose :file cider-nrepl takes from the frame that
   threw, while the :line is the test's, and anything on babashka, whose
-  :file is whichever file the session loaded last. Other failures, like an
-  assertion in a helper elsewhere, keep theirs, which goes with their
-  :line."
+  :file is whichever file the session loaded last. Those without a :line,
+  like a ClojureScript error outside an assertion, get the test's. Other
+  failures, like an assertion in a helper elsewhere, keep theirs, which
+  goes with their :line."
   [client session test-op? failures]
   (let [bb? (contains? (:versions client) :babashka)
         tests (distinct (keep (fn [{:keys [ns var]}] (when (and ns var) [ns var])) failures))
         ;; Independent lookups, so all at once.
-        files (zipmap tests (pmap (fn [[ns var]]
+        found (zipmap tests (pmap (fn [[ns var]]
                                     (try
-                                      (:file (info client (str ns "/" var) {:ns ns :session session}))
+                                      (info client (str ns "/" var) {:ns ns :session session})
                                       (catch clojure.lang.ExceptionInfo _ nil)))
                                   tests))]
-    (mapv (fn [{:keys [ns var type] :as failure}]
-            (let [file (get files [ns var])
+    (mapv (fn [{:keys [ns var type line] :as failure}]
+            (let [{:keys [file] :as test} (get found [ns var])
                   given (source-file (:file failure))]
               (if (and file (or (and test-op? (or bb? (= "error" type)))
                                 (nil? given)
                                 (= given (.getName (java.io.File. ^String file)))))
-                (assoc failure :file file)
+                (cond-> (assoc failure :file file)
+                  (and (nil? line) (:line test)) (assoc :line (:line test)))
                 failure)))
           failures)))
 
