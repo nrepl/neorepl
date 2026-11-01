@@ -553,6 +553,12 @@
     (run "-s" "where-made" "(defn made-at-the-repl [])")
     (is (= 1 (:status (run-command "where" "made-at-the-repl"))))))
 
+(deftest refs-test
+  (testing "takes cider-nrepl, which the integration tests have"
+    (doseq [args [["refs" "map"] ["refs" "--deps" "map"]]]
+      (is (= {:status 1 :out "" :err "neorepl: Cross-references take cider-nrepl on the server\n"}
+             (apply run-command args))))))
+
 (deftest reload-test
   (is (= {:status 0 :out "Reloaded clojure.set\n" :err ""} (run-command "reload" "clojure.set")))
   (let [{:keys [status err]} (run-command "reload" "no.such.ns")]

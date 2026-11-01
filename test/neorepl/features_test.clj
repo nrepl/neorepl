@@ -114,6 +114,17 @@
                (transport/respond-to msg :status ["done" "no-info"]))
       "complete" (transport/respond-to msg :status "done"
                                        :completions [{:candidate "map" :type "function" :ns "clojure.core"}])
+      ;; Nothing for a var they don't know.
+      "fn-refs" (transport/respond-to msg (cond-> {:status "done"}
+                                            (= "greet" sym)
+                                            (assoc :fn-refs [{:name "demo.core/welcome" :file "demo/core.clj"
+                                                              :file-url "file:/src/demo/core.clj" :line 5 :column 1
+                                                              :doc "(not documented)"}])))
+      ;; One without its file's URL, from a REPL.
+      "fn-deps" (transport/respond-to msg (cond-> {:status "done"}
+                                            (= "welcome" sym)
+                                            (assoc :fn-deps [{:name "demo.core/greet" :file "NO_SOURCE_PATH"
+                                                              :line 3 :column 1}])))
       "apropos" (transport/respond-to msg :status "done"
                                       :apropos-matches [{:name "clojure.core/map" :type "function"
                                                          :doc "Cider's map.\nMore."}])
@@ -201,7 +212,7 @@
 (middleware/set-descriptor! #'wrap-fake-cider {:handles {"info" {} "complete" {} "apropos" {} "ns-list" {} "cider-version" {}
                                                          "macroexpand" {} "analyze-last-stacktrace" {} "test-stacktrace" {}
                                                          "refresh" {} "refresh-clear" {} "test-var-query" {} "retest" {}
-                                                         "inspect-last-exception" {}}
+                                                         "inspect-last-exception" {} "fn-refs" {} "fn-deps" {}}
                                           ;; As cider-nrepl says which it is.
                                           :describe-fn (fn [_] {:cider-version {:version-string "0.63.1"}})})
 
@@ -246,6 +257,12 @@
         (testing "with nested shapes and bare symbols"
           (is (= "(Classname/staticMethod args*) Classname/staticField"
                  (->> (features/info client "." user) :forms (take-last 2) (str/join " ")))))))))
+
+(deftest references-test
+  (testing "takes cider-nrepl, which cider-test fakes"
+    (with-client [client {:port *port*}]
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"^Cross-references take cider-nrepl on the server$"
+                            (features/references client "greet" user false))))))
 
 (deftest complete-test
   (with-client [client {:port *port*}]
@@ -456,6 +473,17 @@
   (let [srv (server/start-server :port 0 :handler (server/default-handler #'wrap-fake-cider #'test-server/wrap-fake-inspector))]
     (try
       (with-client [client {:port (:port srv)}]
+        (testing "cross-references"
+          (let [ctx {:ns "demo.core"}]
+            (is (= [{:name "demo.core/welcome" :file (str (io/file "/src/demo/core.clj")) :line 5 :column 1}]
+                   (features/references client "greet" ctx false)))
+            (testing "the other way, without where one made at a REPL is"
+              (is (= [{:name "demo.core/greet"}] (features/references client "welcome" ctx true))))
+            (testing "none for a var nothing uses"
+              (is (= [] (features/references client "map" ctx false))))
+            (testing "and nothing called that"
+              (is (thrown-with-msg? clojure.lang.ExceptionInfo #"^Nothing called lonely in demo.core$"
+                                    (features/references client "lonely" ctx false))))))
         (testing "cider-nrepl's ops come first"
           (is (= {:ns "clojure.core" :name "map" :arglists ["[f]" "[f coll]"] :doc "Cider's map."
                   :file (str (io/file "/tmp/a b/core.clj")) :line 1}

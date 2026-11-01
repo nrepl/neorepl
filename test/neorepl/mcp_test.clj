@@ -83,7 +83,7 @@
      (testing "the curated tools"
        (send {:id 4 :method "tools/list"})
        (let [tools (get-in (receive) [:result :tools])]
-         (is (= ["eval" "load" "doc" "source" "where" "apropos" "macroexpand" "reload" "test" "retest"
+         (is (= ["eval" "load" "doc" "source" "where" "refs" "apropos" "macroexpand" "reload" "test" "retest"
                  "pst" "interrupt" "check" "ports"]
                 (map :name tools)))
          (is (every? (comp #{"object"} :type :inputSchema) tools))
@@ -188,7 +188,12 @@
          (send (tool-call 12 "doc" {:symbol "hello"}))
          (is (str/starts-with? (text (receive)) "neorepl.mcp-looking/hello")))
        (send (tool-call 10 "apropos" {:regex "^mapcat$"}))
-       (is (= "clojure.core/mapcat" (get-in (receive) [:result :structuredContent :vars 0 :name])))))))
+       (is (= "clojure.core/mapcat" (get-in (receive) [:result :structuredContent :vars 0 :name])))
+       (testing "that takes cider-nrepl"
+         (send (tool-call 13 "refs" {:symbol "map"}))
+         (let [{{:keys [isError] :as result} :result} (receive)]
+           (is (true? isError))
+           (is (= "Cross-references take cider-nrepl on the server" (text {:result result})))))))))
 
 (deftest reload-test
   (call-with-mcp

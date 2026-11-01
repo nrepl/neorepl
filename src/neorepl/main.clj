@@ -632,13 +632,15 @@ when there's no server to talk to."
 
 (defn- lookup-command
   "The command doing the lookup called name on its one argument, or on all of
-  them when it takes several."
-  [name]
-  (let [{arg-name :arg :keys [args?]} (lookups/lookup name)]
-    (fn [{:keys [format] :as options} args ctx]
-      (let [arg (if args? args (the-arg args arg-name))]
-        (with-lookup-context options ctx
-          #(report-lookup format name %1 %2 arg))))))
+  them when it takes several, or the one called other when the options say
+  flag."
+  ([name] (lookup-command name nil nil))
+  ([name flag other]
+   (let [{arg-name :arg :keys [args?]} (lookups/lookup name)]
+     (fn [{:keys [format] :as options} args ctx]
+       (let [arg (if args? args (the-arg args arg-name))]
+         (with-lookup-context options ctx
+           #(report-lookup format (if (get options flag) other name) %1 %2 arg)))))))
 
 (def ^:private source-help
   (help-text
@@ -714,11 +716,6 @@ fails, 2 on usage errors and 3 when there's no server to talk to."
   neorepl macroexpand '(when x (println x))'
   neorepl macroexpand --all '(-> x f (g y))'"))
 
-(defn- macroexpand-command [{:keys [all format] :as options} args ctx]
-  (let [form (the-arg args "FORM")]
-    (with-lookup-context options ctx
-      #(report-lookup format (if all "macroexpand-all" "macroexpand") %1 %2 form))))
-
 (def ^:private where-help
   (help-text
    "Usage: neorepl where [options] SYM"
@@ -731,6 +728,28 @@ usage errors and 3 when there's no server to talk to."
    "Examples:
   neorepl where map
   neorepl where --ns my.app --format json start"))
+
+(def ^:private refs-options
+  (concat connection-options
+          [ns-option
+           lookup-session-option
+           {:long "--deps"
+            :doc "List the functions SYM uses instead"}]
+          common-options))
+
+(def ^:private refs-help
+  (help-text
+   "Usage: neorepl refs [options] SYM"
+   "Lists the functions that use the var SYM, each with where it's defined, in
+the code that's loaded: what calls a function before changing it, say.
+With --deps, it lists the functions SYM uses instead. Takes cider-nrepl."
+   refs-options
+   discovery-note
+   "Exit status: 0 when it finds some, 1 when it finds none or the server
+can't look, 2 on usage errors and 3 when there's no server to talk to."
+   "Examples:
+  neorepl refs my.app/handler
+  neorepl refs --deps --format json my.app/handler"))
 
 (def ^:private reload-options
   (concat connection-options common-options))
@@ -1131,9 +1150,11 @@ agent and the eval tool see the same *ns*, *1 and *e."
    {:name "apropos" :summary "Find vars by name" :options apropos-options :help apropos-help
     :main (lookup-command "apropos")}
    {:name "macroexpand" :summary "Expand macros" :options macroexpand-options :help macroexpand-help
-    :main macroexpand-command}
+    :main (lookup-command "macroexpand" :all "macroexpand-all")}
    {:name "where" :summary "Show where a var is defined" :options lookup-options :help where-help
     :main (lookup-command "where")}
+   {:name "refs" :summary "List the functions that use a var" :options refs-options :help refs-help
+    :main (lookup-command "refs" :deps "deps")}
    {:name "trace" :summary "Trace functions" :options lookup-options :help trace-help
     :main (lookup-command "trace")}
    {:name "untrace" :summary "Stop tracing functions" :options lookup-options :help untrace-help
