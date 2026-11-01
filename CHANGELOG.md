@@ -12,6 +12,7 @@
 - [#52](https://github.com/nrepl/neorepl/pull/52): The REPL highlights its commands as they're typed, `,doc` and the like, and a command name that isn't one in red.
 - [#53](https://github.com/nrepl/neorepl/pull/53): C-x C-e in the REPL opens what's typed in `$EDITOR` and brings back what's saved, and `,edit` without a name opens the current namespace's file.
 - [#55](https://github.com/nrepl/neorepl/pull/55): `neorepl refs` lists the functions that use a var, or with `--deps`, the ones it uses, as `,refs` and `,deps` do in the REPL and the `refs` tool does for MCP, with cider-nrepl.
+- [#59](https://github.com/nrepl/neorepl/pull/59): `neorepl eval --ns NS` evaluates in a namespace, loading it first unless it's there, and leaves the session in its own, as the MCP `eval` tool's `ns` does.
 
 ### Changes
 

@@ -254,6 +254,21 @@
       (is (= {:status 0 :out "1\n" :err ""}
              (run "-s" "stdin-code" "--timeout" "5" "1"))))))
 
+(deftest eval-in-ns-test
+  (testing "--ns: in the namespace, loaded first unless it's there, leaving the session in its own"
+    (is (= {:status 0 :out "\"clojure.set #{1 2}\"\n" :err ""}
+           (run "-s" "in-ns" "--ns" "clojure.set" "(str *ns* \" \" (union #{1} #{2}))")))
+    (is (= {:status 0 :out "\"user\"\n" :err ""}
+           (run "-s" "in-ns" "(str *ns*)")))
+    (testing "code from stdin too"
+      (is (= {:status 0 :out "#{1 2}\n" :err ""}
+             (run-in *dir* "(union #{1} #{2})" "eval" "-p" (str *port*) "-s" "in-ns" "--ns" "clojure.set" "-"))))
+    (testing "not one that doesn't load"
+      (let [{:keys [status out err]} (run "-s" "in-ns" "--ns" "no.such.ns" "1")]
+        (is (= 1 status))
+        (is (= "" out))
+        (is (str/includes? err "Could not locate no/such/ns"))))))
+
 (deftest load-test
   (let [file (spit-file *dir* "src/demo/core.clj"
                         "(ns demo.core)\n(println :loading)\n(defn answer [] 42)\n(answer)")]
@@ -850,6 +865,7 @@
       ["eval" "-p" "1" "(+" "1)"] "Too many arguments"
       ["eval" "-f" "x.clj" "1"] "not both"
       ["eval" "-f" "/does/not/exist.clj"] "No such file"
+      ["eval" "-p" "1" "--ns" "" "1"] "Invalid value for --ns"
       ["load" "-p" "1"] "Nothing to load"
       ["load" "-p" "1" "a.clj" "b.clj"] "Load one file at a time"
       ["load" "-p" "1" "/does/not/exist.clj"] "No such file"

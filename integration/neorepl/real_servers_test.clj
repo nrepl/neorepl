@@ -40,7 +40,12 @@
          (is (str/includes? err "boom"))))
      (testing "in a named session"
        (run server "eval" "-s" "eval" "(def x 42)")
-       (is (= {:status 0 :out "42\n" :err ""} (run server "eval" "-s" "eval" "x")))))))
+       (is (= {:status 0 :out "42\n" :err ""} (run server "eval" "-s" "eval" "x"))))
+     (testing "in a namespace, leaving the session in its own"
+       (is (= {:status 0 :out "\"hi ns\"\n" :err ""}
+              (run server "eval" "-s" "in-ns" "--ns" "demo.core" "(greet \"ns\")")))
+       (is (= {:status 0 :out "\"user\"\n" :err ""}
+              (run server "eval" "-s" "in-ns" "(str *ns*)")))))))
 
 (deftest lookups-test
   (on-each-server

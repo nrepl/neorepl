@@ -350,7 +350,9 @@ when it times out.")
 (def ^:private eval-options
   (concat connection-options
           [{:short "-f" :long "--file" :arg "FILE" :parse not-empty
-            :doc "Evaluate the code in FILE"}]
+            :doc "Evaluate the code in FILE"}
+           {:long "--ns" :arg "NS" :parse not-empty
+            :doc "Evaluate in NS, loading it first unless it's there"}]
           evaluation-options
           common-options))
 
@@ -360,7 +362,8 @@ when it times out.")
        neorepl eval [options] -f FILE
        neorepl eval [options] -"
    "Evaluates CODE, the contents of FILE or, with -, standard input. Output is
-printed as it arrives and each value on a line of its own."
+printed as it arrives and each value on a line of its own. With --ns, the
+code goes into the namespace NS, and the session stays in its own."
    eval-options
    discovery-note
    sessions-note
@@ -368,6 +371,7 @@ printed as it arrives and each value on a line of its own."
    "Examples:
   neorepl eval '(+ 1 2)'
   neorepl eval --format json -f script.clj
+  echo '(start)' | neorepl eval --ns my.app -
   neorepl eval --max-output 2000 '(slurp \"big.txt\")'
   echo '(range 3)' | neorepl eval -"))
 
@@ -380,16 +384,18 @@ printed as it arrives and each value on a line of its own."
     (empty? args) (throw (usage-error "Nothing to evaluate"))
     :else (throw (usage-error "Too many arguments: quote the code to pass it as one"))))
 
-(defn- eval-command [{:keys [file] :as options} args ctx]
-  (report-evaluation (cond-> {:op "eval" :code (read-code file args)}
-                       ;; For the file and line numbers in errors.
-                       file (assoc :file (.getAbsolutePath (io/file file))))
-                     options
-                     ctx
-                     ;; Reading the code used stdin up, so reads from *in*
-                     ;; get end of input.
-                     (when (= ["-"] args)
-                       {:read-line (constantly nil)})))
+(defn- eval-command [{:keys [file ns] :as options} args ctx]
+  (let [msg (cond-> {:op "eval" :code (read-code file args)}
+              ;; For the file and line numbers in errors.
+              file (assoc :file (.getAbsolutePath (io/file file))))
+        ;; Reading the code used stdin up, so reads from *in* get end of
+        ;; input.
+        evaluate-options (when (= ["-"] args)
+                           {:read-line (constantly nil)})]
+    (report-run #(features/evaluate-in-ns %1 (assoc msg :session %2) ns (merge %3 evaluate-options))
+                options
+                ctx
+                (constantly nil))))
 
 (def ^:private load-options
   (concat connection-options evaluation-options common-options))
