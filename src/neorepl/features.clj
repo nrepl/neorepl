@@ -695,6 +695,22 @@
   [s]
   (symbol-name? simple-symbol? s))
 
+(defn- loading-copy
+  "A copy of session, in its language, for neorepl to load namespaces in,
+  so the session's *1 and namespace stay put. A copy starts in user, but
+  in ClojureScript it keeps the session's namespace, so it moves to
+  cljs.user: ClojureScript's REPL makes the namespace it's in depend on
+  those it requires, and loading a namespace's tests from it is a circular
+  dependency."
+  [client session opts]
+  (let [copy (nrepl/clone-session client session)]
+    (try
+      (ask client {:op "eval" :session copy :code "#?(:cljs (in-ns 'cljs.user) :default nil)"} opts)
+      copy
+      (catch Throwable e
+        (nrepl/close-session client copy)
+        (throw e)))))
+
 (defn- unknown-tests
   "Loads the namespaces that names, names of namespaces and of tests as
   ns/name, are or are in, in session, and returns the names of tests that
@@ -995,12 +1011,11 @@
     (let [check? (and (not failed?) (seq names))
           ;; cider-nrepl's orchard finds the project's namespaces.
           project? (and ops? (not failed?) (empty? names) (supports? client "cider-version"))
-          ;; The check, the loading and the eval ones run in a copy of the
-          ;; session, in its language, so its *1 stays put.
-          copy (when (or check? project?) (nrepl/clone-session client session))
           deadline (when timeout (+ (System/currentTimeMillis) (long (* 1000 timeout))))
           ;; The timeout left, for what waits on the server.
           left-ms #(when deadline (max 1 (- deadline (System/currentTimeMillis))))
+          ;; The check, the loading and the eval ones run in a copy.
+          copy (when (or check? project?) (loading-copy client session {:timeout-ms (left-ms)}))
           report (atom nil)]
       (try
         (when check?
@@ -1356,17 +1371,16 @@
   [client session name opts]
   (when-not (symbol-name? simple-symbol? name)
     (throw (ex-info (str "Not the name of a namespace: " name) {:type ::failed})))
-  (let [eval-ns (fn [code]
-                  (evaluate-for client {:op "eval" :session session :code code} opts (fn [_])))
-        enter #(eval-ns (format "#?(:clj (clojure.core/in-ns '%1$s) :cljs (in-ns '%1$s) :default (in-ns '%1$s))" name))
-        ;; Asked in a copy of session, in its language, so its *1 stays put.
-        copy (nrepl/clone-session client session)
+  (let [evaluate-in (fn [session code]
+                      (evaluate-for client {:op "eval" :session session :code code} opts (fn [_])))
+        enter #(evaluate-in session (format "#?(:clj (clojure.core/in-ns '%1$s) :cljs (in-ns '%1$s) :default (in-ns '%1$s))" name))
+        copy (loading-copy client session {})
         found? #(eval-data client {:session copy} ns-found-code [name] {})]
     (try
       (if (found?)
         (enter)
         ;; ClojureScript's require only works as a form of its own.
-        (let [loaded (eval-ns (format "#?(:clj (clojure.core/require '%1$s) :cljs (require '%1$s) :default (require '%1$s))" name))]
+        (let [loaded (evaluate-in copy (format "#?(:clj (clojure.core/require '%1$s) :cljs (require '%1$s) :default (require '%1$s))" name))]
           (cond
             (not= "ok" (:status loaded)) loaded
             ;; shadow-cljs only says what went wrong, with no eval-error.

@@ -400,7 +400,10 @@
       (testing "keeping the value before, behind in-ns's"
         (is (= "3" (eval-in "*2"))))
       (testing "loading the namespace first"
+        (eval-in "(+ 2 2)")
         (is (= {:status "ok" :ns "clojure.data"} (select-keys (enter "clojure.data") [:status :ns])))
+        (testing "in a copy of the session, so the require's nil isn't behind in-ns's value"
+          (is (= "4" (eval-in "*2"))))
         (is (= "{:a 1}" (eval-in "(first (diff {:a 1} {}))"))))
       (testing "out of a namespace that doesn't refer clojure.core"
         (eval-in "(in-ns 'empty.one)")
