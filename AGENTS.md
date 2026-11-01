@@ -92,11 +92,11 @@ nREPL with cider-nrepl (`neorepl server` jacks one in), `bb nrepl-server`,
 shadow-cljs, and piggieback with Node. Write down the versions in PLAN.md.
 
 The integration tests in `integration/` do that for the first two, each in a
-project of its own: nREPL with the cider-nrepl jack-in brings, and the server
-of the `bb` on the PATH, which has to be 1.13.227 or newer, as older ones
-never answer for a test that throws
-([babashka#2201](https://github.com/babashka/babashka/issues/2201)). They
-need the Clojure CLI. A feature that depends on what a server answers gets a
+project of its own: nREPL with the cider-nrepl jack-in brings, started by
+the Clojure CLI and by Leiningen, and the server of the `bb` on the PATH,
+which has to be 1.13.227 or newer, as older ones never answer for a test
+that throws ([babashka#2201](https://github.com/babashka/babashka/issues/2201)).
+They need the Clojure CLI and Leiningen. A feature that depends on what a server answers gets a
 test there as well as against the fakes.
 
 Before a release, run [proof](https://github.com/nrepl/proof) against
