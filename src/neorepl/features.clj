@@ -294,6 +294,12 @@
       (str/replace #"\n(?=.)" "\n  ")
       (str/replace " " " ")))
 
+(defn- blank->nil
+  "cider-nrepl sends nil as an empty list, babashka as an empty string."
+  [x]
+  (when-not (or (and (string? x) (str/blank? x)) (and (coll? x) (empty? x)))
+    x))
+
 (defn- normalize-info
   "info and lookup responses in one shape: :ns, :name, :doc, where it is as
   the :file, :line and :column, :arglists and a special form's :forms as
@@ -301,8 +307,12 @@
   member has its :class as the :ns and the :member as the :name, and for a
   class, the :class as the :name, with its Javadoc as text either way. Its
   for a namespace, which names it twice, has no :ns."
-  [client {:keys [file arglists-str forms forms-str macro special-form class member doc-fragments column] :as info}]
-  (let [file (source-file file)
+  [client response]
+  (let [{:keys [file arglists-str forms forms-str macro special-form class member doc-fragments column] :as info}
+        ;; As nbb has them for what it doesn't find, and nREPL's lookup the
+        ;; file of a var with none.
+        (into {} (filter (comp some? blank->nil val)) response)
+        file (source-file file)
         info (cond-> info
                member (assoc :ns class :name member)
                (and class (not member)) (assoc :name class)
@@ -341,10 +351,10 @@
   ([client sym ctx opts]
    (cond
      (supports? client "info")
-     (let [info (apply merge (ask client (lookup-msg {:op "info" :sym sym} ctx) opts))]
-       ;; Java members come without a name.
-       (when (or (:name info) (:member info))
-         (normalize-info client info)))
+     (let [info (normalize-info client (apply merge (ask client (lookup-msg {:op "info" :sym sym} ctx) opts)))]
+       ;; Java members come without a name, which they get here.
+       (when (:name info)
+         info))
 
      (supports? client "lookup")
      (try
@@ -502,12 +512,6 @@
                             (binding [*read-eval* false] (read-string %s)))))"
                       [all? text] opts)
              str/trimr))))
-
-(defn- blank->nil
-  "cider-nrepl sends nil as an empty list, babashka as an empty string."
-  [x]
-  (when-not (or (and (string? x) (str/blank? x)) (and (coll? x) (empty? x)))
-    x))
 
 (defn- dups
   "Flags the frames that call on from one before them in the same function

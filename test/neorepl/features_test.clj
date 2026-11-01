@@ -45,6 +45,9 @@
                "if" (transport/respond-to msg :status "done" :name "if" :special-form "true"
                                           :forms-str "(if test then else?)")
                "broken" (transport/respond-to msg :status ["done" "info-error"])
+               ;; As nbb answers for what it doesn't find, its nils as
+               ;; empty lists.
+               "not-in-nbb" (transport/respond-to msg :status "done" :ns nil :name nil :arglists-str "")
                "from-a-file" (transport/respond-to msg :status "done" :ns "user" :name "from-a-file"
                                                    :file (str (.toURI (io/file @source-file))) :line 2 :column 1)
                ;; As for the macros ClojureScript takes from Clojure.
@@ -242,6 +245,10 @@
           (nrepl/request client {:op "eval" :ns "user" :code "(defn made-at-the-repl [])"})
           (is (= {:ns "user" :name "made-at-the-repl"}
                  (select-keys (features/info client "made-at-the-repl" user) [:ns :name :file :line]))))
+        (testing "nowhere for a var with no file, as intern makes"
+          (nrepl/request client {:op "eval" :ns "user" :code "(intern 'user 'interned 1)"})
+          (is (= {:ns "user" :name "interned"}
+                 (select-keys (features/info client "interned" user) [:ns :name :file :line]))))
         (testing "symbols are only ever symbols"
           (is (nil? (features/info client "(System/exit 1)" user))))
         (testing "in a session, leaving its *1 alone"
@@ -502,6 +509,7 @@
           (is (= {:name "if" :special-form true :forms ["(if test then else?)"]}
                  (features/info client "if" user)))
           (is (nil? (features/info client "no-such-thing" user)))
+          (is (nil? (features/info client "not-in-nbb" user)))
           (testing "in the session asked for, where it's in ClojureScript, say"
             (let [session (nrepl/clone-session client)]
               (is (= session (:doc (features/info client "session" (assoc user :session session)))))))
