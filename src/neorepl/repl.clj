@@ -617,16 +617,40 @@
   "What the line editor's completion, eldoc and C-x keys need, looking names
   up where the REPL is, plus :in-ns, to say where that is, as run-loop's
   read-code gets it. Lookups for eldoc and docs get cached until then, since
-  evaluating code can change what names mean."
+  evaluating code can change what names mean. Eldoc's go on in the
+  background, so typing never waits on the server."
   [client]
   (let [ctx (atom nil)
-        ;; Short timeouts, since these happen as the user types. Failures
-        ;; don't get cached, so a slow first lookup gets another go.
-        lookup (fn [sym] (features/info client sym @ctx {:timeout-ms 500}))
-        cached (atom (memoize lookup))
-        info #(try
-                (@cached %)
-                (catch clojure.lang.ExceptionInfo _ nil))
+        ;; What lookups found where the REPL is. Failures don't get cached,
+        ;; so a slow first lookup gets another go.
+        found (atom {})
+        looking (atom #{})
+        ;; Short timeouts, since these happen as the user types.
+        info (fn [sym]
+               (let [place @ctx
+                     cache @found]
+                 (if (contains? cache sym)
+                   (get cache sym)
+                   (try
+                     (let [info (features/info client sym place {:timeout-ms 500})]
+                       ;; Unless the REPL's somewhere else by now.
+                       (swap! found #(cond-> % (identical? place @ctx) (assoc sym info)))
+                       info)
+                     (catch clojure.lang.ExceptionInfo _ nil)))))
+        ;; What's cached, or nothing, with a lookup started that calls
+        ;; (refresh) once it finds something.
+        info-later (fn [sym refresh]
+                     (let [cache @found]
+                       (if (contains? cache sym)
+                         (get cache sym)
+                         (when-not (contains? (first (swap-vals! looking conj sym)) sym)
+                           (future
+                             (when (try
+                                     (info sym)
+                                     (finally
+                                       (swap! looking disj sym)))
+                               (refresh)))
+                           nil))))
         token-at (fn [f text cursor]
                    (when-let [token (f (lexer/lex text) cursor)]
                      (assoc token :text (lexer/text text token))))
@@ -638,9 +662,9 @@
         ;; Asked for with a key, so worth waiting longer for.
         asked {:timeout-ms 5000}]
     {:complete #(features/complete client % @ctx {:timeout-ms 2000})
-     :eldoc (fn [text cursor]
+     :eldoc (fn [text cursor refresh]
               (when-let [{:keys [op] :as call} (lexer/call-at (lexer/lex text) cursor)]
-                (some-> (info op) (render/eldoc-line call))))
+                (some-> (info-later op refresh) (render/eldoc-line call))))
      :doc #(some-> (subject %1 %2) info render/doc-text)
      :source #(when-let [sym (subject %1 %2)]
                 (features/source client sym @ctx asked))
@@ -648,7 +672,7 @@
                  (some-> (features/apropos client (Pattern/quote sym) asked) not-empty render/apropos-text))
      :in-ns (fn [place]
               (reset! ctx place)
-              (reset! cached (memoize lookup)))}))
+              (reset! found {}))}))
 
 (defn- interactive
   "The REPL with a line editor. in-ns gets called with where the REPL is, as

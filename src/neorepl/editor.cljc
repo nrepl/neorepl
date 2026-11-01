@@ -183,6 +183,15 @@
       (reset! shown line)
       (.set field reader (when line supplier)))))
 
+(defn- redisplay
+  "Redisplays the line reader is reading, from any thread, with JLine's
+  lock, which output printed above the prompt takes too. Nothing for one
+  it's done reading."
+  [^LineReader reader]
+  (try
+    (.callWidget reader LineReader/REDISPLAY)
+    (catch IllegalStateException _ nil)))
+
 (defn- command-styled
   "code, with styled-code its tokens styled, with the REPL command it starts
   with, a comma and one of commands' names, in the :command style, or as an
@@ -200,12 +209,14 @@
 
 (defn- highlighter
   "Highlights code, with what the delimiter at the cursor pairs with, and
-  has (eldoc text cursor) say what to show under it, as render/eldoc-line's
-  pieces, cut to the terminal's width. JLine highlights on every redisplay,
-  so eldoc sees every change to the line, whatever made it, and the pair
-  follows the cursor. JLine's last redisplay of the line, once it's done
-  reading it, goes without the pair or eldoc, so they don't stay behind in
-  the scrollback. The names of the REPL's commands, a set, show as
+  has (eldoc text cursor refresh) say what to show under it, as
+  render/eldoc-line's pieces, cut to the terminal's width. refresh shows it
+  again, for eldoc to call when what it shows changes, like when a lookup
+  it started comes back. JLine highlights on every redisplay, so eldoc sees
+  every change to the line, whatever made it, and the pair follows the
+  cursor. JLine's last redisplay of the line, once it's done reading it,
+  goes without the pair or eldoc, so they don't stay behind in the
+  scrollback. The names of the REPL's commands, a set, show as
   command-styled has them. under is where eldoc's line goes, see
   show-under."
   [styles raw? eldoc commands under]
@@ -219,7 +230,7 @@
               reading? (.isReading reader)]
           (when eldoc
             (show-under reader under buffer
-                        (when-let [pieces (when reading? (eldoc buffer cursor))]
+                        (when-let [pieces (when reading? (eldoc buffer cursor #(redisplay reader)))]
                           ;; A column to spare, as a terminal can wrap a line
                           ;; that fills the last one.
                           (eldoc-string styles pieces (dec (.getWidth (.getTerminal reader)))))))
@@ -351,9 +362,10 @@
                    line (lexer/incomplete? by default)
     :complete      (complete prefix) for the completions of prefix, as
                    features/complete has them
-    :eldoc         (eldoc text cursor) for what to show under the input
-                   while typing, like the arglists of the function being
-                   called, as render/eldoc-line's pieces
+    :eldoc         (eldoc text cursor refresh) for what to show under
+                   the input while typing, like the arglists of the
+                   function being called, as render/eldoc-line's pieces,
+                   calling (refresh) when that changes, from any thread
     :eldoc?        false to show nothing there after all
     :doc           (doc text cursor) for the documentation C-x C-d shows
     :source        (source text cursor) for the code C-x C-s shows

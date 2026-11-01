@@ -20,6 +20,7 @@
 
 ### Changes
 
+- [#60](https://github.com/nrepl/neorepl/pull/60): Eldoc looks names up in the background, so typing no longer waits up to half a second on the server for a function it hasn't looked up yet.
 - [#45](https://github.com/nrepl/neorepl/pull/45): The REPL shows more of what reads like a special form as one: the forms macros expand into, like `let*`, and the defining, binding and threading macros, `deftest`, `->` and `with-open` among them.
 
 ### Bug fixes

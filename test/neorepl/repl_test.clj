@@ -574,6 +574,25 @@
           (type "\r")
           (is (screen #"(?m)^42\nuser=> $")))))))
 
+(deftest eldoc-lookups-test
+  (with-client [client {:port *port*}]
+    (let [{:keys [eldoc in-ns]} (#'repl/lookups client)
+          text #(some->> % (map first) (apply str))
+          refreshed (promise)]
+      (in-ns {:ns "user"})
+      (testing "in the background, so typing doesn't wait on the server"
+        (is (nil? (eldoc "(mapcat " 8 #(deliver refreshed :refreshed))))
+        (testing "and showing what it found once it's back"
+          (is (= :refreshed (deref refreshed 5000 :timeout)))
+          (is (= "clojure.core/mapcat: ([f] [f & colls])" (text (eldoc "(mapcat " 8 (fn []))))))
+        (testing "nothing to show for nothing found"
+          (let [looked (promise)]
+            (is (nil? (eldoc "(no-such-fn " 12 #(deliver looked :refreshed))))
+            (is (= :not-refreshed (deref looked 500 :not-refreshed))))))
+      (testing "until the next prompt, as evaluating code can change what names mean"
+        (in-ns {:ns "user"})
+        (is (nil? (eldoc "(mapcat " 8 (fn []))))))))
+
 (deftest commands-test
   (call-with-repl {}
     (fn [type screen]
