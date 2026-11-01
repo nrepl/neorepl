@@ -326,6 +326,61 @@
     [(inc (count (filter #{\newline} before)))
      (inc (.codePointCount before (int line-start) (int index)))]))
 
+(defn index
+  "The index in s of line and column, both counting from 1 as position
+  counts them, or nil when s has fewer lines. A column past the end of its
+  line is the line's end."
+  [^String s line column]
+  (loop [start 0
+         n 1]
+    (if (= n line)
+      (let [end (line-end s start)]
+        (if (< (dec column) (.codePointCount s (int start) (int end)))
+          (.offsetByCodePoints s (int start) (int (dec column)))
+          end))
+      (when-let [newline (str/index-of s "\n" start)]
+        (recur (inc newline) (inc n))))))
+
+(defn- after-form
+  "The tokens after the form the first of tokens starts."
+  [[{:keys [type]} & more]]
+  (if (= :open type)
+    (loop [[token & more] more
+           depth 1]
+      (case (:type token)
+        nil nil
+        :open (recur more (inc depth))
+        :close (if (= 1 depth) more (recur more (dec depth)))
+        (recur more depth)))
+    more))
+
+(defn- ns-name-token
+  "The token naming the namespace in tokens, those of an ns form after ns,
+  past the metadata and discarded forms before it."
+  [s tokens]
+  (loop [[token & more] (remove #(= :comment (:type %)) tokens)]
+    (case (:type token)
+      :symbol token
+      :discard (recur (after-form more))
+      :macro-char (when (= "^" (text s token))
+                    (recur (after-form more)))
+      nil)))
+
+(defn ns-forms
+  "The top-level ns forms in the lexed text, in order, as maps with the
+  :name of the namespace each declares and the :start and :end of the
+  form, as form-spans finds them."
+  [{s :text :keys [tokens] :as lexed}]
+  (let [index-at (into {} (map-indexed (fn [i {:keys [start]}] [start i])) tokens)]
+    (vec (keep (fn [[start end]]
+                 (let [[open head & more] (subvec tokens (index-at start))]
+                   (when (and (= "(" (text s open))
+                              (= :symbol (:type head))
+                              (= "ns" (text s head)))
+                     (when-let [name (ns-name-token s (take-while #(< (:start %) end) more))]
+                       {:name (text s name) :start start :end end}))))
+               (form-spans lexed)))))
+
 (def ^:private body-heads
   "The heads of the forms whose arguments on lines of their own are a body,
   indented by two rather than lined up with the first one: cljfmt's

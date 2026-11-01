@@ -1377,22 +1377,26 @@
 
 (defn ensure-ns
   "Makes sure session can evaluate in the namespace called name, loading it
-  first if it isn't there, as require would, in a copy of session, so the
-  session's *1 and namespace stay put. Works in Clojure and ClojureScript
-  alike. Returns nil once the namespace is there, or else what
-  evaluation/evaluate does, whose opts it takes, for loading it, which
-  doesn't show its value."
-  [client session name opts]
+  first if it isn't there, as require would. ns-msg, an eval of the
+  namespace's ns form, with its :file and :line, gets evaluated instead,
+  whether the namespace is there or not, so what the form requires gets
+  loaded too, as it does when the file loads. Either way it's in a copy of
+  session, so the session's *1 and namespace stay put. Works in Clojure
+  and ClojureScript alike. Returns nil once the namespace is there, or
+  else what evaluation/evaluate does, whose opts it takes, for loading it,
+  which doesn't show its value."
+  [client session name ns-msg opts]
   (when-not (symbol-name? simple-symbol? name)
     (throw (ex-info (str "Not the name of a namespace: " name) {:type ::failed})))
   (let [copy (loading-copy client session {})
         found? #(eval-data client {:session copy} ns-found-code [name] {})]
     (try
-      (when-not (found?)
+      (when (or ns-msg (not (found?)))
         ;; ClojureScript's require only works as a form of its own.
         (let [loaded (evaluate-for client
-                                   {:op "eval" :session copy
-                                    :code (format "#?(:clj (clojure.core/require '%1$s) :cljs (require '%1$s) :default (require '%1$s))" name)}
+                                   (merge {:code (format "#?(:clj (clojure.core/require '%1$s) :cljs (require '%1$s) :default (require '%1$s))" name)}
+                                          ns-msg
+                                          {:op "eval" :session copy})
                                    opts
                                    (fn [_]))]
           (cond
@@ -1410,7 +1414,7 @@
   namespace, when that fails, or else for switching to it, with the
   session's :ns. Neither shows its value."
   [client session name opts]
-  (or (ensure-ns client session name opts)
+  (or (ensure-ns client session name nil opts)
       (evaluate-for client
                     ;; nbb's server only switches for an ns form.
                     {:op "eval" :session session
@@ -1421,12 +1425,13 @@
 (defn evaluate-in-ns
   "Evaluates msg, an eval, the way evaluation/evaluate does, whose opts it
   takes, in the namespace called name, when there's one, which ensure-ns
-  makes sure of first. The :timeout covers both, and the session stays in
-  its namespace."
-  [client {:keys [session] :as msg} name {:keys [timeout] :as opts}]
+  makes sure of first, with ns-msg, the namespace's ns form, if there's one
+  to evaluate. The :timeout covers both, and the session stays in its
+  namespace."
+  [client {:keys [session] :as msg} name ns-msg {:keys [timeout] :as opts}]
   (if-not name
     (evaluation/evaluate client msg opts)
     (let [opts (cond-> opts
                  timeout (assoc :deadline (+ (System/currentTimeMillis) (long (* 1000 timeout)))))]
-      (or (ensure-ns client session name opts)
+      (or (ensure-ns client session name ns-msg opts)
           (evaluation/evaluate client (assoc msg :ns name) opts)))))
