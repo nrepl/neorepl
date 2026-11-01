@@ -238,3 +238,19 @@
        (is (= 0 status))
        (is (= {:status "ok" :values ["nil" "42"] :out "m\n"}
               (-> (json/read-str out) :result :structuredContent (select-keys [:status :values :out]))))))))
+
+(deftest other-cider-nrepl-test
+  (testing "a project with a cider-nrepl of its own gets a word about it"
+    (doseq [[tool project & args]
+            [["clojure" "{:aliases {:old {:extra-deps {cider/cider-nrepl {:mvn/version \"0.63.1\"}}}}}" "--aliases" ":old"]
+             ["lein" "(defproject old \"0.1.0\" :dependencies [[org.clojure/clojure \"1.12.6\"]] :plugins [[cider/cider-nrepl \"0.63.1\"]])"]]]
+      (testing tool
+        (let [dir (io/file *dir* (str "old-" tool))]
+          (spit-file dir (:file (jack-in/tool tool)) project)
+          (let [{:keys [status out err]} (apply test-server/run-in {:dir (str dir)
+                                                                   :sessions-file (io/file *dir* "neorepl" "sessions.edn")}
+                                                "(+ 1 2)\n" "repl" args)]
+            (is (= 0 status))
+            (is (= "user=> 3\nuser=> \n" out))
+            (is (str/includes? err (str "neorepl: The server runs cider-nrepl 0.63.1 from the project's or the user's "
+                                        "settings, rather than the " (:cider-nrepl jack-in/versions) " jack-in adds\n")))))))))

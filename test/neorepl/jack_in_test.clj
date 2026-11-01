@@ -87,6 +87,19 @@
         (testing "run through Node, which keeps Ctrl-C from it, see npx-test"
           (is (= "node" (first (#'jack-in/launch-command (jack-in/command "shadow-cljs" {}))))))))))
 
+(deftest other-cider-nrepl-test
+  (let [added (:cider-nrepl jack-in/versions)]
+    (testing "a server running another cider-nrepl than jack-in adds gets a word"
+      (is (= (str "The server runs cider-nrepl 0.51.1 from the project's or the user's settings, rather than the "
+                  added " jack-in adds")
+             (jack-in/other-cider-nrepl "lein" "0.51.1"))))
+    (testing "but not one running the one it adds"
+      (is (nil? (jack-in/other-cider-nrepl "clojure" added))))
+    (testing "nor one without cider-nrepl"
+      (is (nil? (jack-in/other-cider-nrepl "clojure" nil))))
+    (testing "nor babashka's, which has its own"
+      (is (nil? (jack-in/other-cider-nrepl "bb" "0.63.1"))))))
+
 (deftest with-server-test
   (call-with-temp-dir
    (fn [dir]

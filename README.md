@@ -57,9 +57,10 @@ CLI for a `deps.edn`, babashka, which has CIDER's essentials built in, for a
 and `--aliases` adds deps.edn aliases or Leiningen profiles. In a Leiningen
 project, `:init-ns` and `:init` in `:repl-options` work, `:prompt` and
 `:welcome` don't, being for `lein repl`'s own client, and a cider-nrepl in
-`~/.lein/profiles.clj` takes the place of the one jack-in adds. `neorepl
-server` starts one that stays up until you stop it, for editors, coding
-agents and `neorepl eval` to share:
+its `:plugins` or in `~/.lein/profiles.clj` takes the place of the one
+jack-in adds, which the REPL says when it starts. `neorepl server` starts
+one that stays up until you stop it, for editors, coding agents and
+`neorepl eval` to share:
 
 ```shell
 neorepl --aliases :dev:test
