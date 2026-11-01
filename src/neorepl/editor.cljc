@@ -241,6 +241,33 @@
           (doseq [{:keys [candidate] :as completion} (complete prefix)]
             (.add ^List candidates (Candidate. candidate candidate nil (description completion) nil nil false))))))))
 
+(defn- puts [^Terminal terminal capability]
+  (.puts terminal capability (object-array 0)))
+
+(defn- handed-over
+  "Calls f with the terminal let go of, for another program to have it, like
+  an editor, and takes it back after, turning back on the modes JLine reads
+  in, which an editor turns off as it exits, when JLine's reading. Output
+  waits till then. It takes no lock, for widgets, which run with JLine's
+  held, see suspended. A terminal on streams of its own, as in tests, is no
+  other program's to take."
+  [{:keys [^Terminal terminal ^LineReader reader suspended? system?]} f]
+  (reset! suspended? true)
+  (when system?
+    (.pause terminal true))
+  (try
+    (f)
+    (finally
+      (when system?
+        (.resume terminal)
+        (when (.isReading reader)
+          (puts terminal InfoCmp$Capability/keypad_xmit)
+          (when (.isSet reader LineReader$Option/BRACKETED_PASTE)
+            (doto (.writer terminal)
+              (.write "\u001b[?2004h")
+              (.flush)))))
+      (reset! suspended? false))))
+
 (defn- widget ^Widget [f]
   (reify Widget
     (apply [_] (boolean (f)))))
@@ -302,11 +329,14 @@
     :source        (source text cursor) for the code C-x C-s shows
     :apropos       (apropos text cursor) for what C-x C-a shows
     :commands      the names of the REPL's commands, a set, to highlight
+    :edit          (edit text) for what C-x C-e leaves in place of the input,
+                   as {:text text}, or {:message message} saying why it
+                   leaves it be
     :inputrc       readline's settings, a file JLine reads the way readline
                    would, $if neorepl taking in what's for neorepl alone
     :input, :output, :width and :type
                    a terminal on these streams instead, for tests"
-  [{:keys [history-file color? incomplete? complete eldoc eldoc? commands inputrc input]
+  [{:keys [history-file color? incomplete? complete eldoc eldoc? commands edit inputrc input]
     :or {color? true incomplete? lexer/incomplete? eldoc? true}
     :as opts}]
   (when (or input (maybe-terminal?))
@@ -352,7 +382,8 @@
                         :line (atom "")
                         :above (atom (AttributedString. ""))
                         ;; A token for the line waiting there.
-                        :waiting (atom nil)}]
+                        :waiting (atom nil)
+                        :system? (nil? input)}]
             ;; Enter in an unfinished form goes on to a line indented for it,
             ;; rather than to JLine's, which starts at the margin.
             (.put (.getWidgets reader) LineReader/ACCEPT_LINE
@@ -378,6 +409,16 @@
                                      (finally
                                        (.setAutosuggestion reader LineReader$SuggestionType/TAIL_TIP)))
                                    true)))))
+            ;; bash's and zsh's key for editing what's typed in EDITOR.
+            (when edit
+              (bind-widget reader "neorepl-edit" (str (KeyMap/ctrl \X) (KeyMap/ctrl \E))
+                           #(let [buffer (.getBuffer reader)
+                                  {:keys [text message]} (handed-over editor (partial edit (str buffer)))]
+                              (if text
+                                (do (.clear buffer)
+                                    (.write buffer ^CharSequence text))
+                                (.printAbove reader (AttributedString. ^CharSequence message)))
+                              true)))
             ;; rebel-readline's keys, which babashka's REPL has too.
             (doseq [[k key code?] [[:doc \D] [:source \S true] [:apropos \A]]
                     :let [f (some-> (k opts) safely)]
@@ -397,17 +438,12 @@
   (.close terminal))
 
 (defn suspended
-  "Calls f with the terminal let go of, for another program to have it, like
-  an editor, and takes it back after. Output waits till then."
-  [{:keys [^Terminal terminal lock suspended?]} f]
+  "Calls f with the terminal let go of, as handed-over does, holding the
+  editor's lock, which a widget mustn't take: a thread printing above the
+  prompt can hold it while it waits for JLine's."
+  [{:keys [lock] :as editor} f]
   (locking lock
-    (reset! suspended? true)
-    (.pause terminal true)
-    (try
-      (f)
-      (finally
-        (.resume terminal)
-        (reset! suspended? false)))))
+    (handed-over editor f)))
 
 (defn quietly
   "Calls f with what's typed meanwhile not echoed, so that what's typed
@@ -562,9 +598,6 @@
     (finally
       (.setVariable reader LineReader/DISABLE_HISTORY false)
       (reset! raw? false))))
-
-(defn- puts [^Terminal terminal capability]
-  (.puts terminal capability (object-array 0)))
 
 (def ^:private keys-by-capability
   {:up InfoCmp$Capability/key_up

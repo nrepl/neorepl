@@ -217,6 +217,19 @@
         (spit file core)
         (run :clojure "reload")))))
 
+(deftest edit-test
+  ;; The editor's a shell script.
+  (when-not (test-server/windows?)
+    (testing "cider-nrepl finding the file of the namespace the REPL's in"
+      (let [edited (io/file *dir* "edited")
+            editor (doto (spit-file *dir* "vi" (str "#!/bin/sh\necho \"$@\" > '" edited "'\n"))
+                     (.setExecutable true))]
+        (is (= 0 (:status (test-server/run-in {:dir (str (project-dir :clojure))
+                                               :sessions-file (io/file *dir* "neorepl" "sessions.edn")
+                                               :editor-command (str editor)}
+                                              ",ns demo.core\n,edit\n" "repl"))))
+        (is (= (str "+1 " (io/file (project-dir :clojure) "src" "demo" "core.clj") "\n") (slurp edited)))))))
+
 (deftest repl-test
   (on-each-server
    (fn [server]

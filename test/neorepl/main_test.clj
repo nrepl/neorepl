@@ -720,10 +720,11 @@
           editor (fn [path]
                    (doto (spit-file *dir* path (str "#!/bin/sh\necho \"$@\" > '" edited "'\n"))
                      (.setExecutable true)))
-          edit #(with-out-str
-                  (with-in-str ",edit edit.demo/f\n"
-                    (main/run ["repl" "-p" (str *port*)]
-                              {:dir *dir* :sessions-file (sessions-file) :editor-command %})))]
+          edit (fn [editor-command & [input]]
+                 (with-out-str
+                   (with-in-str (or input ",edit edit.demo/f\n")
+                     (main/run ["repl" "-p" (str *port*)]
+                               {:dir *dir* :sessions-file (sessions-file) :editor-command editor-command}))))]
       (run-command "load" (str file))
       (testing "at the line, the way vi and Emacs take it"
         (edit (str "'" (editor "an editor/vi") "' -f"))
@@ -732,7 +733,9 @@
         (edit (str (editor "bin/code") " -w"))
         (is (= (str "-w -g " (.getAbsolutePath file) ":3\n") (slurp edited))))
       (testing "with an editor that fails"
-        (is (= "user=> The editor exited with status 1\nuser=> \n" (edit "false")))))))
+        (is (= "user=> The editor exited with status 1\nuser=> \n" (edit "false"))))
+      (testing "the namespace's file without a name, which takes cider-nrepl to find"
+        (is (str/includes? (edit "false" ",ns edit.demo\n,edit\n") "Nowhere to find edit.demo in edit.demo"))))))
 
 (deftest discovery-test
   (call-with-temp-dir
