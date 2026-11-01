@@ -100,8 +100,15 @@ runtime busy.
 ```shell
 neorepl eval '(+ 1 2)'
 neorepl eval --format json -f script.clj
+neorepl eval --ns my.app '(start)'
 echo '(range 3)' | neorepl eval -
 ```
+
+`--ns` evaluates in a namespace, loading it first unless it's there, and
+leaves the session in its own. `-f FILE --line N:COL` evaluates only the
+top-level form at that spot of FILE, in the file's namespace, which is how an
+editor without a plugin evaluates the form at the cursor:
+[doc/editors.md](doc/editors.md) has setups for Neovim, Emacs and Helix.
 
 Evaluations share a session, so `*ns*`, `*1` and `*e` carry over from one
 call to the next. `--session NAME` keeps separate ones apart, `neorepl

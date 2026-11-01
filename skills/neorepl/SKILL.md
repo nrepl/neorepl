@@ -68,15 +68,19 @@ neorepl eval -s agent '(map inc *1)'
 ```
 
 What the code prints shows up as it runs, and each value on a line of its
-own. Pass code with single quotes in it on standard input, instead of
-fighting the shell:
+own. `--ns my.app` evaluates in that namespace, loading it first unless it's
+there, without moving the session out of its own. Pass code with single
+quotes in it on standard input, instead of fighting the shell:
 
 ```shell
-neorepl eval -s agent - <<'EOF'
-(in-ns 'my.app)
+neorepl eval -s agent --ns my.app - <<'EOF'
 (keys (ns-publics 'my.app))
 EOF
 ```
+
+To evaluate one definition from a file you've edited, without loading the
+rest, give its line: `neorepl eval -s agent -f src/my/app.clj --line 42`
+evaluates the top-level form there, in the file's namespace.
 
 `--timeout 30` interrupts an evaluation that runs longer than 30 seconds and
 `--max-output 2000` cuts long values and output, both worth passing when
