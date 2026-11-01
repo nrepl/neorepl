@@ -16,6 +16,10 @@
 
 - [#45](https://github.com/nrepl/neorepl/pull/45): The REPL shows more of what reads like a special form as one: the forms macros expand into, like `let*`, and the defining, binding and threading macros, `deftest`, `->` and `with-open` among them.
 
+### Bug fixes
+
+- [#54](https://github.com/nrepl/neorepl/pull/54): `neorepl mcp` sends a session's evaluations one at a time, so cancelling one no longer has nREPL drop the calls queued behind it, and a call cancelled while it waits is never sent.
+
 ## 0.4.1 (2026-10-31)
 
 Catching up with cider-nrepl 0.64.

@@ -164,9 +164,14 @@
   {:port {:type "integer" :minimum 1 :maximum 65535
           :description "The nREPL server's port, when the project runs several"}})
 
+(def ^:private default-session
+  "The session a call without one goes to, the one the skill has the CLI
+  use too."
+  "agent")
+
 (def ^:private session-arg
   {:session {:type "string" :minLength 1
-             :description "The named session, shared with neorepl's CLI (default: agent)"}})
+             :description (str "The named session, shared with neorepl's CLI (default: " default-session ")")}})
 
 (def ^:private timeout-arg
   {:timeout {:type "number" :exclusiveMinimum 0 :maximum 86400
@@ -194,8 +199,10 @@
   "The tools, as tools/list has them, and how each one :runs, given the
   server, the arguments, with a :session and an :ns by default, and a
   function to call with the message id and the interrupt function of an
-  evaluation, for cancelling it."
+  evaluation, for cancelling it. The ones whose :evaluates? says they
+  evaluate in their session take their turn there, see call."
   [{:name "eval"
+    :evaluates? true
     :description "Evaluate Clojure code in a session that keeps *ns*, *1 and *e from call to call. Returns what it printed and its values; an exception's message and its class come in the error output, and pst shows the stack trace."
     :inputSchema (schema (merge {:code {:type "string" :description "The code, one form or several"}}
                                 timeout-arg session-arg port-arg)
@@ -204,6 +211,7 @@
            (evaluate server args on-send
                      #(evaluation/evaluate %1 {:op "eval" :code code :session %2} %3)))}
    {:name "load"
+    :evaluates? true
     :description "Load a Clojure file into the session, so its errors carry the file's name and lines. Check it first."
     :inputSchema (schema (merge {:file {:type "string" :description "The file's path"}} timeout-arg session-arg port-arg)
                          "file")
@@ -241,12 +249,14 @@
                                 timeout-arg port-arg))
     :run (fn [server {:keys [namespaces] :as args} _] (reload server args namespaces))}
    {:name "test"
+    :evaluates? true
     :description "Run tests: the namespaces given, or tests as ns/name, or with cider-nrepl or babashka, the whole project's. Says what didn't pass, where and why."
     :inputSchema (schema (merge {:names {:type "array" :items {:type "string"}
                                          :description "Namespaces, and tests as ns/name"}}
                                 timeout-arg session-arg port-arg))
     :run (fn [server {:keys [names] :as args} on-send] (run-tests server args on-send (vec names)))}
    {:name "retest"
+    :evaluates? true
     :description "Rerun the tests that didn't pass last time. Takes cider-nrepl or babashka."
     :inputSchema (schema (merge timeout-arg session-arg port-arg))
     :run (fn [server args on-send] (run-tests server args on-send :failed))}
@@ -324,8 +334,7 @@
         (if-let [message (problem tool arguments)]
           (error message)
           (try
-            ;; The skill has the CLI use the session called agent too.
-            (run server (merge {:session "agent"} arguments) on-send)
+            (run server arguments on-send)
             (catch clojure.lang.ExceptionInfo e
               (error (ex-message e)))))]
     {:content [{:type "text" :text (if (str/blank? text) "(nothing)" text)}]
@@ -347,27 +356,41 @@
 
 (defn- call
   "Runs tool, for the tools/call with id, on a thread of its own, so the
-  requests after it get answered, a cancellation among them. It's :running
-  until it's done, with the interrupt function of its evaluation once
-  there's one."
-  [{:keys [running cancelled ^ExecutorService calls] :as server} id tool arguments]
-  (swap! running assoc id nil)
-  (.execute calls
-            (fn []
-              (try
-                (let [response (call-tool tool arguments server
-                                          (fn [_ interrupt]
-                                            (swap! running assoc id interrupt)
-                                            ;; Cancelled before it got this far.
-                                            (when (contains? @cancelled id)
-                                              (interrupt))))]
-                  (when-not (contains? @cancelled id)
-                    (respond server id response)))
-                (catch Throwable t
-                  (fail server id -32603 (str "neorepl failed: " t)))
-                (finally
-                  (swap! running dissoc id)
-                  (swap! cancelled disj id))))))
+  requests after it get answered, a cancellation among them. One that
+  evaluates in its session waits for the ones before it there to be done:
+  nREPL drops the evaluations queued behind one it interrupts (nrepl#503),
+  so they queue here, in :turns, the last call's promise for each session,
+  where cancelling one means it's never sent. It's :running until it's
+  done, with the interrupt function of its evaluation once there's one."
+  [{:keys [running cancelled turns ^ExecutorService calls] :as server} id tool arguments]
+  (let [arguments (cond->> arguments
+                    ;; Others are for call-tool to turn down.
+                    (or (nil? arguments) (map? arguments)) (merge {:session default-session}))
+        cancelled? #(contains? @cancelled id)
+        turn (promise)
+        previous (when (:evaluates? tool)
+                   (let [k [(:port arguments) (:session arguments)]]
+                     (get (first (swap-vals! turns assoc k turn)) k)))]
+    (swap! running assoc id nil)
+    (.execute calls
+              (fn []
+                (try
+                  (some-> previous deref)
+                  (when-not (cancelled?)
+                    (let [response (call-tool tool arguments server
+                                              (fn [_ interrupt]
+                                                (swap! running assoc id interrupt)
+                                                ;; Cancelled before it got this far.
+                                                (when (cancelled?)
+                                                  (interrupt))))]
+                      (when-not (cancelled?)
+                        (respond server id response))))
+                  (catch Throwable t
+                    (fail server id -32603 (str "neorepl failed: " t)))
+                  (finally
+                    (deliver turn true)
+                    (swap! running dissoc id)
+                    (swap! cancelled disj id)))))))
 
 (defn- cancel
   "Interrupts the evaluation of the request with id, if it's still running,
@@ -387,7 +410,7 @@
                                      :serverInfo {:name "neorepl" :version (:version server)}
                                      :instructions "Evaluate Clojure, look things up, run tests and check files through the project's nREPL server. Sessions keep *ns*, *1 and *e between calls and are shared with the neorepl CLI."})
     "ping" (respond server id {})
-    "tools/list" (respond server id {:tools (mapv #(dissoc % :run) tools)})
+    "tools/list" (respond server id {:tools (mapv #(dissoc % :run :evaluates?) tools)})
     "tools/call" (if-let [tool (get tools-by-name (:name params))]
                    (call server id tool (:arguments params))
                    (fail server id -32602 (str "No tool called " (:name params))))
@@ -404,7 +427,7 @@
   default one for nil."
   [^BufferedReader in ^Writer out opts]
   (let [server (assoc opts :out out :lock (Object.)
-                      :clients (atom {}) :running (atom {}) :cancelled (atom #{})
+                      :clients (atom {}) :running (atom {}) :cancelled (atom #{}) :turns (atom {})
                       :calls (Executors/newCachedThreadPool))]
     (try
       (doseq [line (line-seq in)
