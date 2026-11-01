@@ -50,6 +50,9 @@
                "not-in-nbb" (transport/respond-to msg :status "done" :ns nil :name nil :arglists-str "")
                "from-a-file" (transport/respond-to msg :status "done" :ns "user" :name "from-a-file"
                                                    :file (str (.toURI (io/file @source-file))) :line 2 :column 1)
+               ;; Basilisp counts columns from 0.
+               "from-column-0" (transport/respond-to msg :status "done" :ns "user" :name "from-a-file"
+                                                     :file (str (.toURI (io/file @source-file))) :line 2 :column 0)
                ;; As for the macros ClojureScript takes from Clojure.
                "on-a-wrong-line" (transport/respond-to msg :status "done" :ns "user" :name "on-a-wrong-line"
                                                        :file (str (.toURI (io/file @source-file))) :line 5)
@@ -298,7 +301,9 @@
 
 (deftest apropos-test
   (with-client [client {:port *port*}]
-    (is (some #{{:name "clojure.core/mapcat"}} (features/apropos client "^mapc")))))
+    (is (some #{{:name "clojure.core/mapcat"}} (features/apropos client "^mapc")))
+    (testing "clojure.repl's own, which a server needn't have loaded"
+      (is (= [{:name "clojure.repl/find-doc"}] (features/apropos client "^find-doc$"))))))
 
 (deftest expand-test
   (with-client [client {:port *port*}]
@@ -581,6 +586,7 @@
              (fn [dir]
                (reset! source-file (test-server/spit-file dir "src.clj" "(ns user)\n(defn from-a-file []\n  1)\n(def after 2)\n(println :not-a-definition)\n"))
                (is (= "(defn from-a-file []\n  1)" (features/source client "from-a-file" user)))
+               (is (= "(defn from-a-file []\n  1)" (features/source client "from-column-0" user)))
                (testing "if it's a definition, rather than whatever the line has"
                  (is (nil? (features/source client "on-a-wrong-line" user)))))))
           (testing "or the server's classpath, for a file this machine can't read"
