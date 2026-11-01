@@ -639,10 +639,8 @@
         asked {:timeout-ms 5000}]
     {:complete #(features/complete client % @ctx {:timeout-ms 2000})
      :eldoc (fn [text cursor]
-              (when-let [{:keys [end text]} (token-at lexer/enclosing-op text cursor)]
-                ;; Not while the function's name is still being typed.
-                (when (< end cursor)
-                  (some-> (info text) render/eldoc-text))))
+              (when-let [{:keys [op] :as call} (lexer/call-at (lexer/lex text) cursor)]
+                (some-> (info op) (render/eldoc-line call))))
      :doc #(some-> (subject %1 %2) info render/doc-text)
      :source #(when-let [sym (subject %1 %2)]
                 (features/source client sym @ctx asked))

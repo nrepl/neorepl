@@ -103,12 +103,16 @@
     :else (str/split-lines s)))
 
 (defn- form-text
-  "A special form's shape the way lookup has it, a vector of strings and
-  vectors, as text."
+  "A special form's shape the way lookup has it, data that bencode turns
+  into strings and vectors, lists and vectors alike, as text. The lists in
+  clojure.core's and clojure.repl's shapes start with a vector, as in fn's
+  ([params*] exprs*), or with ., as in set!'s, and the vectors are like
+  [bindings*]."
   [form]
-  (if (string? form)
-    form
-    (str "[" (str/join " " (map form-text form)) "]")))
+  (cond
+    (string? form) form
+    (or (coll? (first form)) (= "." (first form))) (str "(" (str/join " " (map form-text form)) ")")
+    :else (str "[" (str/join " " (map form-text form)) "]")))
 
 (defn- source-file
   "Where a server says a definition is, as a path when that's a file on this

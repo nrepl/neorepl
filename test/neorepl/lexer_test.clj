@@ -201,6 +201,35 @@
     "(ma" 3 "ma"
     "(let [x 1) (" 12 nil))
 
+(deftest call-at-test
+  (are [s expected] (= expected (lexer/call-at (lexer/lex s) (count s)))
+    "(map " {:op "map" :args [{:kind nil}]}
+    "(map inc" {:op "map" :args [{:kind :other}]}
+    "(map inc " {:op "map" :args [{:kind :other} {:kind nil}]}
+    "(defn f \"Doc.\" {:a 1} " {:op "defn" :args [{:kind :other} {:kind :string} {:kind :map} {:kind nil}]}
+    "(fn [x] (f) #{1} " {:op "fn" :args [{:kind :vector} {:kind :list} {:kind :set} {:kind nil}]}
+    "(f 'x " {:op "f" :args [{:kind :other} {:kind nil}]}
+    "(f \"ab" {:op "f" :args [{:kind :string}]}
+    "(f ; a comment\n" {:op "f" :args [{:kind nil}]}
+    ;; The form metadata's on, rather than the metadata.
+    "(defn f ^String [x] " {:op "defn" :args [{:kind :other} {:kind :vector} {:kind nil}]}
+    "(defn f ^{:a 1} [x] " {:op "defn" :args [{:kind :other} {:kind :vector} {:kind nil}]}
+    "(let ^:foo [a 1] " {:op "let" :args [{:kind :vector} {:kind nil}]}
+    ;; Without what #_ discards.
+    "(defn f #_x " {:op "defn" :args [{:kind :other} {:kind nil}]}
+    "(defn f #_ #_ a b " {:op "defn" :args [{:kind :other} {:kind nil}]}
+    ;; Which could be anything.
+    "(let #?(:clj [a 1]) " {:op "let" :args [{:kind nil} {:kind nil}]})
+  (testing "an argument started, of the kind its opener says"
+    (is (= {:op "let" :args [{:kind :vector}]} (lexer/call-at (lexer/lex "(let [x ") 8))))
+  (testing "the innermost list's"
+    (is (= "fn" (:op (lexer/call-at (lexer/lex "(map (fn [x] ") 13)))))
+  (testing "nothing while the function's name is being typed, or outside a call"
+    (are [s] (nil? (lexer/call-at (lexer/lex s) (count s)))
+      "(map"
+      "map"
+      "(:k ")))
+
 (deftest delimiter-match-test
   (let [match (fn [s cursor]
                 (when-let [{:keys [at match mismatched?]} (lexer/delimiter-match (lexer/lex s) cursor)]

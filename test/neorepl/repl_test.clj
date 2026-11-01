@@ -431,34 +431,96 @@
         (is (= "function" (description {:candidate "str/join" :type "function" :ns "clojure.string"}))))
       (testing "and nothing for one the server says nothing about"
         (is (nil? (description {:candidate "map"}))))))
-  (testing "eldoc shows the arglists of the function being called"
+  (testing "eldoc shows the arglists of the function being called, under the input"
     (call-with-repl {:eldoc? true}
       (fn [type screen]
         (type "(mapcat ")
-        (is (screen #"\[f\] \[f & colls\]"))
+        (is (screen #"user=> \(mapcat \nclojure\.core/mapcat: \(\[f\] \[f & colls\]\)"))
         (type "\u0003"))))
-  (testing "eldoc cut to fit the line"
+  (testing "eldoc wherever the cursor is, rather than only at the end"
+    (call-with-repl {:eldoc? true}
+      (fn [type screen]
+        (type "(inc (mapcat x))")
+        ;; Ctrl-B twice, back into (mapcat x), after the x.
+        (type "\u0002\u0002")
+        ;; In place of inc's, which JLine redraws only from where they
+        ;; differ, after clojure.core/.
+        (is (screen #"mapcat: \(\[f\] \[f & colls\]\)"))
+        (type "\u0003"))))
+  (testing "eldoc in bold for the parameter the argument at the cursor goes into, and faint for the arglists that can't take it"
+    (let [{:keys [out]} (call-with-repl {:eldoc? true :color? true}
+                          (fn [type screen]
+                            (type "(mapcat inc ")
+                            (screen #"\nclojure\.core/mapcat: ")
+                            ;; For the keys typed after the lookup came back.
+                            (Thread/sleep 100)
+                            (type "\u0003")))]
+      (is (re-find #"\u001b\[[0-9;]*2m\[f\]" out))
+      (is (re-find #"\u001b\[[0-9;]*1m& colls" out))))
+  (testing "eldoc matches a macro's arguments by their shape"
+    (let [{:keys [out]} (call-with-repl {:eldoc? true :color? true}
+                          (fn [type screen]
+                            (type "(defn f \"Does f.\" ")
+                            ;; Too long for its namespace.
+                            (screen #"\ndefn: \(\[name doc-string\? attr-map\? ")
+                            (Thread/sleep 100)
+                            (type "\u0003")))]
+      ;; Past the docstring, rather than at the third parameter.
+      (is (re-find #"\u001b\[[0-9;]*1mattr-map\?" out))))
+  (testing "eldoc cut to fit, without the namespace first"
     (call-with-repl {:eldoc? true :width 30}
       (fn [type screen]
         (type "(mapcat ")
-        (is (screen #"user=> \(mapcat \[f\] \[f & col…$"))
-        (testing "of the row it's on, when the line's longer"
-          (type "identity identity ")
-          ;; Uncut, which it is only after the line wraps.
-          (is (screen #"\[f\] \[f & colls\]")))
-        (type "\u0003"))))
-  (testing "eldoc keeps a special form's shape whole"
+        (is (screen #"\nmapcat: \(\[f\] \[f & colls\]\)"))
+        (type "\u0003")))
+    (testing "then with an ellipsis, a column short of the width"
+      (call-with-repl {:eldoc? true :width 20}
+        (fn [type screen]
+          (type "(mapcat ")
+          (is (screen #"\nmapcat: \(\[f\] \[f & …"))
+          (type "\u0003")))))
+  (testing "eldoc's line goes once the input's accepted, so it doesn't stay in the scrollback"
+    (let [{:keys [out]} (call-with-repl {:eldoc? true}
+                          (fn [type screen]
+                            (type "(mapcat ")
+                            (screen #"\nclojure\.core/mapcat: ")
+                            (type "list [[1]])\r")
+                            (screen #"(?m)^\(\[1\]\)\nuser=> $")))
+          shown (str/last-index-of out "clojure.core/mapcat: ")]
+      (is (str/includes? (subs out shown (str/index-of out "([1])" shown)) "\u001b[K"))))
+  (testing "the completion menu shows in eldoc's place"
     (call-with-repl {:eldoc? true}
       (fn [type screen]
-        ;; Ctrl-L, so the line's drawn in one go, rather than as the
-        ;; characters inserted before the tip already there.
-        (type "(if x")
-        (screen #"\(if test then else\?\)")
-        (type "\u000c")
-        (is (screen #"user=> \(if x \(if test then else\?\)$"))
-        (testing "with a dash in the word typed, which JLine puts a space before itself"
-          (type "-y\u000c")
-          (is (screen #"user=> \(if x-y \(if test then else\?\)$")))
+        (type "(mapcat map-")
+        (screen #"\nclojure\.core/mapcat: ")
+        (type "\t")
+        (is (screen #"map-indexed"))
+        (type "\u0003"))))
+  (testing "eldoc's line comes back once the input changes after C-d's list of completions, or C-x ='s position"
+    (call-with-repl {:eldoc? true}
+      (fn [type screen]
+        (type "(mapcat map-")
+        (screen #"\nclojure\.core/mapcat: ")
+        (type "\u0004")
+        (screen #"map-indexed")
+        (type "i")
+        (is (screen #"map-indexed[^\n]*\n(?s).*clojure\.core/mapcat: \(\[f\] \[f & colls\]\)$"))
+        (type "\u0003")
+        (type "(mapcat x")
+        (screen #"\nclojure\.core/mapcat: ")
+        (type "\u0018=")
+        (screen #"point 10 of 10")
+        (type "y")
+        (is (screen #"point 10 of 10[^\n]*\n(?s).*clojure\.core/mapcat: \(\[f\] \[f & colls\]\)$"))
+        (type "\u0003"))))
+  (testing "output from another thread goes above the prompt, with eldoc's line still under the input"
+    (call-with-repl {:eldoc? true}
+      (fn [type screen]
+        (type "(do (future (Thread/sleep 300) (println :later)) nil)\r")
+        (screen #"nil\nuser=> $")
+        (type "(mapcat ")
+        (screen #"\nclojure\.core/mapcat: ")
+        (is (screen #":later\n(?s).*user=> \(mapcat \nclojure\.core/mapcat: \(\[f\] \[f & colls\]\)"))
         (type "\u0003"))))
   (testing "eldoc for something that isn't a function"
     (call-with-repl {:eldoc? true}
@@ -495,13 +557,15 @@
         (type "\u0018\u0001")
         (is (screen #"clojure\.core/mapcat"))
         (type "\u0003"))))
-  (testing "Ctrl-R searches the history, with eldoc on too"
+  (testing "Ctrl-R searches the history, its prompt in eldoc's place"
     (call-with-repl {:eldoc? true}
       (fn [type screen]
         (type "(+ 40 2)\r")
         (screen #"(?m)^42\nuser=> $")
         (type "(+ 1 1)\r")
         (screen #"(?m)^2\nuser=> $")
+        (type "(mapcat ")
+        (screen #"\nclojure\.core/mapcat: ")
         (type "\u0012")
         (is (screen #"bck-i-search: _"))
         (testing "and Ctrl-R again finds the match before"
