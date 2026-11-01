@@ -421,7 +421,8 @@
   (try
     (with-open [r (io/reader file)]
       (when-let [[first-line & more] (seq (drop (dec line) (line-seq r)))]
-        (loop [lines [(subs first-line (min (count first-line) (dec (or column 1))))]
+        ;; Basilisp counts columns from 0, basilisp#1357.
+        (loop [lines [(subs first-line (min (count first-line) (max 0 (dec (or column 1)))))]
                more more]
           (let [text (str/join "\n" lines)]
             (if (and (lexer/incomplete? text) (seq more))
@@ -461,7 +462,14 @@
      (->> (ask client {:op "apropos" :query regex} opts)
           (some :apropos-matches)
           (mapv #(select-keys % [:name :type :doc])))
-     (->> (eval-data client {:ns "user"} "(do (require 'clojure.repl) (map str (clojure.repl/apropos (re-pattern %s))))"
+     ;; clojure.repl/apropos, which Basilisp doesn't have, with clojure.repl
+     ;; loaded, as it would be for that.
+     (->> (eval-data client {:ns "user"} "(do #?(:clj (require 'clojure.repl))
+                                              (let [regex (re-pattern %s)]
+                                                (map str (sort (for [n (all-ns)
+                                                                     s (keys (ns-publics n))
+                                                                     :when (re-find regex (str s))]
+                                                                 (symbol (str (ns-name n)) (str s)))))))"
                      [regex] opts)
           (mapv #(hash-map :name %))))))
 
@@ -509,7 +517,9 @@
                       "(with-out-str
                          (clojure.pprint/pprint
                            ((if %s clojure.walk/macroexpand-all macroexpand-1)
-                            (binding [*read-eval* false] (read-string %s)))))"
+                            (let [s %s]
+                              ;; Basilisp has no *read-eval*.
+                              #?(:lpy (read-string s) :default (binding [*read-eval* false] (read-string s)))))))"
                       [all? text] opts)
              str/trimr))))
 

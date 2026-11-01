@@ -24,6 +24,7 @@
 - [#56](https://github.com/nrepl/neorepl/pull/56): Running a ClojureScript namespace's tests, or switching to them with `,ns`, from the namespace they test no longer fails on piggieback as a circular dependency, and `,ns` loading a namespace no longer leaves a `nil` in `*2`.
 - [#58](https://github.com/nrepl/neorepl/pull/58): Lookups take an empty list in a server's answer for the nil it stands for, so `doc` no longer prints `[]` for what nbb doesn't find, and `doc` and `where` no longer fail on a var made with `intern` without cider-nrepl.
 - [#58](https://github.com/nrepl/neorepl/pull/58): Code that throws on nbb fails the evaluation, which nbb's server says only with an `:ex`, so `neorepl eval` exits 1 and the MCP `eval` tool reports an error.
+- [#58](https://github.com/nrepl/neorepl/pull/58): `source`, `macroexpand` and `apropos` work on Basilisp.
 
 ## 0.4.1 (2026-10-31)
 
