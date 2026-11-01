@@ -1218,7 +1218,10 @@ version."))
                           :sessions-file (io/file (xdg/cache-home) "neorepl" "sessions.edn")
                           :history-dir (io/file (xdg/state-home) "neorepl" "history")
                           ;; See https://no-color.org.
-                          :terminal {:color? (str/blank? (System/getenv "NO_COLOR"))}
+                          :terminal {:color? (str/blank? (System/getenv "NO_COLOR"))
+                                     ;; Where readline looks.
+                                     :inputrc (or (not-empty (System/getenv "INPUTRC"))
+                                                  (io/file (System/getProperty "user.home") ".inputrc"))}
                           :editor-command (some #(not-empty (System/getenv %)) ["VISUAL" "EDITOR"])
                           :sources-dir (io/file (xdg/cache-home) "neorepl" "sources")})]
     (flush)

@@ -151,6 +151,26 @@
                               (screen #"(?m)^3\nuser=> $")))]
         (is (not (str/includes? out "\u001b[7m")))))))
 
+(deftest inputrc-test
+  (call-with-temp-dir
+   (fn [dir]
+     (testing "readline's settings count, so the vi keymap is there"
+       (call-with-repl {:inputrc (test-server/spit-file dir "vi" "set editing-mode vi\n")}
+         (fn [type screen]
+           ;; Escape, then x deleting the character under the cursor.
+           (type "12\u001bx\r")
+           (is (screen #"(?m)^1\nuser=> $")))))
+     (testing "and so do neorepl's own, like highlighting input past 1000 characters"
+       (let [line (str "(str \"" (apply str (repeat 1100 "a")) "\")")
+             {:keys [out]} (call-with-repl {:inputrc (test-server/spit-file dir "long" "$if neorepl\n  set features-max-buffer-size 10000\n$endif\n")
+                                            :color? true}
+                             (fn [type screen]
+                               (type line)
+                               (screen #"\)$")
+                               (type "\r")
+                               (screen #"\nuser=> $")))]
+         (is (str/includes? out "\u001b[7m(")))))))
+
 (deftest output-test
   (testing "stdout and stderr get lines of their own"
     (call-with-repl {}

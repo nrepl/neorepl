@@ -273,9 +273,11 @@
     :doc           (doc text cursor) for the documentation C-x C-d shows
     :source        (source text cursor) for the code C-x C-s shows
     :apropos       (apropos text cursor) for what C-x C-a shows
+    :inputrc       readline's settings, a file JLine reads the way readline
+                   would, $if neorepl taking in what's for neorepl alone
     :input, :output, :width and :type
                    a terminal on these streams instead, for tests"
-  [{:keys [history-file color? incomplete? complete eldoc eldoc? input]
+  [{:keys [history-file color? incomplete? complete eldoc eldoc? inputrc input]
     :or {color? true incomplete? lexer/incomplete? eldoc? true}
     :as opts}]
   (when (or input (maybe-terminal?))
@@ -305,6 +307,8 @@
               (.variable builder style "fg:default")))
           (when history-file
             (.variable builder LineReader/HISTORY_FILE (str history-file)))
+          (when inputrc
+            (.variable builder LineReader/INPUT_RC_FILE_NAME (str inputrc)))
           (when complete
             (.completer builder (completer (safely complete))))
           (let [reader (.build builder)
