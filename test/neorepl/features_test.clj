@@ -368,7 +368,12 @@
                                                              :expected "(= 1 (throw (ex-info \"boom\" {})))"
                                                              :actual "#error {:message \"boom\", :data {}}"
                                                              :error {:message "boom" :stack "Error: boom\n    at x.js:1:2"}
-                                                             :line 6}]}})))))
+                                                             :line 6}]}}))))
+  (testing "an error outside an assertion, whose line ClojureScript doesn't know"
+    (is (= [{:type "error" :ns "app.core-test" :var "throws" :error "boom" :index 0}]
+           (#'features/test-results {:app.core-test {:throws [{:type "error" :index 0 :ns "app.core-test" :var "throws"
+                                                               :error {:message "boom" :stack "Error: boom"}
+                                                               :line "NaN"}]}})))))
 
 (deftest reload-test
   (with-client [client {:port *port*}]
@@ -631,7 +636,10 @@
                   (is (= "helper.clj"
                          (:file (first (#'features/locate client session false
                                                           [{:type "error" :ns "neorepl.sample-suite" :var "erring"
-                                                            :file "helper.clj" :line 3}])))))))
+                                                            :file "helper.clj" :line 3}]))))))
+                (testing "and the test's line, for an error ClojureScript knows none for"
+                  (is (= 14 (:line (first (#'features/locate client session true
+                                                             [{:type "error" :ns "neorepl.sample-suite" :var "erring"}])))))))
               (testing "every test in the project, its namespaces loaded first, as orchard finds them"
                 ;; One that's never there, since one that threw is loaded as far
                 ;; as require is concerned, its ns form having said so.
