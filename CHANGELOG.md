@@ -14,6 +14,7 @@
 - [#55](https://github.com/nrepl/neorepl/pull/55): `neorepl refs` lists the functions that use a var, or with `--deps`, the ones it uses, as `,refs` and `,deps` do in the REPL and the `refs` tool does for MCP, with cider-nrepl.
 - [#59](https://github.com/nrepl/neorepl/pull/59): `neorepl eval --ns NS` evaluates in a namespace, loading it first unless it's there, and leaves the session in its own, as the MCP `eval` tool's `ns` does.
 - [#59](https://github.com/nrepl/neorepl/pull/59): `neorepl eval -f FILE --line N:COL` evaluates only the top-level form at that spot, in the file's namespace, after its `ns` form, and with `-` takes FILE's text from standard input, so an editor can evaluate the form at the cursor in a buffer it hasn't saved.
+- [#59](https://github.com/nrepl/neorepl/pull/59): `doc/editors.md` sets up Neovim, Emacs and Helix to evaluate in neorepl, with the REPL beside them.
 
 ### Changes
 
