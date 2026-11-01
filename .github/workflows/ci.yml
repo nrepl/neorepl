@@ -55,8 +55,9 @@ jobs:
           bb: ${{ matrix.bb }}
       - run: bb test
 
-  # Against real servers: nREPL with cider-nrepl, which takes the Clojure CLI,
-  # and babashka's.
+  # Against real servers: nREPL with cider-nrepl, started by the Clojure CLI
+  # and by Leiningen, babashka's, and ClojureScript on Node through
+  # piggieback and shadow-cljs, with the Node and npm the runner has.
   integration:
     name: Integration (bb ${{ matrix.task }})
     runs-on: ubuntu-latest
@@ -82,7 +83,8 @@ jobs:
             ~/.m2/repository
             ~/.gitlibs
             ~/.deps.clj
-          key: integration-${{ runner.os }}-${{ hashFiles('deps.edn', 'src/neorepl/jack_in.clj') }}
+            ~/.npm
+          key: integration-${{ runner.os }}-${{ hashFiles('deps.edn', 'src/neorepl/jack_in.clj', 'integration/neorepl/cljs_servers_test.clj') }}
           restore-keys: integration-${{ runner.os }}-
       - run: bb ${{ matrix.task }}
 
