@@ -430,6 +430,44 @@
       (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Not the name of a namespace: a/b"
                             (enter "a/b"))))))
 
+(deftest ensure-ns-test
+  (with-client [client {:port *port*}]
+    (let [session (nrepl/clone-session client)
+          eval-in (fn [code] (some :value (nrepl/request client {:op "eval" :session session :code code})))]
+      (testing "nothing to do for a namespace that's there"
+        (is (nil? (features/ensure-ns client session "clojure.string" {}))))
+      (testing "loading one that isn't"
+        (eval-in "(+ 1 2)")
+        (is (nil? (features/ensure-ns client session "clojure.walk" {})))
+        (testing "leaving the session's namespace and *1 as they were"
+          (is (= "3" (eval-in "*1")))
+          (is (= "user" (nrepl/session-ns client session))))
+        (is (= "true" (eval-in "(some? (find-ns 'clojure.walk))"))))
+      (testing "not one that doesn't load, for its error"
+        (let [{:keys [status err]} (features/ensure-ns client session "no.such.ns" {:collect? true})]
+          (is (= "eval-error" status))
+          (is (str/includes? err "Could not locate no/such/ns"))))
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Not the name of a namespace: a/b"
+                            (features/ensure-ns client session "a/b" {}))))))
+
+(deftest evaluate-in-ns-test
+  (with-client [client {:port *port*}]
+    (let [session (nrepl/clone-session client)
+          evaluate #(features/evaluate-in-ns client {:op "eval" :session session :code %1} %2 (merge {:collect? true} %3))]
+      (testing "in the namespace, loaded first"
+        (is (= {:status "ok" :values ["{:a 1}"]}
+               (select-keys (evaluate "(first (clojure.data/diff {:a 1} {}))" "clojure.data" {}) [:status :values])))
+        (is (= {:status "ok" :values ["\"clojure.data\""]}
+               (select-keys (evaluate "(str *ns*)" "clojure.data" {}) [:status :values]))))
+      (testing "leaving the session in its own"
+        (is (= "user" (nrepl/session-ns client session))))
+      (testing "or where it is, without one"
+        (is (= ["\"user\""] (:values (evaluate "(str *ns*)" nil {})))))
+      (testing "not when it doesn't load"
+        (let [{:keys [status err]} (evaluate "1" "no.such.ns" {})]
+          (is (= "eval-error" status))
+          (is (str/includes? err "Could not locate no/such/ns")))))))
+
 (deftest run-tests-test
   (with-client [client {:port *port*}]
     (let [session (nrepl/clone-session client)

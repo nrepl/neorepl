@@ -173,6 +173,16 @@
            (is (= "nil" (text (receive))))
            (finally
              (alter-var-root #'*in* (constantly in))))))
+     (testing "in a namespace, loaded first unless it's there, leaving the session in its own"
+       (send (tool-call 14 "eval" {:code "(str *ns* \" \" (union #{1} #{2}))" :ns "clojure.set"}))
+       (is (= "\"clojure.set #{1 2}\"" (text (receive))))
+       (send (tool-call 15 "eval" {:code "(str *ns*)"}))
+       (is (= "\"user\"" (text (receive))))
+       (testing "and not one that isn't a namespace's name"
+         (send (tool-call 16 "eval" {:code "1" :ns "a/b"}))
+         (let [{{:keys [isError] :as result} :result} (receive)]
+           (is (true? isError))
+           (is (= "Not the name of a namespace: a/b" (text {:result result}))))))
      (testing "in the session called agent, unless the call names another"
        (is (str/includes? (slurp (sessions-file)) "\"agent\"")))
      (testing "a lookup"

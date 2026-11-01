@@ -204,12 +204,13 @@
   [{:name "eval"
     :evaluates? true
     :description "Evaluate Clojure code in a session that keeps *ns*, *1 and *e from call to call. Returns what it printed and its values; an exception's message and its class come in the error output, and pst shows the stack trace."
-    :inputSchema (schema (merge {:code {:type "string" :description "The code, one form or several"}}
+    :inputSchema (schema (merge {:code {:type "string" :description "The code, one form or several"}
+                                 :ns {:type "string" :description "The namespace to evaluate in, loaded first unless it's there (default: the session's)"}}
                                 timeout-arg session-arg port-arg)
                          "code")
-    :run (fn [server {:keys [code] :as args} on-send]
+    :run (fn [server {:keys [code ns] :as args} on-send]
            (evaluate server args on-send
-                     #(evaluation/evaluate %1 {:op "eval" :code code :session %2} %3)))}
+                     #(features/evaluate-in-ns %1 {:op "eval" :code code :session %2} ns %3)))}
    {:name "load"
     :evaluates? true
     :description "Load a Clojure file into the session, so its errors carry the file's name and lines. Check it first."

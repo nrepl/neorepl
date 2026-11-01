@@ -1375,31 +1375,58 @@
       :cljs (cljs.core/some? (cljs.core/find-ns (cljs.core/symbol %1$s)))
       :default (some? (find-ns (symbol %1$s))))")
 
-(defn enter-ns
-  "Puts session in the namespace called name, loading it first if it isn't
-  there, as require would, rather than leaving the session in an empty
-  namespace, as in-ns does, for one that isn't loaded or a typo. Works in
-  Clojure and ClojureScript alike. Returns what evaluation/evaluate does,
-  whose opts it takes, for loading the namespace, when that fails, or else
-  for switching to it, with the session's :ns. Neither shows its value."
+(defn ensure-ns
+  "Makes sure session can evaluate in the namespace called name, loading it
+  first if it isn't there, as require would, in a copy of session, so the
+  session's *1 and namespace stay put. Works in Clojure and ClojureScript
+  alike. Returns nil once the namespace is there, or else what
+  evaluation/evaluate does, whose opts it takes, for loading it, which
+  doesn't show its value."
   [client session name opts]
   (when-not (symbol-name? simple-symbol? name)
     (throw (ex-info (str "Not the name of a namespace: " name) {:type ::failed})))
-  (let [evaluate-in (fn [session code]
-                      (evaluate-for client {:op "eval" :session session :code code} opts (fn [_])))
-        ;; nbb's server only switches for an ns form.
-        enter #(evaluate-in session (format "#?(:clj (clojure.core/in-ns '%1$s) :org.babashka/nbb (ns %1$s) :cljs (in-ns '%1$s) :default (in-ns '%1$s))" name))
-        copy (loading-copy client session {})
+  (let [copy (loading-copy client session {})
         found? #(eval-data client {:session copy} ns-found-code [name] {})]
     (try
-      (if (found?)
-        (enter)
+      (when-not (found?)
         ;; ClojureScript's require only works as a form of its own.
-        (let [loaded (evaluate-in copy (format "#?(:clj (clojure.core/require '%1$s) :cljs (require '%1$s) :default (require '%1$s))" name))]
+        (let [loaded (evaluate-for client
+                                   {:op "eval" :session copy
+                                    :code (format "#?(:clj (clojure.core/require '%1$s) :cljs (require '%1$s) :default (require '%1$s))" name)}
+                                   opts
+                                   (fn [_]))]
           (cond
             (not= "ok" (:status loaded)) loaded
             ;; shadow-cljs only says what went wrong, with no eval-error.
-            (not (found?)) (throw (ex-info (str "Couldn't load " name) {:type ::failed}))
-            :else (enter))))
+            (not (found?)) (throw (ex-info (str "Couldn't load " name) {:type ::failed})))))
       (finally
         (nrepl/close-session client copy)))))
+
+(defn enter-ns
+  "Puts session in the namespace called name, loading it first if it isn't
+  there, as ensure-ns does, rather than leaving the session in an empty
+  namespace, as in-ns does, for one that isn't loaded or a typo. Returns
+  what evaluation/evaluate does, whose opts it takes, for loading the
+  namespace, when that fails, or else for switching to it, with the
+  session's :ns. Neither shows its value."
+  [client session name opts]
+  (or (ensure-ns client session name opts)
+      (evaluate-for client
+                    ;; nbb's server only switches for an ns form.
+                    {:op "eval" :session session
+                     :code (format "#?(:clj (clojure.core/in-ns '%1$s) :org.babashka/nbb (ns %1$s) :cljs (in-ns '%1$s) :default (in-ns '%1$s))" name)}
+                    opts
+                    (fn [_]))))
+
+(defn evaluate-in-ns
+  "Evaluates msg, an eval, the way evaluation/evaluate does, whose opts it
+  takes, in the namespace called name, when there's one, which ensure-ns
+  makes sure of first. The :timeout covers both, and the session stays in
+  its namespace."
+  [client {:keys [session] :as msg} name {:keys [timeout] :as opts}]
+  (if-not name
+    (evaluation/evaluate client msg opts)
+    (let [opts (cond-> opts
+                 timeout (assoc :deadline (+ (System/currentTimeMillis) (long (* 1000 timeout)))))]
+      (or (ensure-ns client session name opts)
+          (evaluation/evaluate client (assoc msg :ns name) opts)))))
