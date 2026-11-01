@@ -267,7 +267,54 @@
       (let [{:keys [status out err]} (run "-s" "in-ns" "--ns" "no.such.ns" "1")]
         (is (= 1 status))
         (is (= "" out))
-        (is (str/includes? err "Could not locate no/such/ns"))))))
+        (is (str/includes? err "Could not locate no/such/ns")))))
+  (let [file (spit-file *dir* "src/demo/lines.clj"
+                        (str ";; Lines.\n"
+                             "(ns demo.lines\n"
+                             "  (:require [clojure.string :as s]))\n"
+                             "\n"
+                             "(defn shout\n"
+                             "  [x]\n"
+                             "  (s/upper-case x))\n"
+                             "\n"
+                             ";; After shout.\n"
+                             "(def answer 42) (def other 43)\n"))
+        line #(apply run "-s" "lines" "-f" (str file) "--line" %&)]
+    (testing "--line: the top-level form there, in the file's namespace, its ns form first"
+      (run "-s" "lines" "(+ 1 2)")
+      (is (= {:status 0 :out "#'demo.lines/shout\n" :err ""} (line "6:3")))
+      (testing "loading in a copy of the session, which stays in its namespace"
+        (is (= {:status 0 :out "[3 \"user\"]\n" :err ""} (run "-s" "lines" "[*2 (str *ns*)]"))))
+      (is (= {:status 0 :out "\"HI\"\n" :err ""} (run "-s" "lines" "(demo.lines/shout \"hi\")")))
+      (testing "knowing where it's from"
+        (is (= {:status 0 :out (str "[" (pr-str (.getAbsolutePath file)) " 5]\n") :err ""}
+               (run "-s" "lines" "((juxt :file :line) (meta #'demo.lines/shout))"))))
+      (testing "or the last one before it, from the blank lines and comments after one"
+        (is (= "#'demo.lines/shout\n" (:out (line "8"))))
+        (is (= "#'demo.lines/shout\n" (:out (line "9")))))
+      (testing "the one the column's in, on a line with two"
+        (is (= "#'demo.lines/answer\n" (:out (line "10"))))
+        (is (= "#'demo.lines/other\n" (:out (line "10:17")))))
+      (testing "the last one, past the end"
+        (is (= "#'demo.lines/other\n" (:out (line "99")))))
+      (testing "nothing before the first"
+        (is (= {:status 1 :out "" :err (str "neorepl: " file ":1:1: No form there or before it to evaluate\n")}
+               (line "1"))))
+      (testing "--ns over the file's namespace"
+        (is (= "#'user/answer\n" (:out (line "10" "--ns" "user")))))
+      (testing "FILE's text from stdin, as an editor sends a buffer that isn't saved"
+        (is (= {:status 0 :out "#'demo.lines/unsaved\n" :err ""}
+               (run-in *dir* (str (slurp file) "\n(def unsaved 1)\n") "eval" "-p" (str *port*) "-s" "lines"
+                       "-f" (str file) "--line" "12" "-")))
+        (is (= {:status 0 :out (str "[" (pr-str (.getAbsolutePath file)) " 12]\n") :err ""}
+               (run "-s" "lines" "((juxt :file :line) (meta #'demo.lines/unsaved))")))
+        (testing "checked as the file would be"
+          (is (= {:status 1 :out "" :err (str "neorepl: " file ":12:1: Unclosed (, which neorepl check --fix can repair\n")}
+                 (run-in *dir* (str (slurp file) "\n(def broken\n") "eval" "-p" (str *port*) "-s" "lines"
+                         "-f" (str file) "--line" "10" "-")))))
+      (testing "the session's namespace for a file without an ns form"
+        (let [script (spit-file *dir* "script.clj" "(def scripted 1)\n")]
+          (is (= "#'user/scripted\n" (:out (run "-s" "lines" "-f" (str script) "--line" "1")))))))))
 
 (deftest load-test
   (let [file (spit-file *dir* "src/demo/core.clj"
@@ -865,6 +912,11 @@
       ["eval" "-p" "1" "(+" "1)"] "Too many arguments"
       ["eval" "-f" "x.clj" "1"] "not both"
       ["eval" "-f" "/does/not/exist.clj"] "No such file"
+      ["eval" "-p" "1" "--line" "3" "1"] "--line needs a --file"
+      ["eval" "-p" "1" "--line" "x" "-f" "a.clj"] "Invalid value for --line: x"
+      ["eval" "-p" "1" "--line" "0" "-f" "a.clj"] "Invalid value for --line: 0"
+      ["eval" "-p" "1" "--line" "3:" "-f" "a.clj"] "Invalid value for --line: 3:"
+      ["eval" "-p" "1" "--line" "3:4:5" "-f" "a.clj"] "Invalid value for --line: 3:4:5"
       ["eval" "-p" "1" "--ns" "" "1"] "Invalid value for --ns"
       ["load" "-p" "1"] "Nothing to load"
       ["load" "-p" "1" "a.clj" "b.clj"] "Load one file at a time"

@@ -433,40 +433,60 @@
 (deftest ensure-ns-test
   (with-client [client {:port *port*}]
     (let [session (nrepl/clone-session client)
-          eval-in (fn [code] (some :value (nrepl/request client {:op "eval" :session session :code code})))]
+          eval-in (fn [code] (some :value (nrepl/request client {:op "eval" :session session :code code})))
+          ns-msg (fn [code] {:op "eval" :code code :file "/tmp/ensured.clj" :line 3 :column 1})]
       (testing "nothing to do for a namespace that's there"
-        (is (nil? (features/ensure-ns client session "clojure.string" {}))))
+        (is (nil? (features/ensure-ns client session "clojure.string" nil {}))))
       (testing "loading one that isn't"
         (eval-in "(+ 1 2)")
-        (is (nil? (features/ensure-ns client session "clojure.walk" {})))
+        (is (nil? (features/ensure-ns client session "clojure.walk" nil {})))
         (testing "leaving the session's namespace and *1 as they were"
           (is (= "3" (eval-in "*1")))
           (is (= "user" (nrepl/session-ns client session))))
         (is (= "true" (eval-in "(some? (find-ns 'clojure.walk))"))))
       (testing "not one that doesn't load, for its error"
-        (let [{:keys [status err]} (features/ensure-ns client session "no.such.ns" {:collect? true})]
+        (let [{:keys [status err]} (features/ensure-ns client session "no.such.ns" nil {:collect? true})]
           (is (= "eval-error" status))
           (is (str/includes? err "Could not locate no/such/ns"))))
+      (testing "its ns form, whether it's there or not, so what it requires is too"
+        (is (nil? (features/ensure-ns client session "neorepl.ensured"
+                                      (ns-msg "(ns neorepl.ensured (:require [clojure.set :as set]))") {})))
+        (is (= "\"clojure.set\"" (eval-in "(str (ns-name (get (ns-aliases 'neorepl.ensured) 'set)))")))
+        (is (nil? (features/ensure-ns client session "neorepl.ensured"
+                                      (ns-msg "(ns neorepl.ensured (:require [clojure.set :as set] [clojure.data :as data]))") {})))
+        (is (= "\"clojure.data\"" (eval-in "(str (ns-name (get (ns-aliases 'neorepl.ensured) 'data)))")))
+        (testing "and its error, when it fails"
+          (let [{:keys [status err]} (features/ensure-ns client session "neorepl.ensured"
+                                                         (ns-msg "(ns neorepl.ensured (:require [no.such.lib]))") {:collect? true})]
+            (is (= "eval-error" status))
+            (is (str/includes? err "no/such/lib")))))
       (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Not the name of a namespace: a/b"
-                            (features/ensure-ns client session "a/b" {}))))))
+                            (features/ensure-ns client session "a/b" nil {}))))))
 
 (deftest evaluate-in-ns-test
   (with-client [client {:port *port*}]
     (let [session (nrepl/clone-session client)
-          evaluate #(features/evaluate-in-ns client {:op "eval" :session session :code %1} %2 (merge {:collect? true} %3))]
+          evaluate #(features/evaluate-in-ns client {:op "eval" :session session :code %1} %2 %3 (merge {:collect? true} %4))]
       (testing "in the namespace, loaded first"
         (is (= {:status "ok" :values ["{:a 1}"]}
-               (select-keys (evaluate "(first (clojure.data/diff {:a 1} {}))" "clojure.data" {}) [:status :values])))
+               (select-keys (evaluate "(first (clojure.data/diff {:a 1} {}))" "clojure.data" nil {}) [:status :values])))
         (is (= {:status "ok" :values ["\"clojure.data\""]}
-               (select-keys (evaluate "(str *ns*)" "clojure.data" {}) [:status :values]))))
+               (select-keys (evaluate "(str *ns*)" "clojure.data" nil {}) [:status :values]))))
+      (testing "with its ns form first"
+        (is (= ["#{1 2}"]
+               (:values (evaluate "(set/union #{1} #{2})" "neorepl.in-ns"
+                                  {:op "eval" :code "(ns neorepl.in-ns (:require [clojure.set :as set]))"} {})))))
       (testing "leaving the session in its own"
         (is (= "user" (nrepl/session-ns client session))))
       (testing "or where it is, without one"
-        (is (= ["\"user\""] (:values (evaluate "(str *ns*)" nil {})))))
+        (is (= ["\"user\""] (:values (evaluate "(str *ns*)" nil nil {})))))
       (testing "not when it doesn't load"
-        (let [{:keys [status err]} (evaluate "1" "no.such.ns" {})]
+        (let [{:keys [status err]} (evaluate "1" "no.such.ns" nil {})]
           (is (= "eval-error" status))
-          (is (str/includes? err "Could not locate no/such/ns")))))))
+          (is (str/includes? err "Could not locate no/such/ns"))))
+      (testing "with the timeout covering the loading too"
+        (is (= "timeout" (:status (evaluate ":never" "neorepl.slow-ns"
+                                            {:op "eval" :code "(ns neorepl.slow-ns) (Thread/sleep 5000)"} {:timeout 0.5}))))))))
 
 (deftest run-tests-test
   (with-client [client {:port *port*}]

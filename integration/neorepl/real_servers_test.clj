@@ -45,7 +45,17 @@
        (is (= {:status 0 :out "\"hi ns\"\n" :err ""}
               (run server "eval" "-s" "in-ns" "--ns" "demo.core" "(greet \"ns\")")))
        (is (= {:status 0 :out "\"user\"\n" :err ""}
-              (run server "eval" "-s" "in-ns" "(str *ns*)")))))))
+              (run server "eval" "-s" "in-ns" "(str *ns*)"))))
+     (testing "the top-level form at a line of a file, in its namespace"
+       ;; Off the classpath, which a whole-project reload goes over.
+       (let [file (spit-file (project-dir server) "scratch/lines.clj"
+                             "(ns demo.lines\n  (:require [demo.core :as core]))\n\n(defn twice [who]\n  (str (core/greet who) \"!\"))\n")]
+         (is (= {:status 0 :out "#'demo.lines/twice\n" :err ""}
+                (run server "eval" "-s" "lines" "-f" (str file) "--line" "5:3")))
+         (is (= {:status 0 :out "\"hi x!\"\n" :err ""}
+                (run server "eval" "-s" "lines" "(demo.lines/twice \"x\")")))
+         (is (= {:status 0 :out (str file ":4:1\n") :err ""}
+                (run server "where" "demo.lines/twice"))))))))
 
 (deftest lookups-test
   (on-each-server

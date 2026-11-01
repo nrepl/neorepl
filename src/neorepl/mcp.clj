@@ -210,7 +210,7 @@
                          "code")
     :run (fn [server {:keys [code ns] :as args} on-send]
            (evaluate server args on-send
-                     #(features/evaluate-in-ns %1 {:op "eval" :code code :session %2} ns %3)))}
+                     #(features/evaluate-in-ns %1 {:op "eval" :code code :session %2} ns nil %3)))}
    {:name "load"
     :evaluates? true
     :description "Load a Clojure file into the session, so its errors carry the file's name and lines. Check it first."

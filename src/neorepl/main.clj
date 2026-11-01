@@ -44,6 +44,15 @@
     (when (pos? n) n)))
 
 
+(defn- parse-position
+  "N or N:COL, as [N COL], COL being 1 without one."
+  [s]
+  (let [[line column & more] (str/split s #":" -1)
+        line (parse-count line)
+        column (if column (parse-count column) 1)]
+    (when (and line column (empty? more))
+      [line column])))
+
 (defn- parse-seconds [s]
   ;; Nine digits are plenty, and the milliseconds can't overflow.
   (when (re-matches #"\d{1,9}(\.\d+)?" s)
@@ -351,6 +360,8 @@ when it times out.")
   (concat connection-options
           [{:short "-f" :long "--file" :arg "FILE" :parse not-empty
             :doc "Evaluate the code in FILE"}
+           {:long "--line" :arg "N[:COL]" :parse parse-position
+            :doc "Evaluate only the top-level form at line N of FILE"}
            {:long "--ns" :arg "NS" :parse not-empty
             :doc "Evaluate in NS, loading it first unless it's there"}]
           evaluation-options
@@ -362,8 +373,14 @@ when it times out.")
        neorepl eval [options] -f FILE
        neorepl eval [options] -"
    "Evaluates CODE, the contents of FILE or, with -, standard input. Output is
-printed as it arrives and each value on a line of its own. With --ns, the
-code goes into the namespace NS, and the session stays in its own."
+printed as it arrives and each value on a line of its own.
+
+With --ns, the code goes into the namespace NS, and the session stays in its
+own. With --line, only the top-level form of FILE that line N, column COL is
+in gets evaluated, or the last one before it, in the namespace of the file's
+ns form, which goes first, so that what it requires is loaded. That's how an
+editor evaluates the form at the cursor. With both -f FILE and -, FILE's text
+comes from standard input, so an editor can send a buffer it hasn't saved."
    eval-options
    discovery-note
    sessions-note
@@ -371,12 +388,15 @@ code goes into the namespace NS, and the session stays in its own."
    "Examples:
   neorepl eval '(+ 1 2)'
   neorepl eval --format json -f script.clj
+  neorepl eval -f src/my/app.clj --line 12:3
   echo '(start)' | neorepl eval --ns my.app -
   neorepl eval --max-output 2000 '(slurp \"big.txt\")'
   echo '(range 3)' | neorepl eval -"))
 
 (defn- read-code [file args]
   (cond
+    ;; FILE's text, as an editor sends a buffer that isn't saved.
+    (and file (= ["-"] args)) (features/checked-text *in* file "neorepl check --fix")
     (and file (seq args)) (throw (usage-error "Give either CODE or --file, not both"))
     file (file-text file)
     (= ["-"] args) (slurp *in*)
@@ -384,15 +404,42 @@ code goes into the namespace NS, and the session stays in its own."
     (empty? args) (throw (usage-error "Nothing to evaluate"))
     :else (throw (usage-error "Too many arguments: quote the code to pass it as one"))))
 
-(defn- eval-command [{:keys [file ns] :as options} args ctx]
+(defn- form-at
+  "The eval of only the top-level form at line and column of file, whose
+  code msg evaluates, or the last one before them, as Emacs'
+  beginning-of-defun finds it, with the :line and :column it starts at.
+  Returns {:msg the-eval :ns ns}, where without ns it's the namespace of
+  the file's last ns form before the form, with :ns-msg, the eval of that
+  ns form."
+  [{:keys [code] :as msg} file [line column] ns]
+  (let [lexed (lexer/lex code)
+        ;; A line past the end is the end.
+        at (or (lexer/index code line column) (count code))
+        [start end] (last (take-while #(<= (first %) at) (lexer/form-spans lexed)))
+        part (fn [start end]
+               (let [[line column] (lexer/position code start)]
+                 (assoc msg :code (subs code start end) :line line :column column)))]
+    (when-not start
+      (throw (ex-info (str file ":" line ":" column ": No form there or before it to evaluate")
+                      {:type ::features/failed})))
+    (let [ns-form (when-not ns
+                    (last (take-while #(<= (:start %) start) (lexer/ns-forms lexed))))]
+      {:msg (part start end)
+       :ns (or ns (:name ns-form))
+       :ns-msg (when ns-form (part (:start ns-form) (:end ns-form)))})))
+
+(defn- eval-command [{:keys [file line ns] :as options} args ctx]
+  (when (and line (not file))
+    (throw (usage-error "--line needs a --file")))
   (let [msg (cond-> {:op "eval" :code (read-code file args)}
               ;; For the file and line numbers in errors.
               file (assoc :file (.getAbsolutePath (io/file file))))
+        {:keys [msg ns ns-msg]} (if line (form-at msg file line ns) {:msg msg :ns ns})
         ;; Reading the code used stdin up, so reads from *in* get end of
         ;; input.
         evaluate-options (when (= ["-"] args)
                            {:read-line (constantly nil)})]
-    (report-run #(features/evaluate-in-ns %1 (assoc msg :session %2) ns (merge %3 evaluate-options))
+    (report-run #(features/evaluate-in-ns %1 (assoc msg :session %2) ns ns-msg (merge %3 evaluate-options))
                 options
                 ctx
                 (constantly nil))))

@@ -301,3 +301,35 @@
     "a\n" 2 [2 1]
     "a\n\n(" 3 [3 1]
     "\uD83D\uDE00(" 2 [1 2]))
+
+(deftest index-test
+  (are [s line column index] (= index (lexer/index s line column))
+    "abc" 1 1 0
+    "abc" 1 3 2
+    "a\nbc" 2 2 3
+    "a\n" 2 1 2
+    "a\n\n(" 3 1 3
+    "\uD83D\uDE00(" 1 2 2
+    ;; Past the end of the line, the line's end.
+    "ab\ncd" 1 9 2
+    "ab" 1 9 2
+    ;; Past the last line, nothing.
+    "ab\ncd" 3 1 nil)
+  (testing "the inverse of position"
+    (let [s "(ns a)\n\n(defn f\n  [\uD83D\uDE00])\n"]
+      (doseq [i (range (count s))
+              :when (not (Character/isLowSurrogate (.charAt s i)))]
+        (is (= i (apply lexer/index s (lexer/position s i))))))))
+
+(deftest ns-forms-test
+  (let [ns-forms #(map (juxt :name :start :end) (lexer/ns-forms (lexer/lex %)))]
+    (is (= [["a.b" 0 8]] (ns-forms "(ns a.b)")))
+    (testing "after other forms, with requires"
+      (is (= [["a.b" 6 50]] (ns-forms ";; hi\n(ns a.b\n  (:require [clojure.string :as s]))\n(s/join [])"))))
+    (testing "past metadata, comments and discarded forms"
+      (is (= ["a" "b" "c" "d"]
+             (map first (ns-forms "(ns ^:no-doc a)\n(ns ^{:doc \"x\"} b)\n(ns ; why\n c)\n(ns #_x ^:a ^{:b [1]} d)")))))
+    (testing "every one, in order"
+      (is (= ["a" "b"] (map first (ns-forms "(ns a)\n(def x 1)\n(ns b)")))))
+    (testing "not the ones that only look like one"
+      (is (empty? (ns-forms "(nsa b)\n'(ns c)\n#_(ns d)\n(ns)\n(ns \"e\")\n(def ns 1)\n(foo (ns f))"))))))
