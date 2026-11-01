@@ -56,30 +56,46 @@
   {(str "src/demo/core." ext) core
    (str "test/demo/core_test." ext) core-test})
 
-(defn- npm-install
-  "Installs what the package.json in dir names."
-  [dir]
-  (let [{:keys [exit out err]} (shell/sh "npm" "install" "--no-audit" "--no-fund" :dir (str dir))]
+(defn- sh!
+  "Runs command in dir, throwing with what it printed unless it works."
+  [dir & command]
+  (let [{:keys [exit out err]} (apply shell/sh (concat command [:dir (str dir)]))]
     (when-not (zero? exit)
-      (throw (ex-info (str "npm install failed in " dir ":\n" out err) {})))))
+      (throw (ex-info (str (str/join " " command) " failed in " dir ":\n" out err) {})))))
+
+(defn- server-spec
+  "What with-server starts for spec: the :command, the :port-file it writes,
+  .nrepl-port unless it says, and the :files, with the project file for a
+  build tool's."
+  [{:keys [tool project] :as spec}]
+  (if tool
+    (let [{:keys [file port-file]} (jack-in/tool tool)]
+      (-> spec
+          (assoc :command (jack-in/command tool {}) :port-file port-file)
+          (update :files assoc file project)))
+    (merge {:port-file ".nrepl-port"} spec)))
 
 (defn- with-server
-  "Calls f once server is up in a project of its own, with the build tool
-  :tool, the :project file it reads and the :files, paths to their
-  contents, started the way `neorepl server` starts it, saying what the
-  server printed if it doesn't come up. A package.json gets installed
-  first."
-  [server {:keys [tool project files]} f]
-  (let [{:keys [file port-file]} (jack-in/tool tool)
+  "Calls f once server is up in a project of its own, with the :files,
+  paths to their contents, saying what the server printed if it doesn't
+  come up. It's started the way `neorepl server` starts it, with the build
+  tool :tool, which reads the :project file, or for a server jack-in
+  doesn't start, with the :command, run in the project, which writes the
+  :port-file. A package.json gets installed first, and a requirements.txt
+  in a venv, .venv."
+  [server spec f]
+  (let [{:keys [command port-file files]} (server-spec spec)
         dir (project-dir server)
         output (atom [])]
-    (spit-file dir file project)
     (doseq [[path content] files]
       (spit-file dir path content))
     (when (contains? files "package.json")
-      (npm-install dir))
+      (sh! dir "npm" "install" "--no-audit" "--no-fund"))
+    (when (contains? files "requirements.txt")
+      (sh! dir "python3" "-m" "venv" ".venv")
+      (sh! dir ".venv/bin/pip" "install" "--quiet" "--disable-pip-version-check" "-r" "requirements.txt"))
     (try
-      (jack-in/with-server dir (jack-in/command tool {}) port-file #(swap! output conj %) (fn [_] (f)))
+      (jack-in/with-server dir command port-file #(swap! output conj %) (fn [_] (f)))
       (catch clojure.lang.ExceptionInfo e
         (if (= ::jack-in/failed (:type (ex-data e)))
           (throw (ex-info (str/join "\n" (cons (ex-message e) @output)) {} e))

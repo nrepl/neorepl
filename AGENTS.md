@@ -89,17 +89,20 @@ not a failure.
 The fakes behave like today's cider-nrepl, which says nothing about the next
 one, so anything that depends on a server gets checked against real ones:
 nREPL with cider-nrepl (`neorepl server` jacks one in), `bb nrepl-server`,
-shadow-cljs, and piggieback with Node. Write down the versions in PLAN.md.
+shadow-cljs, piggieback with Node, nbb and Basilisp. Write down the versions
+in PLAN.md.
 
-The integration tests in `integration/` do that for all four, each in a
+The integration tests in `integration/` do that for all of them, each in a
 project of its own: nREPL with the cider-nrepl jack-in brings, started by
 the Clojure CLI and by Leiningen, and the server of the `bb` on the PATH,
 which has to be 1.13.227 or newer, as older ones never answer for a test
 that throws ([babashka#2201](https://github.com/babashka/babashka/issues/2201)),
-and in `cljs_servers_test.clj`, ClojureScript sessions on Node, through
-piggieback and shadow-cljs. `servers.clj` starts them. They need the
-Clojure CLI, Leiningen, Node and npm. A feature that depends on what a
-server answers gets a test there as well as against the fakes.
+in `cljs_servers_test.clj`, ClojureScript sessions on Node, through
+piggieback and shadow-cljs, and in `dialects_test.clj`, nbb's and
+Basilisp's servers, which jack-in doesn't start, with nbb from npm and
+Basilisp in a venv. `servers.clj` starts them. They need the Clojure CLI, Leiningen, Node
+and npm, and Python 3. A feature that depends on what a server answers gets
+a test there as well as against the fakes.
 
 Before a release, run [proof](https://github.com/nrepl/proof) against
 neorepl: `proof proxy` between neorepl and a server, and the `proof serve`

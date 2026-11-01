@@ -56,8 +56,9 @@ jobs:
       - run: bb test
 
   # Against real servers: nREPL with cider-nrepl, started by the Clojure CLI
-  # and by Leiningen, babashka's, and ClojureScript on Node through
-  # piggieback and shadow-cljs, with the Node and npm the runner has.
+  # and by Leiningen, babashka's, ClojureScript on Node through piggieback
+  # and shadow-cljs, and nbb's, with the Node and npm the runner has, and
+  # Basilisp's.
   integration:
     name: Integration (bb ${{ matrix.task }})
     runs-on: ubuntu-latest
@@ -77,6 +78,9 @@ jobs:
           cli: latest
           lein: latest
           bb: latest
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.14'
       - uses: actions/cache@v6
         with:
           path: |
@@ -84,7 +88,8 @@ jobs:
             ~/.gitlibs
             ~/.deps.clj
             ~/.npm
-          key: integration-${{ runner.os }}-${{ hashFiles('deps.edn', 'src/neorepl/jack_in.clj', 'integration/neorepl/cljs_servers_test.clj') }}
+            ~/.cache/pip
+          key: integration-${{ runner.os }}-${{ hashFiles('deps.edn', 'src/neorepl/jack_in.clj', 'integration/neorepl/cljs_servers_test.clj', 'integration/neorepl/dialects_test.clj') }}
           restore-keys: integration-${{ runner.os }}-
       - run: bb ${{ matrix.task }}
 
