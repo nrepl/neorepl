@@ -21,6 +21,7 @@
 
 - [#54](https://github.com/nrepl/neorepl/pull/54): `neorepl mcp` sends a session's evaluations one at a time, so cancelling one no longer has nREPL drop the calls queued behind it, and a call cancelled while it waits is never sent.
 - [#56](https://github.com/nrepl/neorepl/pull/56): A ClojureScript test's error outside an assertion shows up at the test's line, rather than at line `NaN`.
+- [#56](https://github.com/nrepl/neorepl/pull/56): Running a ClojureScript namespace's tests, or switching to them with `,ns`, from the namespace they test no longer fails on piggieback as a circular dependency, and `,ns` loading a namespace no longer leaves a `nil` in `*2`.
 
 ## 0.4.1 (2026-10-31)
 
