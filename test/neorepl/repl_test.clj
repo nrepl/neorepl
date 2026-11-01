@@ -90,9 +90,19 @@
     (call-with-repl {}
       (fn [type screen]
         (type "(+ 1\r")
-        (is (screen #"#_=> $"))
+        (testing "each indented for the form it's in"
+          ;; Lined up with the 1.
+          (is (screen #"#_=> {4}$")))
         (type "2)\r")
-        (is (screen #"(?m)^3\nuser=> $")))))
+        (is (screen #"(?m)^3\nuser=> $"))
+        (type "(let [a 1]\r")
+        ;; A body, by two.
+        (is (screen #"#_=> {3}$"))
+        (type "a)\r")
+        (is (screen #"(?m)^1\nuser=> $"))
+        (testing "but a paste keeps its own"
+          (type "\u001b[200~(let [a 2]\r a)\u001b[201~\r")
+          (is (screen #"#_=>  a\)\n2\nuser=> $"))))))
   (testing "special forms in bold, the macros that read like them too"
     (let [{:keys [out]} (call-with-repl {:color? true}
                           (fn [type screen]
@@ -464,7 +474,7 @@
       (type ",apropos ^mapcat$\r")
       (is (screen #"clojure\.core/mapcat\nuser=> $"))
       (type ",macroexpand (when x\r")
-      (is (screen #"#_=> $"))
+      (is (screen #"#_=> +$"))
       (type "y)\r")
       (is (screen #"\(if x \(do y\)\)\nuser=> $"))
       (testing "and code pasted after a command runs after it"

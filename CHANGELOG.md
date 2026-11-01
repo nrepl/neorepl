@@ -8,6 +8,7 @@
 - [#48](https://github.com/nrepl/neorepl/pull/48): The REPL says when the server it started runs another cider-nrepl than the one jack-in adds, as when a Leiningen project's `:plugins` or `~/.lein/profiles.clj` has one.
 - [#49](https://github.com/nrepl/neorepl/pull/49): The REPL takes readline's settings from `~/.inputrc`, or the file `$INPUTRC` names, so `set editing-mode vi` there picks the vi keymap, and `$if neorepl` holds what's for neorepl alone.
 - [#50](https://github.com/nrepl/neorepl/pull/50): The completion menu shows a candidate's namespace next to its type, unless the candidate names it already.
+- [#51](https://github.com/nrepl/neorepl/pull/51): Enter in an unfinished form starts a line indented for it, the way cljfmt indents by default.
 
 ### Changes
 

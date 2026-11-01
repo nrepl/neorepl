@@ -326,6 +326,46 @@
     [(inc (count (filter #{\newline} before)))
      (inc (.codePointCount before (int line-start) (int index)))]))
 
+(def ^:private body-heads
+  "The heads of the forms whose arguments on lines of their own are a body,
+  indented by two rather than lined up with the first one: cljfmt's
+  defaults, along with anything whose name starts with def."
+  #{"alt!" "alt!!" "are" "as->" "binding" "bound-fn" "case" "catch" "comment" "cond" "condp"
+    "cond->" "cond->>" "do" "doseq" "dotimes" "doto" "extend" "extend-protocol" "extend-type"
+    "finally" "fn" "for" "future" "go" "go-loop" "if" "if-let" "if-not" "if-some" "let" "letfn"
+    "locking" "loop" "match" "ns" "proxy" "reify" "struct-map" "testing" "thread" "try"
+    "use-fixtures" "when" "when-first" "when-let" "when-not" "when-some" "while"
+    "with-local-vars" "with-open" "with-out-str" "with-precision" "with-redefs"})
+
+(defn indentation
+  "How far to indent a line that starts right after s, the way Clojure code
+  usually is, cljfmt's way: a body, like let's or defn's, by two from the
+  opener of its form, other lists' arguments lined up with the first, when
+  it's on the head's line, or else with the head, and the elements of
+  vectors, maps and sets with the first. Not at all outside forms, or in a
+  string, where the spaces would be part of it."
+  [s]
+  (let [{:keys [tokens]} (lex s)
+        frames (scan s tokens top-level)]
+    (if (or (map? frames) (not (next frames)) (= :open-string (:type (peek tokens))))
+      0
+      (let [{:keys [open closer]} (peek frames)
+            ;; All balanced, being in the innermost form left open.
+            inner (drop-while #(< (:start %) (:end open)) tokens)
+            [[head-start head-end] [arg-start]] (form-spans {:text s :tokens inner})
+            column #(dec (second (position s %)))
+            ;; Reader conditionals line their branches up, the way vectors
+            ;; and maps do.
+            list? (and (= ")" closer) (not (re-find #"#\?@?$" (subs s 0 (:start open)))))
+            head-name (when (= :symbol (:type (some #(when (= head-start (:start %)) %) inner)))
+                        (name (symbol (subs s head-start head-end))))]
+        (cond
+          (and list? head-name (or (body-heads head-name) (str/starts-with? head-name "def")))
+          (+ 2 (column (:start open)))
+          (and list? arg-start (not (str/includes? (subs s head-start arg-start) "\n")))
+          (column arg-start)
+          :else (column (:end open)))))))
+
 (defn delimiter-problem
   "The first delimiter that doesn't balance in s, as a map with its :line,
   :column and a :message, or nil."
