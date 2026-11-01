@@ -45,7 +45,9 @@
   session. One of (hang-up) closes the connection. One of (late-read) reads
   a line from *in*, but only says so after 300ms, as if the server had been
   slow to say it, and ends once interrupted. One of (stubborn-read) does
-  the same, but takes 500ms to say it can't be interrupted."
+  the same, but takes 500ms to say it can't be interrupted. One of
+  (nbb-throw) fails the way nbb's server says code threw, with :ex but no
+  eval-error."
   [handler]
   (fn [{:keys [op code session interrupt-id stdin] :as msg}]
     (let [interrupted (get @late-reads interrupt-id)
@@ -70,6 +72,9 @@
                             (transport/respond-to msg :status "done"))
         (= "(late-read)" code) (late-read msg false)
         (= "(stubborn-read)" code) (late-read msg true)
+        (= "(nbb-throw)" code) (do (transport/respond-to msg :err "bad\n")
+                                   (transport/respond-to msg :ex "#error {:message \"bad\"}")
+                                   (transport/respond-to msg :status "done"))
         :else (handler msg)))))
 
 (middleware/set-descriptor! #'wrap-stuck {:expects #{"eval" "interrupt" "stdin"}})

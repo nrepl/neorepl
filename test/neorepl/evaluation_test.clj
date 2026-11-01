@@ -42,7 +42,9 @@
           (is (= "eval-error" status))
           (is (= ["1"] values))))
       (testing "shadow-cljs's word for ClojureScript code that threw"
-        (is (= "eval-error" (:status (evaluate {:op "eval" :code ":repl/exception!"} {}))))))))
+        (is (= "eval-error" (:status (evaluate {:op "eval" :code ":repl/exception!"} {})))))
+      (testing "nbb's, an :ex without eval-error"
+        (is (= "eval-error" (:status (evaluate {:op "eval" :code "(nbb-throw)"} {}))))))))
 
 (deftest many-forms-test
   (with-client [client {:port *port*}]

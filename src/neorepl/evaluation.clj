@@ -19,6 +19,9 @@
     ;; shadow-cljs's way of saying ClojureScript code threw, after the
     ;; error on stderr.
     (= ":repl/exception!" value) (update :statuses conj "eval-error")
+    ;; nbb's, an :ex with no status, rather than one with eval-error, or
+    ;; cider-nrepl's inspect-eval-error.
+    (and ex (empty? status)) (update :statuses conj "eval-error")
     (and collect? value) (update :values conj value)
     (and collect? (seq out)) (update :out conj out)
     (and collect? (seq err)) (update :err conj err)
