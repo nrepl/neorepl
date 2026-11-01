@@ -36,7 +36,8 @@
   calls (f type screen): type types a string, screen waits for a regex to
   show up in the output, ANSI codes stripped, and returns it. Then ends the
   REPL with Ctrl-D and returns its raw output and the history file's
-  contents. The named sessions are in opts' :sessions-file, if it has one.
+  contents. The named sessions are in opts' :sessions-file, if it has one,
+  and its :editor-command is the REPL's.
 
   Eldoc is off unless opts say :eldoc? true, since what it shows after the
   cursor gets in the way of reading the screen, and so are colors unless
@@ -52,8 +53,9 @@
                                     {:dir dir
                                      :sessions-file (or (:sessions-file opts) (io/file dir "sessions.edn"))
                                      :history-dir (io/file dir "history")
+                                     :editor-command (:editor-command opts)
                                      :terminal (merge {:input in :output out :width 80 :eldoc? false :color? false}
-                                                      (dissoc opts :sessions-file))}))
+                                                      (dissoc opts :sessions-file :editor-command))}))
              type (fn [s]
                     (.write keys (.getBytes ^String s "UTF-8"))
                     (.flush keys))
@@ -198,6 +200,31 @@
                                (type "\r")
                                (screen #"\nuser=> $")))]
          (is (str/includes? out "\u001b[7m(")))))))
+
+(deftest edit-input-test
+  (testing "C-x C-e edits the input in the editor"
+    (call-with-repl {}
+      (fn [type screen]
+        (type "(+ 1 1)\u0018\u0005")
+        (is (screen #"Set EDITOR, or VISUAL, to the editor to open\n"))
+        (type "\u0003"))))
+  ;; The editors are shell scripts.
+  (when-not (test-server/windows?)
+    (call-with-temp-dir
+     (fn [dir]
+       (testing "taking back what's saved"
+         (call-with-repl {:editor-command (str (doto (test-server/spit-file dir "vi" "#!/bin/sh\nprintf '(+ 20 22)\\n' > \"$1\"\n")
+                                                 (.setExecutable true)))}
+           (fn [type screen]
+             (type "(+ 1 1)\u0018\u0005\r")
+             (is (screen #"(?m)^42\nuser=> $")))))
+       (testing "or leaving the input be when the editor fails"
+         (call-with-repl {:editor-command "false"}
+           (fn [type screen]
+             (type "(+ 1 1)\u0018\u0005")
+             (is (screen #"The editor exited with status 1\n"))
+             (type "\r")
+             (is (screen #"(?m)^2\nuser=> $")))))))))
 
 (deftest output-test
   (testing "stdout and stderr get lines of their own"

@@ -15,7 +15,8 @@
             [neorepl.sessions :as sessions]
             [neorepl.shutdown :as shutdown]
             [neorepl.stacktrace :as stacktrace])
-  (:import (java.lang ProcessBuilder$Redirect)
+  (:import (java.io File)
+           (java.lang ProcessBuilder$Redirect)
            (java.security MessageDigest)
            (java.util.regex Pattern)
            (sun.misc Signal SignalHandler)))
@@ -75,7 +76,8 @@
             :run #(inspect %1 %2)}
            {:name "stacktrace" :help "Browse the last error's stack trace, or the last test run's, and open its frames"
             :run (fn [state _] (browse-error state))}
-           {:name "edit" :arg "SYM" :help "Open where SYM is defined in your EDITOR"
+           {:name "edit" :arg "SYM" :optional? true
+            :help "Open where SYM, or this namespace, is defined in your EDITOR"
             :run #(edit %1 %2)}
            {:name "ns" :arg "NS" :optional? true
             :help "Switch to NS, loading it if need be, or list the project's"
@@ -182,13 +184,31 @@
                 (str "The editor exited with status " status))))))
 
 (defn- edit
-  "Opens the definition of sym in the editor, as open does. Returns what to
-  print, as command-output does."
-  [{:keys [client] :as state} sym]
-  (let [{:keys [found none]} (lookups/run "where" client state sym)]
+  "Opens the definition of sym in the editor, as open does, or without sym,
+  the file of the namespace the REPL's in. Returns what to print, as
+  command-output does."
+  [{:keys [client ns] :as state} sym]
+  (let [{:keys [found none]} (lookups/run "where" client state (or sym ns))]
     (if-let [message (or none (open state (:file found) (:line found)))]
       (out message)
       {})))
+
+(defn- edit-text
+  "Has the user edit text with the editor-command, as open opens files, in a
+  file of its own, as C-x C-e does, with the terminal handed over already:
+  {:text text}, what they leave in it, or {:message message} saying why
+  there's none, as when the editor fails, the way vi's :cq does to leave
+  the input be."
+  [editor-command text]
+  (let [file (File/createTempFile "neorepl-" ".clj")]
+    (try
+      ;; Ending with a newline, as editors end files.
+      (spit file (str text "\n"))
+      (if-let [message (open {:editor-command editor-command :suspended #(%)} (str file) nil)]
+        {:message message}
+        {:text (str/trimr (slurp file))})
+      (finally
+        (.delete file)))))
 
 (defn- open-frame
   "Opens the source of frame, from features/last-error, at its line, as open
@@ -678,12 +698,13 @@
     :sessions-file
                   the named sessions' file, for ,sessions
     :session-name session's name in it, if it has one"
-  [client session {:keys [terminal history-dir dir] :as opts}]
+  [client session {:keys [terminal history-dir dir editor-command] :as opts}]
   (let [{:keys [in-ns] :as lookups} (lookups client)]
     (if-let [editor (some-> terminal
                             (merge (select-keys lookups [:complete :eldoc :doc :source :apropos])
                                    {:incomplete? incomplete?
                                     :commands (set (map :name commands))
+                                    :edit (partial edit-text editor-command)
                                     :history-file (history-file history-dir (or (:project-dir client) dir))})
                             editor/open)]
       (try

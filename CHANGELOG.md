@@ -10,6 +10,7 @@
 - [#50](https://github.com/nrepl/neorepl/pull/50): The completion menu shows a candidate's namespace next to its type, unless the candidate names it already.
 - [#51](https://github.com/nrepl/neorepl/pull/51): Enter in an unfinished form starts a line indented for it, the way cljfmt indents by default.
 - [#52](https://github.com/nrepl/neorepl/pull/52): The REPL highlights its commands as they're typed, `,doc` and the like, and a command name that isn't one in red.
+- [#53](https://github.com/nrepl/neorepl/pull/53): C-x C-e in the REPL opens what's typed in `$EDITOR` and brings back what's saved, and `,edit` without a name opens the current namespace's file.
 
 ### Changes
 
