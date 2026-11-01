@@ -9,105 +9,24 @@
             [clojure.test :refer [deftest is testing use-fixtures]]
             [neorepl.jack-in :as jack-in]
             [neorepl.json :as json]
-            [neorepl.test-server :as test-server :refer [call-with-temp-dir spit-file]]))
+            [neorepl.servers :as servers :refer [*dir* project-dir run run-with]]
+            [neorepl.test-server :as test-server :refer [spit-file]]))
 
 (def ^:private servers
   "The servers the tests run against, by name, with the build tool that
   starts each and the project file it gets."
-  {:clojure {:tool "clojure" :project "{:paths [\"src\" \"test\"]}"}
-   :lein {:tool "lein" :project "(defproject demo \"0.1.0\" :dependencies [[org.clojure/clojure \"1.12.6\"]])"}
-   :bb {:tool "bb" :project "{:paths [\"src\" \"test\"]}"}})
+  (let [files (servers/sources "clj")]
+    {:clojure {:tool "clojure" :project "{:paths [\"src\" \"test\"]}" :files files}
+     :lein {:tool "lein" :project "(defproject demo \"0.1.0\" :dependencies [[org.clojure/clojure \"1.12.6\"]])" :files files}
+     :bb {:tool "bb" :project "{:paths [\"src\" \"test\"]}" :files files}}))
 
-(def ^:private ^:dynamic *dir*
-  "A directory with each server's project, in a directory named after it,
-  and neorepl's sessions, as if it was XDG_CACHE_HOME."
-  nil)
-
-(defn- project-dir [server]
-  (io/file *dir* (name server)))
-
-(def ^:private core
-  "(ns demo.core)
-
-(defn greet
-  \"Says hi.\"
-  [who]
-  (str \"hi \" who))
-
-(defn boom [x]
-  (throw (ex-info \"boom\" {:x x})))
-
-(defn welcome [who]
-  (println (greet who)))
-")
-
-(def ^:private core-test
-  "(ns demo.core-test
-  (:require [clojure.test :refer [deftest is]]
-            [demo.core :as core]))
-
-(deftest greet-test
-  (is (= \"hi you\" (core/greet \"you\"))))
-
-(deftest failing-test
-  (println \"printed by failing-test\")
-  (is (= \"hi\" (core/greet \"you\"))))
-
-(deftest error-test
-  (core/boom 1))
-")
-
-(defn- with-server
-  "Calls f once server is up in a project of its own, started the way
-  `neorepl server` starts it, saying what the server printed if it doesn't
-  come up."
-  [server f]
-  (let [{:keys [tool project]} (servers server)
-        {:keys [file port-file]} (jack-in/tool tool)
-        dir (project-dir server)
-        output (atom [])]
-    (spit-file dir file project)
-    (spit-file dir "src/demo/core.clj" core)
-    (spit-file dir "test/demo/core_test.clj" core-test)
-    (try
-      (jack-in/with-server dir (jack-in/command tool {}) port-file #(swap! output conj %) (fn [_] (f)))
-      (catch clojure.lang.ExceptionInfo e
-        (if (= ::jack-in/failed (:type (ex-data e)))
-          (throw (ex-info (str/join "\n" (cons (ex-message e) @output)) {} e))
-          (throw e))))))
-
-(defn- run-with
-  "Runs neorepl with args in server's project, finding the server by its
-  port file, with stdin as standard input, as test-server/run-in does."
-  [server stdin & args]
-  (apply test-server/run-in {:dir (str (project-dir server))
-                             :sessions-file (io/file *dir* "neorepl" "sessions.edn")}
-         stdin args))
-
-(defn- run
-  "Runs neorepl with args against server."
-  [server & args]
-  (apply run-with server "" args))
-
-(defn- on-each-server
+(def ^:private on-each-server
   "Calls (f server) for each server, testing it under its name."
-  [f]
-  (doseq [server (keys servers)]
-    (testing server
-      (f server))))
+  (partial servers/on-each-server servers))
 
 (use-fixtures :once
   (fn [f]
-    (call-with-temp-dir
-     (fn [dir]
-       ;; As the servers give their files' paths, without symlinks, like
-       ;; macOS' /var.
-       (binding [*dir* (.getCanonicalFile dir)]
-         ((reduce (fn [inner server] #(with-server server inner))
-                  #(do (doseq [server (keys servers)]
-                         (run server "eval" "(require 'demo.core-test)"))
-                       (f))
-                  (keys servers))))))))
+    (servers/call-with-servers servers #(run % "eval" "(require 'demo.core-test)") f)))
 
 (deftest eval-test
   (on-each-server
@@ -238,7 +157,7 @@
       (is (= {:status 0 :out "Reloaded demo.core, demo.core-test\n" :err ""} (run :clojure "reload")))
       (is (= ":added\n" (:out (run :clojure "eval" "(demo.core/added)"))))
       (finally
-        (spit file core)
+        (spit file servers/core)
         (run :clojure "reload")))))
 
 (deftest edit-test
@@ -249,7 +168,7 @@
             editor (doto (spit-file *dir* "vi" (str "#!/bin/sh\necho \"$@\" > '" edited "'\n"))
                      (.setExecutable true))]
         (is (= 0 (:status (test-server/run-in {:dir (str (project-dir :clojure))
-                                               :sessions-file (io/file *dir* "neorepl" "sessions.edn")
+                                               :sessions-file (servers/sessions-file)
                                                :editor-command (str editor)}
                                               ",ns demo.core\n,edit\n" "repl"))))
         (is (= (str "+1 " (io/file (project-dir :clojure) "src" "demo" "core.clj") "\n") (slurp edited)))))))
@@ -285,7 +204,7 @@
         (let [dir (io/file *dir* (str "old-" tool))]
           (spit-file dir (:file (jack-in/tool tool)) project)
           (let [{:keys [status out err]} (apply test-server/run-in {:dir (str dir)
-                                                                   :sessions-file (io/file *dir* "neorepl" "sessions.edn")}
+                                                                   :sessions-file (servers/sessions-file)}
                                                 "(+ 1 2)\n" "repl" args)]
             (is (= 0 status))
             (is (= "user=> 3\nuser=> \n" out))
