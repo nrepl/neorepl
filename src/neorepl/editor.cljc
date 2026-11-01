@@ -201,17 +201,24 @@
       (apply f args)
       (catch Exception _ nil))))
 
+(defn- description
+  "What the completion menu shows next to a completion: its :type, and its
+  :ns unless the :candidate names it already, as with an alias, the way
+  CIDER does."
+  [{:keys [candidate type ns]}]
+  (not-empty (str/join ", " (remove nil? [type (when-not (re-find #"./" candidate) ns)]))))
+
 (defn- completer
   "Completes the word at the cursor with what (complete prefix) returns:
-  maps with the :candidate and maybe its :type."
+  maps with the :candidate and maybe its :type and :ns."
   [complete]
   (reify Completer
     (complete [_ _ line candidates]
       (let [prefix (.word ^ParsedLine line)]
         ;; Everything would be too much.
         (when (seq prefix)
-          (doseq [{:keys [candidate type]} (complete prefix)]
-            (.add ^List candidates (Candidate. candidate candidate nil type nil nil false))))))))
+          (doseq [{:keys [candidate] :as completion} (complete prefix)]
+            (.add ^List candidates (Candidate. candidate candidate nil (description completion) nil nil false))))))))
 
 (defn- widget ^Widget [f]
   (reify Widget

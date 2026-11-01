@@ -4,6 +4,7 @@
   (:require [clojure.java.io :as io]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing use-fixtures]]
+            [neorepl.editor :as editor]
             [neorepl.features :as features]
             [neorepl.main :as main]
             [neorepl.nrepl :as nrepl]
@@ -368,6 +369,14 @@
                             (is (screen #"map-indexed"))
                             (type "\u0003")))]
       (is (not (re-find #"\u001b\[[0-9;]*m" out)))))
+  (testing "the completion menu shows a candidate's type and namespace"
+    (let [description #'editor/description]
+      (is (= "function, clojure.core" (description {:candidate "map" :type "function" :ns "clojure.core"})))
+      (is (= "function, clojure.core" (description {:candidate "/" :type "function" :ns "clojure.core"})))
+      (testing "but not the namespace of one that names it"
+        (is (= "function" (description {:candidate "str/join" :type "function" :ns "clojure.string"}))))
+      (testing "and nothing for one the server says nothing about"
+        (is (nil? (description {:candidate "map"}))))))
   (testing "eldoc shows the arglists of the function being called"
     (call-with-repl {:eldoc? true}
       (fn [type screen]
