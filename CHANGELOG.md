@@ -25,6 +25,7 @@
 - [#58](https://github.com/nrepl/neorepl/pull/58): Lookups take an empty list in a server's answer for the nil it stands for, so `doc` no longer prints `[]` for what nbb doesn't find, and `doc` and `where` no longer fail on a var made with `intern` without cider-nrepl.
 - [#58](https://github.com/nrepl/neorepl/pull/58): Code that throws on nbb fails the evaluation, which nbb's server says only with an `:ex`, so `neorepl eval` exits 1 and the MCP `eval` tool reports an error.
 - [#58](https://github.com/nrepl/neorepl/pull/58): `source`, `macroexpand` and `apropos` work on Basilisp.
+- [#58](https://github.com/nrepl/neorepl/pull/58): `,ns` switches namespaces on nbb, whose server takes no notice of `in-ns`.
 
 ## 0.4.1 (2026-10-31)
 

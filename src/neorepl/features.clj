@@ -1387,7 +1387,8 @@
     (throw (ex-info (str "Not the name of a namespace: " name) {:type ::failed})))
   (let [evaluate-in (fn [session code]
                       (evaluate-for client {:op "eval" :session session :code code} opts (fn [_])))
-        enter #(evaluate-in session (format "#?(:clj (clojure.core/in-ns '%1$s) :cljs (in-ns '%1$s) :default (in-ns '%1$s))" name))
+        ;; nbb's server only switches for an ns form.
+        enter #(evaluate-in session (format "#?(:clj (clojure.core/in-ns '%1$s) :org.babashka/nbb (ns %1$s) :cljs (in-ns '%1$s) :default (in-ns '%1$s))" name))
         copy (loading-copy client session {})
         found? #(eval-data client {:session copy} ns-found-code [name] {})]
     (try
