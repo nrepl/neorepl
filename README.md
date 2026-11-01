@@ -54,9 +54,12 @@ CIDER's jack-in does, and stops it when the REPL ends. The project's build
 tool runs it, with cider-nrepl: Leiningen for a `project.clj`, the Clojure
 CLI for a `deps.edn`, babashka, which has CIDER's essentials built in, for a
 `bb.edn` and shadow-cljs for a `shadow-cljs.edn`. `--tool` picks another one
-and `--aliases` adds deps.edn aliases or Leiningen profiles. `neorepl server`
-starts one that stays up until you stop it, for editors, coding agents and
-`neorepl eval` to share:
+and `--aliases` adds deps.edn aliases or Leiningen profiles. In a Leiningen
+project, `:init-ns` and `:init` in `:repl-options` work, `:prompt` and
+`:welcome` don't, being for `lein repl`'s own client, and a cider-nrepl in
+`~/.lein/profiles.clj` takes the place of the one jack-in adds. `neorepl
+server` starts one that stays up until you stop it, for editors, coding
+agents and `neorepl eval` to share:
 
 ```shell
 neorepl --aliases :dev:test
