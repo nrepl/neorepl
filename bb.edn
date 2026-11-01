@@ -12,7 +12,7 @@
             :requires ([clojure.string :as str])
             :task (clojure (str "-M:test" (str/join *command-line-args*)))}
 
-  test:integration {:doc "Run the integration tests, against real servers, on babashka. They need the Clojure CLI, Leiningen, Node and npm."
+  test:integration {:doc "Run the integration tests, against real servers, on babashka. They need the Clojure CLI, Leiningen, Node and npm, and Python 3."
                     :extra-paths ["test" "integration"]
                     :requires ([neorepl.test-runner :as runner])
                     :task (apply runner/-main "--dir" "integration" *command-line-args*)}
