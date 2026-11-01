@@ -23,7 +23,8 @@ From a checkout, `bbin install .` installs that instead.
 `neorepl` connects to the nREPL server whose `.nrepl-port` file is in the
 current directory or one of its parents (`neorepl ports` lists the ones it
 can see) and starts a REPL. Enter evaluates the input once its forms are
-complete, Ctrl-C interrupts an evaluation and Ctrl-D exits. Code gets
+complete, and before that starts a line indented for the form it's in,
+Ctrl-C interrupts an evaluation and Ctrl-D exits. Code gets
 highlighted, along with the delimiter that pairs with the one at the cursor,
 values get pretty printed and the history is kept per project.
 TAB completes, the arglists of the function you're calling show up after

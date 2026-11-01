@@ -331,6 +331,16 @@
                         :above (atom (AttributedString. ""))
                         ;; A token for the line waiting there.
                         :waiting (atom nil)}]
+            ;; Enter in an unfinished form goes on to a line indented for it,
+            ;; rather than to JLine's, which starts at the margin.
+            (.put (.getWidgets reader) LineReader/ACCEPT_LINE
+                  (widget #(let [buffer (.getBuffer reader)
+                                 text (str buffer)]
+                             (if (and (not @raw?) (incomplete? text))
+                               (.write buffer ^CharSequence (apply str "\n" (repeat (lexer/indentation (subs text 0 (.cursor buffer))) \space)))
+                               ;; JLine's own.
+                               (.callWidget reader (str "." LineReader/ACCEPT_LINE)))
+                             true)))
             (when (and eldoc eldoc?)
               (.setAutosuggestion reader LineReader$SuggestionType/TAIL_TIP)
               ;; JLine shows the history search's prompt where the tip goes,

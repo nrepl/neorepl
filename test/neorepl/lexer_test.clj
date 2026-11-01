@@ -228,6 +228,48 @@
       (is (= [3 nil false] (match "(a))" 4)))
       (is (= [0 nil false] (match "(a (b)" 0))))))
 
+(deftest indentation-test
+  (testing "a body by two"
+    (are [s] (= 2 (lexer/indentation s))
+      "(defn f [x]"
+      "(let [a 1]"
+      "(when-let [x (f)]"
+      "(clojure.core/let [a 1]"
+      "(defspec prop"
+      "(if"))
+  (testing "from its form's opener"
+    (is (= 4 (lexer/indentation "(defn f [x]\n  (let [y 1]")))
+    (is (= 4 (lexer/indentation "  (do"))))
+  (testing "other lists' arguments lined up with the first"
+    (are [s n] (= n (lexer/indentation s))
+      "(foo a" 5
+      "(-> x" 4
+      "(foo (bar 1)" 5
+      "(foo 'x" 5
+      "(foo a ; why" 5
+      "(foo #_x a" 9
+      "  (foo a" 7))
+  (testing "or with the head, without one on its line"
+    (are [s n] (= n (lexer/indentation s))
+      "(foo" 1
+      "(foo\n a" 1
+      "(foo (bar" 6
+      "(" 1))
+  (testing "vectors', maps' and sets' elements with the first"
+    (are [s n] (= n (lexer/indentation s))
+      "[1 2" 1
+      "{:a 1" 1
+      "#{1" 2
+      "(let [a 1" 6))
+  (testing "reader conditionals' branches lined up"
+    (is (= 3 (lexer/indentation "#?(:clj a"))))
+  (testing "not at all outside forms, in a string, or past a delimiter that doesn't balance"
+    (are [s] (= 0 (lexer/indentation s))
+      ""
+      "(+ 1 2)"
+      "(str \"a"
+      "(a]")))
+
 (deftest delimiter-error-test
   (letfn [(error [s]
             ;; With the tokens' text in place of the tokens.
