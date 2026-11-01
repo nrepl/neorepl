@@ -74,6 +74,7 @@ jobs:
       - uses: DeLaGuardo/setup-clojure@13.7.0
         with:
           cli: latest
+          lein: latest
           bb: latest
       - uses: actions/cache@v6
         with:

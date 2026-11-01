@@ -1,8 +1,9 @@
 (ns neorepl.real-servers-test
   "neorepl against real servers: nREPL with cider-nrepl, started the way
-  `neorepl server` starts it, and babashka's, with the bb on the PATH. The
-  fakes the unit tests use behave like the cider-nrepl they were written
-  against, which says nothing about the next one, or the next bb."
+  `neorepl server` starts it in a deps.edn project and in a Leiningen one,
+  and babashka's, with the bb on the PATH. The fakes the unit tests use
+  behave like the cider-nrepl they were written against, which says
+  nothing about the next one, or the next bb."
   (:require [clojure.java.io :as io]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing use-fixtures]]
@@ -12,8 +13,10 @@
 
 (def ^:private servers
   "The servers the tests run against, by name, with the build tool that
-  starts each."
-  {:cider "clojure" :bb "bb"})
+  starts each and the project file it gets."
+  {:clojure {:tool "clojure" :project "{:paths [\"src\" \"test\"]}"}
+   :lein {:tool "lein" :project "(defproject demo \"0.1.0\" :dependencies [[org.clojure/clojure \"1.12.6\"]])"}
+   :bb {:tool "bb" :project "{:paths [\"src\" \"test\"]}"}})
 
 (def ^:private ^:dynamic *dir*
   "A directory with each server's project, in a directory named after it,
@@ -56,11 +59,11 @@
   `neorepl server` starts it, saying what the server printed if it doesn't
   come up."
   [server f]
-  (let [tool (servers server)
+  (let [{:keys [tool project]} (servers server)
         {:keys [file port-file]} (jack-in/tool tool)
         dir (project-dir server)
         output (atom [])]
-    (spit-file dir file "{:paths [\"src\" \"test\"]}")
+    (spit-file dir file project)
     (spit-file dir "src/demo/core.clj" core)
     (spit-file dir "test/demo/core_test.clj" core-test)
     (try
@@ -142,13 +145,13 @@
        (is (= 1 status))
        (is (str/includes? out (str "FAIL in demo.core-test/failing-test (" file ":10)\n")))
        ;; cider-nrepl gives the line that threw, bb the test's.
-       (is (str/includes? out (str "ERROR in demo.core-test/error-test (" file ":" ({:cider 13 :bb 12} server) ")\n")))
+       (is (str/includes? out (str "ERROR in demo.core-test/error-test (" file ":" (if (= :bb server) 12 13) ")\n")))
        (is (str/includes? out "error: clojure.lang.ExceptionInfo: boom {:x 1}"))
        (is (str/ends-with? out "Ran 3 tests containing 3 assertions.\n1 failure, 1 error.\n"))
        ;; bb sends what tests print under the session's previous message,
        ;; to a connection that's gone, unless the session's new
        ;; (babashka#2265).
-       (when (= :cider server)
+       (when-not (= :bb server)
          (is (str/includes? out "printed by failing-test\n"))))
      (testing "rerunning what didn't pass"
        (let [{:keys [status out]} (run server "retest")]
@@ -183,36 +186,36 @@
 
 (deftest trace-test
   (testing "cider-nrepl"
-    (is (= "Tracing demo.core/greet\n" (:out (run :cider "trace" "demo.core/greet"))))
-    (is (str/includes? (:out (run :cider "eval" "(demo.core/greet \"t\")")) "└─→ \"hi t\"\n"))
-    (is (= "Stopped tracing demo.core/greet\n" (:out (run :cider "untrace" "demo.core/greet"))))
+    (is (= "Tracing demo.core/greet\n" (:out (run :clojure "trace" "demo.core/greet"))))
+    (is (str/includes? (:out (run :clojure "eval" "(demo.core/greet \"t\")")) "└─→ \"hi t\"\n"))
+    (is (= "Stopped tracing demo.core/greet\n" (:out (run :clojure "untrace" "demo.core/greet"))))
     (testing "a call that throws"
-      (run :cider "trace" "demo.core/boom")
-      (is (str/includes? (:out (run :cider "eval" "(demo.core/boom 3)")) "└─✗ clojure.lang.ExceptionInfo: boom\n"))
-      (run :cider "untrace" "demo.core/boom")))
+      (run :clojure "trace" "demo.core/boom")
+      (is (str/includes? (:out (run :clojure "eval" "(demo.core/boom 3)")) "└─✗ clojure.lang.ExceptionInfo: boom\n"))
+      (run :clojure "untrace" "demo.core/boom")))
   (testing "babashka"
     (is (= {:status 1 :out "" :err "neorepl: Tracing takes cider-nrepl on the server\n"}
            (run :bb "trace" "demo.core/greet")))))
 
 (deftest java-doc-test
   (testing "cider-nrepl, with the Javadoc"
-    (is (str/includes? (:out (run :cider "doc" "java.util.ArrayList"))
+    (is (str/includes? (:out (run :clojure "doc" "java.util.ArrayList"))
                        "Resizable-array implementation of the List interface."))
-    (is (str/starts-with? (:out (run :cider "doc" ".toUpperCase"))
+    (is (str/starts-with? (:out (run :clojure "doc" ".toUpperCase"))
                           "java.lang.String/toUpperCase\n([this locale] [this])\n")))
   (testing "babashka, without it"
     (is (= {:status 0 :out "java.util.ArrayList\n" :err ""} (run :bb "doc" "java.util.ArrayList")))))
 
 (deftest reload-test
-  (let [file (io/file (project-dir :cider) "src" "demo" "core.clj")]
-    (run :cider "reload")
+  (let [file (io/file (project-dir :clojure) "src" "demo" "core.clj")]
+    (run :clojure "reload")
     (try
       (spit file "\n(defn added [] :added)\n" :append true)
-      (is (= {:status 0 :out "Reloaded demo.core, demo.core-test\n" :err ""} (run :cider "reload")))
-      (is (= ":added\n" (:out (run :cider "eval" "(demo.core/added)"))))
+      (is (= {:status 0 :out "Reloaded demo.core, demo.core-test\n" :err ""} (run :clojure "reload")))
+      (is (= ":added\n" (:out (run :clojure "eval" "(demo.core/added)"))))
       (finally
         (spit file core)
-        (run :cider "reload")))))
+        (run :clojure "reload")))))
 
 (deftest repl-test
   (on-each-server
@@ -222,7 +225,7 @@
        (is (str/includes? out "demo.core=> \"hi r\"\n"))
        ;; bb's comes as output nobody asked for, which the REPL prints from
        ;; another thread, where *out* isn't this one.
-       (when (= :cider server)
+       (when-not (= :bb server)
          (is (str/includes? out "printed by failing-test\n")))
        (is (str/includes? out "Ran 1 test containing 1 assertion.\n1 failure, 0 errors.\n"))))))
 
