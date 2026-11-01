@@ -9,6 +9,7 @@
 - [#49](https://github.com/nrepl/neorepl/pull/49): The REPL takes readline's settings from `~/.inputrc`, or the file `$INPUTRC` names, so `set editing-mode vi` there picks the vi keymap, and `$if neorepl` holds what's for neorepl alone.
 - [#50](https://github.com/nrepl/neorepl/pull/50): The completion menu shows a candidate's namespace next to its type, unless the candidate names it already.
 - [#51](https://github.com/nrepl/neorepl/pull/51): Enter in an unfinished form starts a line indented for it, the way cljfmt indents by default.
+- [#52](https://github.com/nrepl/neorepl/pull/52): The REPL highlights its commands as they're typed, `,doc` and the like, and a command name that isn't one in red.
 
 ### Changes
 

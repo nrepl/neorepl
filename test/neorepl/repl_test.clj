@@ -12,6 +12,7 @@
             [neorepl.sessions :as sessions]
             [neorepl.test-server :as test-server :refer [*port* call-with-temp-dir lf with-client]])
   (:import (java.io ByteArrayInputStream ByteArrayOutputStream PipedInputStream PipedOutputStream)
+           (org.jline.utils AttributedString)
            (java.util.regex Pattern)
            (java.util.zip ZipEntry ZipOutputStream)))
 
@@ -109,6 +110,22 @@
                             (type "(-> 1 inc)\r")
                             (screen #"(?m)^2\nuser=> $")))]
       (is (str/includes? out "\u001b[34;1m->"))))
+  (testing "commands highlighted"
+    (let [{:keys [out]} (call-with-repl {:color? true}
+                          (fn [type screen]
+                            (type ",doc map")
+                            (screen #",doc map$")
+                            (type "\u0003")
+                            (screen #"\nuser=> $")))]
+      (is (str/includes? out "\u001b[34;1m")))
+    (let [styled #(.toAnsi ^AttributedString (#'editor/command-styled @#'editor/colors #{"doc"} % (AttributedString. ^String %)))]
+      (is (= "\u001b[34;1m,doc\u001b[0m map" (styled ",doc map")))
+      (testing "and one that isn't there as an error"
+        (is (= "\u001b[31m,dco\u001b[0m map" (styled ",dco map"))))
+      (testing "but not while it's being typed"
+        (is (= ",d" (styled ",d"))))
+      (testing "and code isn't a command"
+        (is (= "(doc map)" (styled "(doc map)"))))))
   (testing "the prompt follows the namespace"
     (call-with-repl {}
       (fn [type screen]

@@ -683,6 +683,7 @@
     (if-let [editor (some-> terminal
                             (merge (select-keys lookups [:complete :eldoc :doc :source :apropos])
                                    {:incomplete? incomplete?
+                                    :commands (set (map :name commands))
                                     :history-file (history-file history-dir (or (:project-dir client) dir))})
                             editor/open)]
       (try

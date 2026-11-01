@@ -23,12 +23,13 @@
 
 (def ^:private colors
   "Styles for lexer token types, for :err output and :notice messages, for
-  the delimiter that pairs with the one at the cursor, its :match, and for
-  the :headings of full-screen views."
+  the delimiter that pairs with the one at the cursor, its :match, for the
+  REPL's :commands, and for the :headings of full-screen views."
   (let [faint (.faint AttributedStyle/DEFAULT)
         green (fg AttributedStyle/GREEN)
         magenta (fg AttributedStyle/MAGENTA)
-        yellow (fg AttributedStyle/YELLOW)]
+        yellow (fg AttributedStyle/YELLOW)
+        special (.bold (fg AttributedStyle/BLUE))]
     {:comment faint
      :discard faint
      :string green
@@ -38,11 +39,14 @@
      :keyword (fg AttributedStyle/CYAN)
      :number magenta
      :constant magenta
-     :special (.bold (fg AttributedStyle/BLUE))
+     :special special
      :reader-macro yellow
      :macro-char yellow
      :err (fg AttributedStyle/RED)
      :match (.inverse AttributedStyle/DEFAULT)
+     ;; The REPL's own special forms, which red stands out from in every
+     ;; theme, as an unknown command is.
+     :command special
      :notice faint
      :heading (.bold AttributedStyle/DEFAULT)}))
 
@@ -154,6 +158,21 @@
       tip
       (str " " tip))))
 
+(defn- command-styled
+  "code, with styled-code its tokens styled, with the REPL command it starts
+  with, a comma and one of commands' names, in the :command style, or as an
+  :err when the name is no command's, nor the start of one, which it is
+  while it's being typed."
+  ^AttributedString [styles commands ^String code ^AttributedString styled-code]
+  (let [[_ name] (when (seq commands) (re-find #"^\s*,([a-z][a-z-]*)" code))
+        k (cond
+            (nil? name) nil
+            (commands name) :command
+            (not-any? #(str/starts-with? % name) commands) :err)]
+    (if k
+      (.styleMatches styled-code #"^\s*,[a-z][a-z-]*" (style styles k))
+      styled-code)))
+
 (defn- highlighter
   "Highlights code, with what the delimiter at the cursor pairs with, and
   has (eldoc text cursor) say what to show after the cursor, cut to what's
@@ -161,8 +180,9 @@
   highlights on every redisplay, so eldoc sees every change to the line,
   whatever made it, and the pair follows the cursor. JLine's last redisplay
   of the line, once it's done reading it, goes without the pair, so it
-  doesn't stay behind in the scrollback."
-  [styles raw? prompt eldoc]
+  doesn't stay behind in the scrollback. The names of the REPL's commands,
+  a set, show as command-styled has them."
+  [styles raw? prompt eldoc commands]
   (reify Highlighter
     (highlight [_ reader buffer]
       (if @raw?
@@ -186,9 +206,10 @@
                                             tip)
                                           (tail-tip buffer))))
                              "")))
-          (styled styles lexed (if (.isReading ^LineReader reader)
-                                 (delimiter-marks (lexer/delimiter-match lexed cursor))
-                                 {})))))
+          (command-styled styles commands buffer
+                          (styled styles lexed (if (.isReading ^LineReader reader)
+                                                 (delimiter-marks (lexer/delimiter-match lexed cursor))
+                                                 {}))))))
     (setErrorPattern [_ _])
     (setErrorIndex [_ _])))
 
@@ -280,11 +301,12 @@
     :doc           (doc text cursor) for the documentation C-x C-d shows
     :source        (source text cursor) for the code C-x C-s shows
     :apropos       (apropos text cursor) for what C-x C-a shows
+    :commands      the names of the REPL's commands, a set, to highlight
     :inputrc       readline's settings, a file JLine reads the way readline
                    would, $if neorepl taking in what's for neorepl alone
     :input, :output, :width and :type
                    a terminal on these streams instead, for tests"
-  [{:keys [history-file color? incomplete? complete eldoc eldoc? inputrc input]
+  [{:keys [history-file color? incomplete? complete eldoc eldoc? commands inputrc input]
     :or {color? true incomplete? lexer/incomplete? eldoc? true}
     :as opts}]
   (when (or input (maybe-terminal?))
@@ -299,7 +321,7 @@
                           (.terminal terminal)
                           (.appName "neorepl")
                           (.parser (parser raw? incomplete?))
-                          (.highlighter (highlighter styles raw? prompt (when eldoc? (some-> eldoc safely))))
+                          (.highlighter (highlighter styles raw? prompt (when eldoc? (some-> eldoc safely)) commands))
                           (.variable LineReader/SECONDARY_PROMPT_PATTERN "%P #_=> ")
                           ;; The highlighter shows the pair, rather than JLine
                           ;; moving the cursor to it after a closer is typed.
