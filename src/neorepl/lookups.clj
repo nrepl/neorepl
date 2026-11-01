@@ -50,6 +50,14 @@
                 (select-keys info [:file :line :column]))))
     :text render/location-text
     :none (fn [{:keys [ns]} sym] (str "Nowhere to find " sym " in " ns))}
+   {:name "refs" :arg "SYM" :help "List the functions that use SYM"
+    :find (fn [client ctx sym] (not-empty (features/references client sym ctx false)))
+    :text render/references-text
+    :none (fn [_ sym] (str "Nothing loaded uses " sym))}
+   {:name "deps" :arg "SYM" :help "List the functions SYM uses"
+    :find (fn [client ctx sym] (not-empty (features/references client sym ctx true)))
+    :text render/references-text
+    :none (fn [_ sym] (str sym " uses no functions"))}
    {:name "reload" :arg "NS..." :args? true :optional? true
     :help "Reload the namespaces NS, or the ones that changed"
     :find (fn [client {:keys [timeout-ms]} nses]

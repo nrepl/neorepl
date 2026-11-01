@@ -121,8 +121,9 @@ neorepl load src/my/app.clj
 `neorepl doc`, `neorepl source`, `neorepl apropos` and `neorepl pst` do what
 their `clojure.repl` namesakes do, `neorepl macroexpand` expands macros,
 `neorepl complete` lists completions, `neorepl where` says where something's
-defined and `neorepl reload` reloads code, all using cider-nrepl when the
-server has it. `--session NAME` looks things up as that session sees them:
+defined, `neorepl refs` which functions use it, or with `--deps`, which it
+uses, and `neorepl reload` reloads code, all using cider-nrepl when the
+server has it, which `refs` takes. In the REPL they're `,refs` and `,deps`. `--session NAME` looks things up as that session sees them:
 in its language, ClojureScript included, and in its namespace, the Clojure
 one in ClojureScript, which `--ns` can name otherwise:
 
@@ -243,9 +244,10 @@ way the other commands do. With Claude Code:
 claude mcp add neorepl -- neorepl mcp
 ```
 
-Its tools are `eval`, `load`, `doc`, `source`, `where`, `apropos`,
+Its tools are `eval`, `load`, `doc`, `source`, `where`, `refs`, `apropos`,
 `macroexpand`, `reload`, `test`, `retest`, `pst`, `interrupt`, `check` and
-`ports`, with `check` taking a `fix` argument for `--fix`, and they share the CLI's sessions, the one called
+`ports`, with `check` taking a `fix` argument for `--fix` and `refs` a
+`deps` one for `--deps`, and they share the CLI's sessions, the one called
 `agent` unless a call names another, so `neorepl eval --session agent` and
 the `eval` tool see the same state. That's fewer tools
 than the CLI has commands on purpose: an agent pays for every tool's

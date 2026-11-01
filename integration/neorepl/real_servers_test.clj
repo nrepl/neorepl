@@ -36,6 +36,9 @@
 
 (defn boom [x]
   (throw (ex-info \"boom\" {:x x})))
+
+(defn welcome [who]
+  (println (greet who)))
 ")
 
 (def ^:private core-test
@@ -124,7 +127,7 @@
   (on-each-server
    (fn [server]
      (let [file (io/file (project-dir server) "src" "demo" "core.clj")]
-       (is (= {:status 0 :out "#'demo.core/boom\n" :err ""} (run server "load" (str file))))
+       (is (= {:status 0 :out "#'demo.core/welcome\n" :err ""} (run server "load" (str file))))
        (is (= {:status 0 :out "demo.core/greet\n([who])\n  Says hi.\n" :err ""}
               (run server "doc" "demo.core/greet")))
        (is (= {:status 0 :out "(defn greet\n  \"Says hi.\"\n  [who]\n  (str \"hi \" who))\n" :err ""}
@@ -205,6 +208,27 @@
                           "java.lang.String/toUpperCase\n([this locale] [this])\n")))
   (testing "babashka, without it"
     (is (= {:status 0 :out "java.util.ArrayList\n" :err ""} (run :bb "doc" "java.util.ArrayList")))))
+
+(deftest refs-test
+  (testing "cider-nrepl"
+    (let [dir (project-dir :clojure)
+          core (io/file dir "src" "demo" "core.clj")
+          core-test (io/file dir "test" "demo" "core_test.clj")
+          ;; Each line's name and location.
+          rows (fn [& args]
+                 (->> (apply run :clojure args) :out str/split-lines (map #(str/split % #"\s+")) set))]
+      (is (= #{["demo.core/welcome" (str core ":11:1")]
+               ["demo.core-test/greet-test" (str core-test ":5:1")]
+               ["demo.core-test/failing-test" (str core-test ":8:1")]}
+             (rows "refs" "demo.core/greet")))
+      (testing "and the functions a function uses"
+        (is (contains? (rows "refs" "--deps" "demo.core/welcome") ["demo.core/greet" (str core ":3:1")])))
+      (testing "but not for a var that isn't there, which cider-nrepl takes for one nothing uses"
+        (is (= {:status 1 :out "" :err "neorepl: Nothing called demo.core/nope in user\n"}
+               (run :clojure "refs" "demo.core/nope"))))))
+  (testing "babashka"
+    (is (= {:status 1 :out "" :err "neorepl: Cross-references take cider-nrepl on the server\n"}
+           (run :bb "refs" "demo.core/greet")))))
 
 (deftest reload-test
   (let [file (io/file (project-dir :clojure) "src" "demo" "core.clj")]

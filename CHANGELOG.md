@@ -11,6 +11,7 @@
 - [#51](https://github.com/nrepl/neorepl/pull/51): Enter in an unfinished form starts a line indented for it, the way cljfmt indents by default.
 - [#52](https://github.com/nrepl/neorepl/pull/52): The REPL highlights its commands as they're typed, `,doc` and the like, and a command name that isn't one in red.
 - [#53](https://github.com/nrepl/neorepl/pull/53): C-x C-e in the REPL opens what's typed in `$EDITOR` and brings back what's saved, and `,edit` without a name opens the current namespace's file.
+- [#55](https://github.com/nrepl/neorepl/pull/55): `neorepl refs` lists the functions that use a var, or with `--deps`, the ones it uses, as `,refs` and `,deps` do in the REPL and the `refs` tool does for MCP, with cider-nrepl.
 
 ### Changes
 

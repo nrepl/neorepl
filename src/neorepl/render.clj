@@ -87,6 +87,12 @@
   [{:keys [file line column]}]
   (str/join ":" (remove nil? [file line column])))
 
+(defn references-text
+  "Cross-references, from features/references, a line each: the function's
+  name and where it's defined."
+  [references]
+  (str/join "\n" (cli/columns (map (juxt :name location-text) references))))
+
 (defn- labeled
   "text after label, with the lines after the first lined up with it."
   [label text]

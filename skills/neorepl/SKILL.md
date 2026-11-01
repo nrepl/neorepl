@@ -106,9 +106,14 @@ neorepl untrace my.app/parse-date
 neorepl doc clojure.core/update-in
 neorepl source --ns my.app start
 neorepl where my.app/start
+neorepl refs my.app/start
 neorepl apropos update
 neorepl macroexpand --all '(-> x (f) (g))'
 ```
+
+`refs` lists the functions that use a function, with where each is, from the
+code that's loaded: look before changing what it takes or returns.
+`--deps` lists the ones it uses instead. It takes cider-nrepl.
 
 They resolve names in `user`, or the namespace `--ns` names, apropos aside.
 With `-s agent` they look as your session sees things, in its namespace, and
