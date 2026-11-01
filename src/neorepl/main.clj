@@ -190,7 +190,8 @@ when it times out.")
   with-server does. What the server prints goes where output nobody asked
   for goes, like an evaluation's that comes late, and to stderr before
   something takes that over and after f. When the connection drops because
-  the server's gone, it says how that ended."
+  the server's gone, it says how that ended, and when the server runs
+  another cider-nrepl than jack-in adds, it says that first."
   [project options f]
   (let [output (atom print-err-line)]
     (with-server project options #(@output %)
@@ -201,6 +202,7 @@ when it times out.")
                                              (some-> (or out err) print-err))})
              (assoc :project-dir (:dir project)))
          (fn [client]
+           (some-> (jack-in/other-cider-nrepl (:tool project) (:cider-version client)) warn)
            (reset! output #(nrepl/unclaimed client {:err (str % "\n")}))
            (try
              (f client)

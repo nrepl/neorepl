@@ -120,6 +120,18 @@
       ;; Its server loads cider-nrepl when it's there.
       "shadow-cljs" ["npx" "shadow-cljs" "-d" (str "cider/cider-nrepl:" cider-nrepl) "server"])))
 
+(defn other-cider-nrepl
+  "What to say when a server command started for tool runs another
+  cider-nrepl than the one it adds, cider-version being the one describe
+  gives. The project's settings, or the user's, can bring their own, as a
+  deps.edn alias does, or Leiningen's :plugins and :user profile. Nil when
+  it's the one command adds, and for babashka, whose server has its own."
+  [tool-name cider-version]
+  (let [added (:cider-nrepl versions)]
+    (when (and cider-version (not= "bb" tool-name) (not= added cider-version))
+      (str "The server runs cider-nrepl " cider-version " from the project's or the user's settings, rather than the "
+           added " jack-in adds"))))
+
 (defn- address
   "Where the server that printed line says it's listening, if it does: nREPL,
   Leiningen and shadow-cljs say it their way, babashka its own."
