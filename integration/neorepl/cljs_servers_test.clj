@@ -45,14 +45,18 @@
   (apply run server command "-s" "cljs" args))
 
 (defn- await-runtime
-  "Waits for the cljs session's runtime to answer, for 30s at most.
-  shadow-cljs's node-repl returns before Node is up, and until then an
-  evaluation only gets \"No available JS runtime\" on stderr."
+  "Waits for the cljs session's runtime to answer, for 30s at most, and
+  returns its last answer. shadow-cljs's node-repl returns before Node is
+  up, and until then an evaluation only gets \"No available JS runtime\" on
+  stderr. It asks what only ClojureScript answers, as a session the REPL
+  didn't start in stays in Clojure, which answers (+ 1 2) too."
   [server]
   (loop [tries 150]
-    (when (and (pos? tries) (not= "3\n" (:out (run-cljs server "eval" "(+ 1 2)"))))
-      (Thread/sleep 200)
-      (recur (dec tries)))))
+    (let [answer (run-cljs server "eval" "(js/parseInt \"3\")")]
+      (if (or (= "3\n" (:out answer)) (= 1 tries))
+        answer
+        (do (Thread/sleep 200)
+            (recur (dec tries)))))))
 
 (use-fixtures :once
   (fn [f]
@@ -61,8 +65,13 @@
     ;; so two would get each other's.
     (servers/call-with-servers servers
                                (fn [server]
-                                 (run-cljs server "eval" (get-in servers [server :node-repl]))
-                                 (await-runtime server)
+                                 (let [started (run-cljs server "eval" (get-in servers [server :node-repl]))
+                                       answer (await-runtime server)]
+                                   ;; Without a runtime every test fails, in
+                                   ;; Clojure, so this says why, once.
+                                   (is (= "3\n" (:out answer))
+                                       (str (name server) "'s ClojureScript REPL didn't start: "
+                                            (pr-str started) ", then " (pr-str answer))))
                                  (run-cljs server "eval" "(require 'demo.core-test)"))
                                f)))
 
