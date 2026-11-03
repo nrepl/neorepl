@@ -1039,6 +1039,31 @@
       (finally
         (server/stop-server srv)))))
 
+(deftest taps-test
+  (let [tapped (promise)]
+    (with-client [client {:port *port* :on-unclaimed #(some->> (:cider/tap-value %) (deliver tapped))}]
+      (let [subscription (features/subscribe-taps client)
+            session (nrepl/clone-session client)]
+        (try
+          (is (string? subscription))
+          (testing "a summary of each value tapped, as responses nobody claims"
+            (nrepl/request client {:op "eval" :code "(tap> {:tapped [1 2]})"})
+            (let [{:keys [idx] :as value} (deref tapped 5000 nil)]
+              (is (= {:summary "{:tapped [1 2]}" :type "clojure.lang.PersistentArrayMap"}
+                     (dissoc value :idx)))
+              (testing "which the inspector takes by its number"
+                (is (str/includes? (render/inspector-text (:lines (features/inspect-tap client session idx 10)))
+                                   ":tapped")))
+              (testing "while the server keeps it"
+                (is (thrown-with-msg? clojure.lang.ExceptionInfo #"doesn't keep that value anymore"
+                                      (features/inspect-tap client session 99999 10))))))
+          (finally
+            (features/unsubscribe-taps client subscription)))
+        (testing "until it's over"
+          (is (zero? (test-server/tap-subscribers)))))
+      (testing "nil when the server can't"
+        (is (nil? (features/subscribe-taps (assoc client :ops {}))))))))
+
 (deftest forward-system-output-test
   (let [printed (atom [])]
     (with-client [client {:port *port* :on-unclaimed #(swap! printed conj (select-keys % [:out :err]))}]

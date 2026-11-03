@@ -284,6 +284,53 @@
   []
   (count @trace-subscriptions))
 
+(def ^:private tapped-values
+  "The values tapped while wrap-fake-taps had a subscription, in order."
+  (atom []))
+
+(def ^:private tap-subscriptions
+  "The add-tap functions of wrap-fake-taps' subscriptions, by id."
+  (atom {}))
+
+(defn tap-subscribers
+  "How many tap subscriptions wrap-fake-taps has."
+  []
+  (count @tap-subscriptions))
+
+(def ^:private tap-ops
+  #{"cider/tap-subscribe" "cider/tap-unsubscribe" "cider/tap-inspect"})
+
+(defn wrap-fake-taps
+  "cider-nrepl's tap ops, roughly: a subscription gets a summary of each
+  value tapped in this process, and tap-inspect puts one on show in the
+  session's inspector."
+  [handler]
+  (fn [{:keys [op subscription idx] :as msg}]
+    (case op
+      "cider/tap-subscribe"
+      (let [id (str (java.util.UUID/randomUUID))
+            f (fn [value]
+                (let [idx (dec (count (swap! tapped-values conj value)))]
+                  (transport/respond-to msg "cider/tap-value" {:summary (pr-str value)
+                                                               :type (if (nil? value) "nil" (.getName (class value)))
+                                                               :idx idx}
+                                        :status "cider/tap-value")))]
+        (swap! tap-subscriptions assoc id f)
+        (add-tap f)
+        (transport/respond-to msg "cider/tap-subscribe" id :status "done"))
+      "cider/tap-unsubscribe"
+      (do (some-> (get @tap-subscriptions subscription) remove-tap)
+          (swap! tap-subscriptions dissoc subscription)
+          (transport/respond-to msg "cider/tap-unsubscribe" subscription :status "done"))
+      "cider/tap-inspect"
+      (if-some [value (get @tapped-values (Long/parseLong idx))]
+        (do (swap! inspected assoc (:session msg) [value])
+            (show msg))
+        (transport/respond-to msg :status ["done" "tap-value-not-retained"]))
+      (handler msg))))
+
+(middleware/set-descriptor! #'wrap-fake-taps {:handles (zipmap tap-ops (repeat {}))})
+
 (def reloads
   "How many times wrap-fake-reload has reloaded, which code evaluated on the
   server can read."
@@ -376,13 +423,14 @@
 (defn fixture
   "A :once fixture that runs the tests with an nREPL server listening on
   *port*, with wrap-stuck, wrap-fake-inspector, wrap-fake-tracer,
-  wrap-fake-reload and wrap-fake-system-output unless opts, which go to
-  nrepl.server/start-server, give it a :handler."
+  wrap-fake-reload, wrap-fake-system-output and wrap-fake-taps unless opts,
+  which go to nrepl.server/start-server, give it a :handler."
   [& opts]
   (fn [f]
     @builtin-sources
     (let [srv (apply server/start-server :port 0 :handler (server/default-handler #'wrap-stuck #'wrap-fake-inspector #'wrap-fake-tracer
-                                                                                  #'wrap-fake-reload #'wrap-fake-system-output)
+                                                                                  #'wrap-fake-reload #'wrap-fake-system-output
+                                                                                  #'wrap-fake-taps)
                      opts)]
       (try
         (binding [*port* (:port srv)]

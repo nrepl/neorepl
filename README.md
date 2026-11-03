@@ -29,7 +29,9 @@ highlighted, along with the delimiter that pairs with the one at the cursor,
 values get pretty printed and the history is kept per project. What gets
 printed after an evaluation's done shows up above the prompt, and that
 includes what the server's own threads print, like a web server's
-handlers, with nREPL 1.5 or later and babashka.
+handlers, with nREPL 1.5 or later and babashka. So do the values sent to
+`tap>` in Clojure, with cider-nrepl 0.64 or later, and `,tap` opens the
+last one in the inspector.
 TAB completes, and the arglists of the function you're calling show up
 under the input, with the parameter the argument at the cursor goes into in
 bold, and a macro's, like `defn`'s, matched by their shape. C-x C-d shows

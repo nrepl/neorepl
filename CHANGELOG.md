@@ -22,6 +22,7 @@
 - [#65](https://github.com/nrepl/neorepl/pull/65): `,ns` without a name browses the namespaces, the project's or every loaded one, filtering them as their names are typed, and their public vars and docs, switching to a namespace or opening a var in `$EDITOR`.
 - [#66](https://github.com/nrepl/neorepl/pull/66): `,spec` browses the specs, filtering them as their names are typed, a spec's form with the specs it names to go to, and examples generated from it.
 - [#69](https://github.com/nrepl/neorepl/pull/69): The REPL shows what the server's own threads print, like a web server's handlers, above the prompt, with nREPL 1.5 or later and babashka.
+- [#71](https://github.com/nrepl/neorepl/pull/71): The REPL shows the values sent to `tap>` above the prompt, and `,tap` opens the last one in the inspector, with cider-nrepl 0.64 or later.
 
 ### Changes
 

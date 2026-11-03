@@ -61,7 +61,7 @@
                      (.interrupt thread)
                      thread))}))
 
-(declare edit enter-ns switch-session inspect run-tests browse-error autoreload browse-specs)
+(declare edit enter-ns switch-session inspect inspect-tapped run-tests browse-error autoreload browse-specs)
 
 (def ^:private commands
   "The REPL's commands, the CIDER way: a comma, which Clojure reads as
@@ -76,6 +76,8 @@
            {:name "inspect" :arg "CODE" :optional? true :code-arg? true
             :help "Inspect the value of CODE, or the last value"
             :run #(inspect %1 %2)}
+           {:name "tap" :help "Inspect the value tapped last"
+            :run (fn [state _] (inspect-tapped state))}
            {:name "stacktrace" :help "Browse the last error's stack trace, or the last test run's, and open its frames"
             :run (fn [state _] (browse-error state))}
            {:name "edit" :arg "SYM" :optional? true
@@ -290,21 +292,37 @@
         (out (render/test-report-text report)))
     {}))
 
-(defn- inspect
-  "Inspects the value of code, or *1 without it, evaluating it the way the
-  REPL :evaluates code, and lets the user :browse it, or prints it when
+(defn- show-inspector
+  "Shows the inspector's view, the lines (view page-size) returns, with a
+  page that fits the screen, letting the user :browse it, or prints it when
   there's no browsing. Returns what to print, as command-output does."
-  [{:keys [client session ns evaluate browse height]} code]
-  (let [height (when browse (height))
-        page-size (some-> height inspector/start-page-size)]
-    (if-let [lines (:lines (evaluate #(features/inspect client session (or code "*1")
-                                                        (assoc % :page-size page-size))))]
+  [{:keys [client session ns browse height]} view]
+  (let [height (when browse (height))]
+    (if-let [lines (view (some-> height inspector/start-page-size))]
       (if browse
         (do (inspector/browse browse client session ns lines height)
             {})
         ;; Without browsing, there's nothing to push the marks' indexes to.
         (out (render/inspector-text lines false)))
       {})))
+
+(defn- inspect
+  "Inspects the value of code, or *1 without it, evaluating it the way the
+  REPL :evaluates code, as show-inspector shows it."
+  [{:keys [client session evaluate] :as state} code]
+  (show-inspector state (fn [page-size]
+                          (:lines (evaluate #(features/inspect client session (or code "*1")
+                                                               (assoc % :page-size page-size)))))))
+
+(defn- inspect-tapped
+  "Inspects the value tapped last, the :tapped summary says, as
+  show-inspector shows it, unless :taps, a promise of the subscription,
+  comes to nothing."
+  [{:keys [client session taps tapped] :as state}]
+  (cond
+    (nil? @taps) (out "Taps take cider-nrepl 0.64 or later on the server")
+    (nil? @tapped) (out "Nothing's been tapped yet")
+    :else (show-inspector state #(:lines (features/inspect-tap client session (:idx @tapped) %)))))
 
 (defn- autoreload
   "Turns reloading what changed before each evaluation on or off, as arg
@@ -437,7 +455,9 @@
   does, for ,test and ,inspect, and one to :browse what ,inspect and
   ,stacktrace find, as browser/browse does, partly applied to the editor,
   if the REPL can, an atom with the last test run's :test-errors, functions
-  that have the REPL :show-traces and :hide-traces, the :sessions-file and
+  that have the REPL :show-traces and :hide-traces, a promise of the
+  subscription to :taps and an atom with the summary of the value :tapped
+  last, for ,tap, the :sessions-file and
   the REPL's :own session, where it started, for ,sessions, an atom saying
   whether it's :reloading what changed before each evaluation, and a
   function to run lookups :quietly with, as editor/quietly takes f. What to
@@ -521,6 +541,10 @@
         ;; The session that has the server forward what gets printed on
         ;; threads no session started.
         forwarding (atom nil)
+        ;; The subscription to what gets tapped, once there's an answer, and
+        ;; the summary of the value tapped last.
+        taps (promise)
+        tapped (atom nil)
         ;; Whether what changed gets reloaded before each evaluation.
         reloading (atom false)
         ;; Evaluates with (run opts) in session, opts being
@@ -566,19 +590,31 @@
                      result))]
     ;; Late output comes on the client's reader thread, which mustn't wait
     ;; for the terminal: it has the responses lookups are waiting for.
-    ;; So do trace events.
-    (nrepl/on-unclaimed! client #(send-off late (fn [_]
-                                                 (print-response (if-let [event (:cider/trace-event %)]
-                                                                   (out (render/trace-event-text event))
-                                                                   %)))))
+    ;; So do trace events, and taps.
+    (nrepl/on-unclaimed! client (fn [{event :cider/trace-event value :cider/tap-value :as response}]
+                                  (some->> value (reset! tapped))
+                                  (send-off late (fn [_]
+                                                   (print-response (cond
+                                                                     event (out (render/trace-event-text event))
+                                                                     value (out (render/tap-text value))
+                                                                     :else response))))))
     ;; So does what gets printed on threads no session started.
     (try
       (reset! forwarding (features/forward-system-output client))
       (catch clojure.lang.ExceptionInfo _))
+    ;; Without waiting, since cider-nrepl loads what it takes the first time.
+    (future
+      (deliver taps (try
+                      (features/subscribe-taps client)
+                      (catch clojure.lang.ExceptionInfo _ nil))))
     (shutdown/call-with-cleanup
      ;; Or the server goes on sending the events nowhere, rather than
      ;; printing them.
      #(do (hide-traces)
+          (when-let [subscription (deref taps 1000 nil)]
+            (try
+              (features/unsubscribe-taps client subscription)
+              (catch Exception _)))
           (when-let [session @forwarding]
             (try
               (nrepl/close-session client session)
@@ -594,7 +630,7 @@
                           (command-output (merge io place {:client client :evaluate (partial evaluate session)
                                                            :test-errors test-errors :reloading reloading
                                                            :show-traces show-traces :hide-traces hide-traces
-                                                           :own own :quietly quietly})
+                                                           :taps taps :tapped tapped :own own :quietly quietly})
                                           name arg)
                           (finally
                             (reset! command-thread nil)

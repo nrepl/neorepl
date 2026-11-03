@@ -1198,7 +1198,8 @@
    (let [responses (ask client (assoc msg :session session) opts)]
      (if-let [value (some :value responses)]
        {:status "ok" :lines (inspector-lines value)}
-       (throw (ex-info (str "The server couldn't do " (:op msg)) {:type ::failed}))))))
+       (throw (ex-info (str "The server couldn't do " (:op msg))
+                       {:type ::failed :statuses (into #{} (mapcat :status) responses)}))))))
 
 (defn inspects-errors?
   "Whether the server can inspect the causes of the error last-error found."
@@ -1384,6 +1385,35 @@
         session
         (do (try (nrepl/close-session client session) (catch Exception _))
             nil)))))
+
+(defn subscribe-taps
+  "Has the server send client a summary of each value tapped from now on,
+  with cider-nrepl 0.64 or later, and returns the subscription, for
+  unsubscribe-taps, or nil when it can't. A summary comes as a response
+  with a :cider/tap-value, a map with the value printed short as its
+  :summary, its :type and the :idx inspect-tap takes, and goes where the
+  client's unclaimed responses go. These are Clojure's taps, since
+  cider-nrepl sends ClojureScript's only to a subscription in a
+  ClojureScript session."
+  [client]
+  (when (supports? client "cider/tap-subscribe")
+    (subscribe client {:op "cider/tap-subscribe"} :cider/tap-subscribe)))
+
+(defn unsubscribe-taps [client subscription]
+  (ask client {:op "cider/tap-unsubscribe" :subscription subscription} {}))
+
+(defn inspect-tap
+  "Starts inspecting the value tapped that subscribe-taps numbered idx in
+  session, with page-size items of a collection a page, when there's one,
+  and returns what inspector does. cider-nrepl keeps the last 100."
+  [client session idx page-size]
+  (try
+    (inspector client session (cond-> {:op "cider/tap-inspect" :idx (str idx)}
+                                page-size (assoc :page-size page-size)))
+    (catch clojure.lang.ExceptionInfo e
+      (throw (if (contains? (:statuses (ex-data e)) "tap-value-not-retained")
+               (ex-info "The server doesn't keep that value anymore, only the last 100 tapped" {:type ::failed})
+               e)))))
 
 (def ^:private project-namespaces-code
   "Keeps the namespaces whose names %s has whose source is a file on the
