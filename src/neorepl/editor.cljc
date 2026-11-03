@@ -8,11 +8,9 @@
            (java.nio.charset StandardCharsets)
            (java.util List)
            (java.util.function Supplier)
-           #?@(:bb []
-               :clj [(org.jline.reader CompletingParsedLine)])
            (org.jline.keymap BindingReader KeyMap)
-           (org.jline.reader Candidate Completer EOFError EndOfFileException Highlighter
-                             LineReader LineReader$Option
+           (org.jline.reader Candidate Completer CompletingParsedLine EOFError EndOfFileException
+                             Highlighter LineReader LineReader$Option
                              LineReaderBuilder ParsedLine Parser Parser$ParseContext Reference
                              UserInterruptException Widget)
            (org.jline.terminal Attributes Attributes$LocalFlag Size Terminal Terminal$Signal
@@ -110,23 +108,21 @@
 
 (defn- parsed-line
   "A ParsedLine for line whose word, the one completion completes, is what's
-  before the cursor of the symbol or keyword it's in. On the JVM it's a
-  CompletingParsedLine, without which JLine warns, but babashka doesn't have
-  that interface."
+  before the cursor of the symbol or keyword it's in. It's a
+  CompletingParsedLine, without which JLine warns."
   [^String line cursor]
   (let [start (or (:start (lexer/symbol-at (lexer/lex line) cursor)) cursor)
         word (subs line start cursor)]
-    (reify #?(:bb ParsedLine :clj CompletingParsedLine)
+    (reify CompletingParsedLine
       (word [_] word)
       (wordCursor [_] (count word))
       (wordIndex [_] 0)
       (words [_] [word])
       (line [_] line)
       (cursor [_] cursor)
-      #?@(:bb []
-          :clj [(escape [_ candidate _] candidate)
-                (rawWordCursor [_] (count word))
-                (rawWordLength [_] (count word))]))))
+      (escape [_ candidate _] candidate)
+      (rawWordCursor [_] (count word))
+      (rawWordLength [_] (count word)))))
 
 (defn- parser
   "Tells JLine to keep reading while (incomplete? line), unless it's reading

@@ -708,11 +708,18 @@
                       {:op "test-var-query" :var-query {:ns-query {:project? "true"}} :stream "true"}
                       {:op "retest" :stream "true"}]
                      (remove (comp #{"test-stacktrace"} :op) @test-requests)))
-              (testing "a failure's file, on babashka, where it's whichever file the session loaded last"
+              (testing "a failure's file, on babashka before 1.13.227, where it's whichever file the session loaded last"
                 (is (= (str (io/file "/src/neorepl/sample_suite.clj"))
                        (:file (first (#'features/locate (assoc client :versions {:babashka "1.13.226"}) session true
                                                         [{:type "fail" :ns "neorepl.sample-suite" :var "erring"
                                                           :file "/elsewhere/loaded.clj" :line 3}])))))
+                (testing "but not from 1.13.227 on, where it's the assertion's, in a helper, say"
+                  (doseq [version ["1.13.227" "1.13.227-SNAPSHOT" "1.14.0"]]
+                    (is (= "/elsewhere/helper.clj"
+                           (:file (first (#'features/locate (assoc client :versions {:babashka version}) session true
+                                                            [{:type "fail" :ns "neorepl.sample-suite" :var "erring"
+                                                              :file "/elsewhere/helper.clj" :line 3}]))))
+                        version)))
                 (testing "but not from clojure.test's report, whose errors' are where they threw, in a helper, say"
                   (is (= "helper.clj"
                          (:file (first (#'features/locate client session false

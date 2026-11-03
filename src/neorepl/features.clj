@@ -849,17 +849,24 @@
                 ;; For test-stacktrace.
                 :index (when (= "error" type) (:index assertion))}))))
 
+(defn- older-babashka?
+  "Whether client's server is babashka older than version, as \"1.13.227\"."
+  [client version]
+  (when-let [bb (get-in client [:versions :babashka])]
+    (let [numbers #(mapv (fn [n] (Long/parseLong n)) (take 3 (re-seq #"\d+" %)))]
+      (neg? (compare (numbers bb) (numbers version))))))
+
 (defn- locate
   "failures with the :file each one's test is in, for those whose :file is
   that file's name, as cider-nrepl and clojure.test give it, or missing. From
   a test-op?, errors too, whose :file cider-nrepl takes from the frame that
-  threw, while the :line is the test's, and anything on babashka, whose
-  :file is whichever file the session loaded last. Those without a :line,
-  like a ClojureScript error outside an assertion, get the test's. Other
-  failures, like an assertion in a helper elsewhere, keep theirs, which
-  goes with their :line."
+  threw, while the :line is the test's, and anything on babashka before
+  1.13.227, whose :file is whichever file the session loaded last
+  (babashka#2208). Those without a :line, like a ClojureScript error outside
+  an assertion, get the test's. Other failures, like an assertion in a
+  helper elsewhere, keep theirs, which goes with their :line."
   [client session test-op? failures]
-  (let [bb? (contains? (:versions client) :babashka)
+  (let [bb? (older-babashka? client "1.13.227")
         tests (distinct (keep (fn [{:keys [ns var]}] (when (and ns var) [ns var])) failures))
         ;; Independent lookups, so all at once.
         found (zipmap tests (pmap (fn [[ns var]]

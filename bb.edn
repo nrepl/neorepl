@@ -1,5 +1,5 @@
 ;; babashka bundles nREPL and JLine, so unlike deps.edn there are no deps here.
-{:min-bb-version "1.13.225"
+{:min-bb-version "1.13.227"
  :paths ["src"]
  :bbin/bin {neorepl {:main-opts ["-m" "neorepl.main"]}}
  :tasks

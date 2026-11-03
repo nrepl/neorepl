@@ -12,6 +12,7 @@
             [neorepl.sessions :as sessions]
             [neorepl.test-server :as test-server :refer [*port* call-with-temp-dir lf with-client]])
   (:import (java.io ByteArrayInputStream ByteArrayOutputStream PipedInputStream PipedOutputStream)
+           (org.jline.reader CompletingParsedLine Parser Parser$ParseContext)
            (org.jline.utils AttributedString)
            (java.util.regex Pattern)
            (java.util.zip ZipEntry ZipOutputStream)))
@@ -415,6 +416,15 @@
         (type "\t")
         (type " list [[1]])\r")
         (is (screen #"(?m)^\(\[1\]\)\nuser=> $")))))
+  (testing "the word completion completes is what's before the cursor of the symbol it's in"
+    (let [line (.parse ^Parser (#'editor/parser (atom false) (constantly false))
+                       "(str/jo x" 7 Parser$ParseContext/COMPLETE)]
+      ;; Which JLine warns about otherwise.
+      (is (instance? CompletingParsedLine line))
+      (is (= ["str/jo" 6 6] [(.word ^CompletingParsedLine line)
+                             (.rawWordCursor ^CompletingParsedLine line)
+                             (.rawWordLength ^CompletingParsedLine line)]))
+      (is (= "str/join" (str (.escape ^CompletingParsedLine line "str/join" false))))))
   (testing "the completion menu goes without colors too"
     (let [{:keys [out]} (call-with-repl {:color? false}
                           (fn [type screen]
