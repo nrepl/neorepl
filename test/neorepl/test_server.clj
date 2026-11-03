@@ -6,6 +6,7 @@
             [neorepl.main :as main]
             [neorepl.nrepl :as nrepl]
             [nrepl.middleware :as middleware]
+            [nrepl.middleware.io :as nrepl-io]
             [nrepl.middleware.print :as print]
             [nrepl.server :as server]
             [nrepl.transport :as transport])
@@ -337,15 +338,41 @@
 
 (middleware/set-descriptor! #'wrap-fake-reload {:handles {"cider.clj-reload/reload" {}}})
 
+(def ^:private forwarding
+  "The last forward-system-output message, which wrap-fake-system-output
+  sends what print-system! prints to."
+  (atom nil))
+
+(defn print-system!
+  "Has wrap-fake-system-output send text, as printed to System/out, or to
+  System/err when stream is :err, to the last session that asked for it."
+  [stream text]
+  (some-> @forwarding (transport/respond-to stream text :source "system")))
+
+(defn wrap-fake-system-output
+  "nREPL's forward-system-output, for what print-system! prints, rather
+  than for what this process does, the tests' output among it."
+  [handler]
+  (fn [{:keys [op] :as msg}]
+    (if (= "forward-system-output" op)
+      (do (reset! forwarding msg)
+          (transport/respond-to msg :status "done"))
+      (handler msg))))
+
+(middleware/set-descriptor! #'wrap-fake-system-output
+                            {:requires #{"clone"}
+                             :expects #{#'nrepl-io/wrap-out}
+                             :handles {"forward-system-output" {}}})
+
 (defn fixture
   "A :once fixture that runs the tests with an nREPL server listening on
-  *port*, with wrap-stuck, wrap-fake-inspector, wrap-fake-tracer and
-  wrap-fake-reload unless opts, which go to nrepl.server/start-server, give
-  it a :handler."
+  *port*, with wrap-stuck, wrap-fake-inspector, wrap-fake-tracer,
+  wrap-fake-reload and wrap-fake-system-output unless opts, which go to
+  nrepl.server/start-server, give it a :handler."
   [& opts]
   (fn [f]
     (let [srv (apply server/start-server :port 0 :handler (server/default-handler #'wrap-stuck #'wrap-fake-inspector #'wrap-fake-tracer
-                                                                                  #'wrap-fake-reload)
+                                                                                  #'wrap-fake-reload #'wrap-fake-system-output)
                      opts)]
       (try
         (binding [*port* (:port srv)]

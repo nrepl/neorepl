@@ -129,3 +129,11 @@
        (is (str/includes? out "demo.b=> Ran 1 test containing 1 assertion.\n0 failures, 0 errors.\n"))
        ;; Back in the REPL's own session, in Clojure.
        (is (str/includes? out (str (get-in servers [server :clojure-ns]) "=> 3\n")))))))
+
+(deftest system-output-test
+  ;; What threads no session started print, on the JVM that runs
+  ;; ClojureScript's tools.
+  (testing "piggieback"
+    (is (servers/forwards-output? :piggieback "clojure")))
+  (testing "but not shadow-cljs, which brings nREPL 1.3.1, from before nREPL forwarded it"
+    (is (not (servers/forwards-output? :shadow-cljs "shadow-cljs")))))

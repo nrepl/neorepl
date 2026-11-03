@@ -411,7 +411,10 @@
          ;; Windows has no SIGTERM, so the server has no say in it there.
          (when-not (test-server/windows?)
            (testing "and stops it after"
-             (is (not (.exists (io/file dir ".nrepl-port"))))))))))
+             (is (not (.exists (io/file dir ".nrepl-port"))))))
+         (testing "passing on what it prints, so it gets no output forwarded"
+           (is (true? (binding [*err* (java.io.StringWriter.)]
+                        (#'main/with-started-server {:dir (str dir) :tool "bb"} {} :shares-output?)))))))))
   (testing "saying how it ended, when it does before the REPL"
     (call-with-temp-dir
      (fn [dir]
@@ -448,7 +451,9 @@
          (is (str/includes? err "nor a shadow-cljs.edn to start one for"))))))
   (testing "or one in neorepl's own process"
     (is (= {:status 0 :out "user=> 3\nuser=> \n" :err ""}
-           (run-in *dir* "(+ 1 2)\n" "repl" "--in-process"))))
+           (run-in *dir* "(+ 1 2)\n" "repl" "--in-process")))
+    (testing "which prints where the REPL does already, so it gets no output forwarded"
+      (is (true? (#'main/with-in-process-server :shares-output?)))))
   (testing "options that don't go together"
     (are [args message] (let [{:keys [status err]} (apply run-in *dir* "" "repl" args)]
                           (and (= 2 status) (str/includes? err message)))

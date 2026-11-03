@@ -203,9 +203,10 @@ when it times out.")
   "Calls f with a client for a server started for project, the way
   with-server does. What the server prints goes where output nobody asked
   for goes, like an evaluation's that comes late, and to stderr before
-  something takes that over and after f. When the connection drops because
-  the server's gone, it says how that ended, and when the server runs
-  another cider-nrepl than jack-in adds, it says that first."
+  something takes that over and after f, so the client :shares-output?
+  with the server. When the connection drops because the server's gone, it
+  says how that ended, and when the server runs another cider-nrepl than
+  jack-in adds, it says that first."
   [project options f]
   (let [output (atom print-err-line)]
     (with-server project options #(@output %)
@@ -214,7 +215,7 @@ when it times out.")
          (-> (nrepl/connect {:host host :port port
                              :on-unclaimed (fn [{:keys [out err]}]
                                              (some-> (or out err) print-err))})
-             (assoc :project-dir (:dir project)))
+             (assoc :project-dir (:dir project) :shares-output? true))
          (fn [client]
            (some-> (jack-in/other-cider-nrepl (:tool project) (:cider-version client)) warn)
            (reset! output #(nrepl/unclaimed client {:err (str % "\n")}))
@@ -232,8 +233,9 @@ when it times out.")
 
 (defn- with-in-process-server
   "Calls f with a client for a server started in this process, with
-  cider-nrepl when it's on the classpath, and stops the server after."
-  [dir f]
+  cider-nrepl when it's on the classpath, and stops the server after. The
+  client :shares-output? with the server, being in the same process."
+  [f]
   (let [start-server (requiring-resolve 'nrepl.server/start-server)
         stop-server (requiring-resolve 'nrepl.server/stop-server)
         ;; Only when it's there, so failing to load it isn't kept quiet.
@@ -241,7 +243,7 @@ when it times out.")
                   @(requiring-resolve 'cider.nrepl/cider-nrepl-handler))
         server (apply start-server :bind "127.0.0.1" :port 0 (when handler [:handler handler]))]
     (try
-      (with-client {:port (:port server)} dir f)
+      (call-with-client (assoc (nrepl/connect {:port (:port server)}) :shares-output? true) f)
       (finally
         (stop-server server)))))
 
@@ -258,7 +260,7 @@ when it times out.")
     (when (and (or tool aliases) (or in-process connect?))
       (throw (usage-error "--tool and --aliases don't go with --port, --host, --url or --in-process")))
     (cond
-      in-process (with-in-process-server dir f)
+      in-process (with-in-process-server f)
       connect? (with-client options dir f)
       :else
       (let [project (jack-in/find-project dir tool)

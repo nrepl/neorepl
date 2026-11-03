@@ -244,6 +244,11 @@
            (is (thrown-with-msg? clojure.lang.ExceptionInfo #"^Generating examples takes test.check on the server$"
                                  (features/spec-example client ":demo/person" 80 {})))))))))
 
+(deftest system-output-test
+  (on-each-server
+   (fn [server]
+     (is (servers/forwards-output? server (get-in servers [server :tool]))))))
+
 (deftest edit-test
   ;; The editor's a shell script.
   (when-not (test-server/windows?)
