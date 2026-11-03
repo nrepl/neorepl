@@ -181,7 +181,14 @@
   (testing "cider-nrepl"
     ;; Gone after, so the other tests have the project as it was.
     (let [file (io/file (project-dir :lein) "src" "demo" "reloaded.clj")
-          write! #(spit file (str "(ns demo.reloaded)\n\n(defonce state (atom 0))\n\n(defn f [] " % ")\n"))
+          ;; clj-reload takes a file as changed when it's newer than its
+          ;; last look, by System/currentTimeMillis, and Linux stamps files
+          ;; with a clock that can be a tick behind that, so an edit right
+          ;; after a reload can look older than it.
+          save! (fn [text & [append?]]
+                  (spit file text :append (boolean append?))
+                  (.setLastModified file (System/currentTimeMillis)))
+          write! #(save! (str "(ns demo.reloaded)\n\n(defonce state (atom 0))\n\n(defn f [] " % ")\n"))
           run-reloading #(run :lein "eval" "-s" "reloading" "--reload" %)]
       (try
         (write! ":before")
@@ -200,7 +207,7 @@
           (is (= {:status 0 :out "[:fixed 1]\n" :err ""} (run-reloading "[(demo.reloaded/f) @demo.reloaded/state]"))))
         (testing "with the session back in the namespace it's in, which a reload makes anew"
           (run-reloading "(in-ns 'demo.reloaded)")
-          (spit file "\n(defn added [] :added)\n" :append true)
+          (save! "\n(defn added [] :added)\n" :append)
           (is (= {:status 0 :out ":added\n" :err ""} (run-reloading "(added)"))))
         (finally
           (io/delete-file file true)))))
