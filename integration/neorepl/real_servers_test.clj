@@ -133,7 +133,10 @@
     (testing "a call that throws"
       (run :clojure "trace" "demo.core/boom")
       (is (str/includes? (:out (run :clojure "eval" "(demo.core/boom 3)")) "└─✗ clojure.lang.ExceptionInfo: boom\n"))
-      (run :clojure "untrace" "demo.core/boom")))
+      (run :clojure "untrace" "demo.core/boom"))
+    (testing "leaving alone what the server's own tools call, which untracing would trace first"
+      (is (= "Wasn't tracing clojure.core/apply\n" (:out (run :clojure "untrace" "apply"))))
+      (is (= "3\n" (:out (run :clojure "eval" "(+ 1 2)"))))))
   (testing "babashka"
     (is (= {:status 1 :out "" :err "neorepl: Tracing takes cider-nrepl on the server\n"}
            (run :bb "trace" "demo.core/greet")))))

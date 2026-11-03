@@ -974,6 +974,9 @@
           (is (= [{:var "clojure.core/map" :status "refused"}
                   {:ns "clojure.string" :status "refused"}]
                  (features/trace client ["map" "clojure.string"] {:ns "trace.me"} true)))
+          (testing "nor untraced, which would trace them first"
+            (is (= [{:var "clojure.core/map" :status "not-traced"}]
+                   (features/trace client ["map"] {:ns "trace.me"} false))))
           (testing "only those: macros aren't traced anyway, and the likes of clojure.core.async can be"
             (is (= [{:var "clojure.core/when" :status "not-traceable"}
                     {:name "clojure.core.not-there" :status "not-found"}]
