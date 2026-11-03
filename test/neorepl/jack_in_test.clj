@@ -123,13 +123,25 @@
            (testing "the way it cleans up after itself"
              (is (not (.exists (io/file dir ".nrepl-port")))))))))))
 
+(deftest port-file-test
+  (when-not (windows?)
+    (testing "waiting for the port file, which nREPL writes after it says where it listens"
+      (call-with-temp-dir
+       (fn [dir]
+         (let [port (free-port)]
+           (is (= (str port)
+                  (jack-in/with-server dir ["sh" "-c" (str "echo 'nREPL server started on port " port " on host 127.0.0.1'; "
+                                                           "sleep 0.5; echo " port " > .nrepl-port; sleep 60")]
+                    ".nrepl-port" (fn [_])
+                    (fn [_] (str/trim (slurp (io/file dir ".nrepl-port")))))))))))))
+
 (deftest stop-test
   (when-not (windows?)
     (testing "the processes the server started go too"
       (call-with-temp-dir
        (fn [dir]
          (let [[process children]
-               (jack-in/with-server dir ["sh" "-c" "sleep 60 & sleep 60 & echo 'nREPL server started on port 1 on host x'; wait"] ".nrepl-port"
+               (jack-in/with-server dir ["sh" "-c" "sleep 60 & sleep 60 & echo 1 > .nrepl-port; echo 'nREPL server started on port 1 on host x'; wait"] ".nrepl-port"
                  (fn [_])
                  (fn [{:keys [^Process process] :as server}]
                    (is (= {:host "x" :port 1} (select-keys server [:host :port])))
@@ -141,11 +153,13 @@
       (call-with-temp-dir
        (fn [dir]
          (let [port (free-port)
-               ;; A server on port that writes what it's given into its port file.
-               start #(jack-in/with-server dir ["sh" "-c" (str "echo " % " > .nrepl-port; "
+               ;; A server on port that writes its port file, which then gets
+               ;; what it's given, as when another server takes it over.
+               start #(jack-in/with-server dir ["sh" "-c" (str "echo " port " > .nrepl-port; "
                                                               "echo 'nREPL server started on port " port " on host 127.0.0.1'; "
+                                                              "echo " % " > .nrepl-port; "
                                                               "sleep 60")]
-                        ".nrepl-port" (fn [_]) (fn [_]))]
+                        ".nrepl-port" (fn [_]) (fn [_] (Thread/sleep 200)))]
            (start port)
            (is (not (.exists (io/file dir ".nrepl-port"))))
            (testing "unless it's another server's"
@@ -164,7 +178,7 @@
   (when (and (not (windows?)) (jack-in/on-path? "npx"))
     (call-with-temp-dir
      (fn [dir]
-       (let [with-server #(jack-in/with-server dir ["npx" "-c" "echo 'nREPL server started on port 1 on host x'; sleep 60"] ".nrepl-port"
+       (let [with-server #(jack-in/with-server dir ["npx" "-c" "echo 1 > .nrepl-port; echo 'nREPL server started on port 1 on host x'; sleep 60"] ".nrepl-port"
                             (fn [_])
                             %)
              gone? #(not (.isAlive (doto % (-> .onExit (deref 5000 nil)))))]
