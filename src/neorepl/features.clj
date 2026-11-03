@@ -1333,6 +1333,20 @@
    (check-tracer client "cider/untrace-all")
    {:untraced (or (some :untraced-count (ask client {:op "cider/untrace-all"} opts)) 0)}))
 
+(defn- subscribe
+  "Sends msg, which has the server send a stream of responses, and returns
+  (pick response) for the first response that's not nil for, or nil once
+  it's done without one, waiting 10s at most. The stream's other responses
+  go where the client's unclaimed ones go, before the one picked or after."
+  [client msg pick]
+  (let [picked (promise)]
+    (nrepl/send! client msg #(if-some [value (pick %)]
+                               (deliver picked value)
+                               (if (nrepl/done? %)
+                                 (deliver picked nil)
+                                 (nrepl/unclaimed client %))))
+    (deref picked 10000 nil)))
+
 (defn subscribe-traces
   "Has the server send client trace events instead of printing what traced
   functions do, when it has cider-nrepl 0.60 or later, and returns the
@@ -1344,17 +1358,32 @@
   subscription ends."
   [client]
   (when (supports? client "cider/trace-subscribe")
-    (let [subscription (promise)]
-      (nrepl/send! client {:op "cider/trace-subscribe"}
-                   #(if-let [id (:cider/trace-subscribe %)]
-                      (deliver subscription id)
-                      (if (nrepl/done? %)
-                        (deliver subscription nil)
-                        (nrepl/unclaimed client %))))
-      (deref subscription 10000 nil))))
+    (subscribe client {:op "cider/trace-subscribe"} :cider/trace-subscribe)))
 
 (defn unsubscribe-traces [client subscription]
   (ask client {:op "cider/trace-unsubscribe" :subscription subscription} {}))
+
+(defn forward-system-output
+  "Has the server send client what gets printed to System/out and
+  System/err, which is where threads print that no session started, from
+  now on, as responses with :out or :err that go where the client's
+  unclaimed responses go. It asks in a session of its own, which it
+  returns, or nil when the server can't, as before nREPL 1.5, or when
+  what it prints comes out where client is already: client :shares-output?
+  with a server in its process, where it would get sent what it prints,
+  over and over, or one neorepl started and passes on what it prints.
+  nREPL never stops, not even once the session's closed, and keeps the
+  session, with its values, so it's one that never evaluates anything."
+  [client]
+  (when (and (supports? client "forward-system-output") (not (:shares-output? client)))
+    (let [session (nrepl/clone-session client)
+          failed? #(or (= "disconnected" %) (str/ends-with? % "error"))]
+      (if (subscribe client {:op "forward-system-output" :session session}
+                     #(when (and (nrepl/done? %) (not-any? failed? (:status %)))
+                        true))
+        session
+        (do (try (nrepl/close-session client session) (catch Exception _))
+            nil)))))
 
 (def ^:private project-namespaces-code
   "Keeps the namespaces whose names %s has whose source is a file on the

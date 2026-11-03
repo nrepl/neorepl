@@ -496,8 +496,8 @@
     :as io}]
   (let [print-response #(let [stopped @interrupted
                               id (:id %)]
-                          ;; What the server prints has no id, and isn't an
-                          ;; evaluation dying.
+                          ;; What a server neorepl started prints has no id,
+                          ;; and isn't an evaluation dying.
                           (when-not (or (and stopped (= stopped id))
                                         (and id (shutdown/exiting?)))
                             (print-response %)))
@@ -518,6 +518,9 @@
                        (try
                          (features/unsubscribe-traces client subscription)
                          (catch Exception _)))
+        ;; The session that has the server forward what gets printed on
+        ;; threads no session started.
+        forwarding (atom nil)
         ;; Whether what changed gets reloaded before each evaluation.
         reloading (atom false)
         ;; Evaluates with (run opts) in session, opts being
@@ -568,10 +571,18 @@
                                                  (print-response (if-let [event (:cider/trace-event %)]
                                                                    (out (render/trace-event-text event))
                                                                    %)))))
+    ;; So does what gets printed on threads no session started.
+    (try
+      (reset! forwarding (features/forward-system-output client))
+      (catch clojure.lang.ExceptionInfo _))
     (shutdown/call-with-cleanup
      ;; Or the server goes on sending the events nowhere, rather than
      ;; printing them.
-     hide-traces
+     #(do (hide-traces)
+          (when-let [session @forwarding]
+            (try
+              (nrepl/close-session client session)
+              (catch Exception _))))
      (fn []
        (loop [{:keys [ns session] :as place} (assoc own :ns (nrepl/evaluation-ns client session))
               pending nil]

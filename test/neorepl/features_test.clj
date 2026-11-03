@@ -1038,3 +1038,21 @@
         (is (nil? (features/subscribe-traces client))))
       (finally
         (server/stop-server srv)))))
+
+(deftest forward-system-output-test
+  (let [printed (atom [])]
+    (with-client [client {:port *port* :on-unclaimed #(swap! printed conj (select-keys % [:out :err]))}]
+      (let [session (features/forward-system-output client)]
+        (testing "in a session of its own"
+          (is (string? session))
+          (is (= "user" (nrepl/session-ns client session))))
+        (testing "what's printed coming as responses nobody claims"
+          (test-server/print-system! :out "elsewhere\n")
+          (test-server/print-system! :err "and there\n")
+          ;; Which come before the answer to what's asked after.
+          (nrepl/request client {:op "describe"})
+          (is (= [{:out "elsewhere\n"} {:err "and there\n"}] @printed)))
+        (testing "nil when the server can't"
+          (is (nil? (features/forward-system-output (assoc client :ops {})))))
+        (testing "or when what it prints comes out here already"
+          (is (nil? (features/forward-system-output (assoc client :shares-output? true)))))))))

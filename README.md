@@ -26,7 +26,10 @@ can see) and starts a REPL. Enter evaluates the input once its forms are
 complete, and before that starts a line indented for the form it's in,
 Ctrl-C interrupts an evaluation and Ctrl-D exits. Code gets
 highlighted, along with the delimiter that pairs with the one at the cursor,
-values get pretty printed and the history is kept per project.
+values get pretty printed and the history is kept per project. What gets
+printed after an evaluation's done shows up above the prompt, and that
+includes what the server's own threads print, like a web server's
+handlers, with nREPL 1.5 or later and babashka.
 TAB completes, and the arglists of the function you're calling show up
 under the input, with the parameter the argument at the cursor goes into in
 bold, and a macro's, like `defn`'s, matched by their shape. C-x C-d shows

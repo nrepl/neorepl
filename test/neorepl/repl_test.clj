@@ -251,6 +251,11 @@
         ;; stretched 100ms to.
         (type "(do (future (Thread/sleep 200) (dotimes [i 6] (print (str \"step\" i \"...\")) (flush) (Thread/sleep 20) (println \"done\"))) nil)\r")
         (is (= 6 (count (re-seq #"step\d\.\.\.done\n" (screen #"step5\.\.\.done\nuser=> $"))))))))
+  (testing "and what the server prints elsewhere, on threads of its own"
+    (call-with-repl {}
+      (fn [type screen]
+        (type "(do (future (Thread/sleep 200) (neorepl.test-server/print-system! :out \"elsewhere\\n\")) nil)\r")
+        (is (screen #"elsewhere\nuser=> $")))))
   (testing "or before what's printed next, if that's sooner"
     (call-with-repl {}
       (fn [type screen]
