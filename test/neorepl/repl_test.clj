@@ -636,6 +636,42 @@
       (type ",ns\r")
       (is (screen #"\nneorepl\.repl-test\n(?s).*user=> $")))))
 
+(deftest autoreload-test
+  (call-with-repl {}
+    (fn [type screen]
+      (let [before @test-server/reloads
+            reloads #(re-pattern (str "\n" (+ before %) "\nuser=> $"))]
+        (testing "staying off when reloading fails"
+          (test-server/answering-reloads :error
+            #(do (type ",autoreload\r")
+                 (is (screen #"whom in this context\nReloading what changed failed\nNot reloading before evaluations\nuser=> $"))))
+          (type "@neorepl.test-server/reloads\r")
+          (is (screen (reloads 0))))
+        (testing "reloading right away"
+          (type ",autoreload\r")
+          (is (screen #"\nReloading what changed before each evaluation\nuser=> $"))
+          (is (= (inc before) @test-server/reloads)))
+        (testing "and before each evaluation"
+          (type "@neorepl.test-server/reloads\r")
+          (is (screen (reloads 2))))
+        (testing "not evaluating when that fails"
+          (test-server/answering-reloads :error
+            #(do (type "(swap! neorepl.test-server/reloads inc)\r")
+                 (is (screen #"whom in this context\nReloading what changed failed\nuser=> $"))))
+          (is (= (+ before 2) @test-server/reloads)))
+        (testing "but evaluating in a ClojureScript session, with nothing to reload"
+          (test-server/answering-reloads :clojure-only
+            #(do (type "(+ 40 2)\r")
+                 (is (screen #"\n42\nuser=> $")))))
+        (testing "nor reloading once it's off"
+          (type ",autoreload off\r")
+          (is (screen #"\nNot reloading before evaluations\nuser=> $"))
+          (type "@neorepl.test-server/reloads\r")
+          (is (screen (reloads 2))))
+        (testing "and saying how it goes"
+          (type ",autoreload maybe\r")
+          (is (screen #"\nUsage: ,autoreload \[on\|off\]\nuser=> $")))))))
+
 (deftest sessions-test
   (call-with-temp-dir
    (fn [dir]

@@ -18,6 +18,7 @@
 - [#60](https://github.com/nrepl/neorepl/pull/60): Eldoc shows under the input, wherever the cursor is, with the parameter the argument at the cursor goes into in bold and the arglists that can't take that many arguments faint.
 - [#60](https://github.com/nrepl/neorepl/pull/60): Eldoc matches the arguments of macros and special forms by their shape, so in `defn` a docstring goes to `doc-string?` and a map after it to `attr-map?`.
 - [#64](https://github.com/nrepl/neorepl/pull/64): `neorepl eval --reload`, and the MCP eval tool's `reload`, reload the namespaces whose files changed before evaluating, with cider-nrepl's clj-reload, which keeps what `defonce` defined, and don't evaluate when that fails.
+- [#64](https://github.com/nrepl/neorepl/pull/64): `,autoreload` has the REPL reload what changed before each evaluation, and before `,test`, `,inspect` and `,ns`.
 
 ### Changes
 

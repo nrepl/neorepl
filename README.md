@@ -35,11 +35,12 @@ the vars whose names have it in them. C-x C-e opens what you've typed in
 your `$EDITOR`, as it does in bash, and brings back what you save.
 Commands start with a comma, the CIDER way: `,doc`, `,source`, `,apropos`,
 `,macroexpand`, `,pst` for the last error's stack trace, `,stacktrace` to
-browse it, `,reload`, `,test`, `,inspect`, `,trace`, `,edit` to open a
-definition in your `$EDITOR`, a copy of it for one in a jar, or with
-cider-nrepl, the namespace's file without a name, `,ns` to switch
-namespaces, loading the one you name if it isn't yet, `,sessions` to step
-into another session, like an agent's, and `,help` for the rest.
+browse it, `,reload`, `,autoreload` to reload what changed before each
+evaluation, `,test`, `,inspect`, `,trace`, `,edit` to open a definition in
+your `$EDITOR`, a copy of it for one in a jar, or with cider-nrepl, the
+namespace's file without a name, `,ns` to switch namespaces, loading the one
+you name if it isn't yet, `,sessions` to step into another session, like an
+agent's, and `,help` for the rest.
 Without a terminal, say in a pipe or Emacs' `M-x shell`, it works like
 `clojure.main`'s REPL instead.
 
