@@ -4,8 +4,7 @@
   The inspector itself lives in the session, on the server."
   (:require [clojure.string :as str]
             [neorepl.browser :as browser]
-            [neorepl.features :as features]
-            [neorepl.nrepl :as nrepl]))
+            [neorepl.features :as features]))
 
 (def ^:private help
   "↑↓ move  → inspect  ← back  [ ] page  v view  P pretty  d def  g refresh  q quit")
@@ -83,12 +82,7 @@
   :message saying why it couldn't. Losing the connection ends the
   inspection."
   [client session current msg]
-  (try
-    (fit client session (shown client session current msg))
-    (catch clojure.lang.ExceptionInfo e
-      (when (= ::nrepl/disconnected (:type (ex-data e)))
-        (throw e))
-      (assoc current :message (ex-message e)))))
+  (browser/asked current #(fit client session (shown client session current msg))))
 
 (defn- define
   "view, the inspector's, with what's being inspected defined as a var in

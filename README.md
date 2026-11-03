@@ -39,8 +39,9 @@ browse it, `,reload`, `,autoreload` to reload what changed before each
 evaluation, `,test`, `,inspect`, `,trace`, `,edit` to open a definition in
 your `$EDITOR`, a copy of it for one in a jar, or with cider-nrepl, the
 namespace's file without a name, `,ns` to switch namespaces, loading the one
-you name if it isn't yet, `,sessions` to step into another session, like an
-agent's, and `,help` for the rest.
+you name if it isn't yet, or without a name, to browse them, their vars and
+their docs, `,sessions` to step into another session, like an agent's, and
+`,help` for the rest.
 Without a terminal, say in a pipe or Emacs' `M-x shell`, it works like
 `clojure.main`'s REPL instead.
 

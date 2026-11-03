@@ -396,9 +396,9 @@
   (testing "a dumb terminal gets the plain REPL"
     (call-with-temp-dir
      (fn [dir]
-       (is (= "user=> 3\nuser=> \n"
+       (is (re-matches #"user=> 3\nuser=> (?s).*neorepl\.repl-test\n.*user=> \n"
               (lf (with-out-str
-                (with-in-str "(+ 1 2)\n"
+                (with-in-str "(+ 1 2)\n,ns\n"
                   (main/run ["repl" "-p" (str *port*)]
                             {:dir dir
                              :sessions-file (io/file dir "sessions.edn")
@@ -633,8 +633,18 @@
       (testing "with code after it running there"
         (type "\u001b[200~,ns user\n(str *ns*)\u001b[201~\r")
         (is (screen #"\n\"user\"\nuser=> $")))
-      (type ",ns\r")
-      (is (screen #"\nneorepl\.repl-test\n(?s).*user=> $")))))
+      (testing "and without a name, browsing the project's namespaces"
+        (type ",ns\r")
+        ;; More than fit on the screen, with every test's loaded.
+        (is (screen #"The project's namespaces(?s).*q quit"))
+        (testing "filtered, with the vars of the one left"
+          ;; The screen is drawn by moving the cursor, not line by line.
+          (type "/.repl-test\r\u001b[C")
+          (is (screen #"(?s)lookup-test.*← back"))
+          (type "\u001b[D"))
+        (testing "switching to the one picked"
+          (type "\r")
+          (is (screen #"neorepl\.repl-test=> $")))))))
 
 (deftest autoreload-test
   (call-with-repl {}

@@ -7,10 +7,12 @@
   (:require [clojure.java.io :as io]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing use-fixtures]]
+            [neorepl.discovery :as discovery]
+            [neorepl.features :as features]
             [neorepl.jack-in :as jack-in]
             [neorepl.json :as json]
             [neorepl.servers :as servers :refer [*dir* project-dir run run-with]]
-            [neorepl.test-server :as test-server :refer [spit-file]]))
+            [neorepl.test-server :as test-server :refer [spit-file with-client]]))
 
 (def ^:private servers
   "The servers the tests run against, by name, with the build tool that
@@ -205,6 +207,20 @@
   (testing "babashka"
     (is (= {:status 1 :out "" :err "neorepl: Reloading what changed takes cider-nrepl on the server\n"}
            (run :bb "eval" "--reload" "1")))))
+
+(deftest namespaces-test
+  ;; What the namespace browser shows, from cider-nrepl's ops, and from
+  ;; evaluating code on babashka.
+  (on-each-server
+   (fn [server]
+     (with-client [client {:port (discovery/read-port (io/file (project-dir server) ".nrepl-port"))}]
+       (let [names (features/loaded-namespaces client {} {})]
+         (is (every? (set names) ["clojure.core" "demo.core"]))
+         (is (not-any? #(re-find #"^(cider\.nrepl|nrepl)\." %) names)))
+       (is (= [{:name "boom" :arglists "([x])"}
+               {:name "greet" :arglists "([who])" :doc "Says hi."}
+               {:name "welcome" :arglists "([who])"}]
+              (features/ns-vars client "demo.core" {} {})))))))
 
 (deftest edit-test
   ;; The editor's a shell script.
