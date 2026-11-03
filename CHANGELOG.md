@@ -42,6 +42,7 @@
 - [#58](https://github.com/nrepl/neorepl/pull/58): `,ns` switches namespaces on nbb, whose server takes no notice of `in-ns`.
 - [#67](https://github.com/nrepl/neorepl/pull/67): `neorepl server` says the server's up once its port file is there, rather than as nREPL says where it listens, before writing the file, so a command run right after finds it.
 - [#70](https://github.com/nrepl/neorepl/pull/70): `neorepl untrace` and `,untrace` leave alone the functions the server's own tools call, which untracing traced first, taking the server down.
+- [#74](https://github.com/nrepl/neorepl/pull/74): A reload right after jack-in, by `,autoreload` or `neorepl eval --reload`, waits for the one jack-in starts in the background, rather than racing it.
 
 ## 0.4.1 (2026-10-31)
 

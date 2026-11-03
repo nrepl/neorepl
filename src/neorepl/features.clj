@@ -1725,10 +1725,13 @@
   and puts session back in its namespace. It runs in session, the way
   evaluation/evaluate does, whose opts it takes. Returns nil once it's
   done, or else what evaluate does, saying why not, with :clojurescript?
-  in a ClojureScript session, where there's nothing for it to reload."
+  in a ClojureScript session, where there's nothing for it to reload.
+  The reload note-changes started, client's :noting-changes, goes first,
+  rather than racing it."
   [client session opts]
   (when-not (supports? client "cider.clj-reload/reload")
     (throw (ex-info "Reloading what changed takes cider-nrepl on the server" {:type ::failed})))
+  (some-> ^Thread (:noting-changes client) (.join 10000))
   (let [clojure-only? (atom false)
         reloaded (atom nil)
         {:keys [status] :as result}

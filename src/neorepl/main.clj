@@ -195,27 +195,27 @@ when it times out.")
     (jack-in/with-server dir command port-file (bound-fn* on-line)
                          (fn [{:keys [host port] :as server}]
                            ;; babashka's has no cider-nrepl to start it.
-                           (when-not (= "bb" tool)
-                             (features/note-changes host port))
-                           (f server)))))
+                           (f (cond-> server
+                                (not= "bb" tool) (assoc :noting-changes (features/note-changes host port))))))))
 
 (defn- with-started-server
   "Calls f with a client for a server started for project, the way
   with-server does. What the server prints goes where output nobody asked
   for goes, like an evaluation's that comes late, and to stderr before
   something takes that over and after f, so the client :shares-output?
-  with the server. When the connection drops because the server's gone, it
-  says how that ended, and when the server runs another cider-nrepl than
-  jack-in adds, it says that first."
+  with the server. The client has the thread that has clj-reload start
+  :noting-changes too, if there's one. When the connection drops because
+  the server's gone, it says how that ended, and when the server runs
+  another cider-nrepl than jack-in adds, it says that first."
   [project options f]
   (let [output (atom print-err-line)]
     (with-server project options #(@output %)
-      (fn [{:keys [host port ^Process process]}]
+      (fn [{:keys [host port ^Process process noting-changes]}]
         (call-with-client
          (-> (nrepl/connect {:host host :port port
                              :on-unclaimed (fn [{:keys [out err]}]
                                              (some-> (or out err) print-err))})
-             (assoc :project-dir (:dir project) :shares-output? true))
+             (assoc :project-dir (:dir project) :shares-output? true :noting-changes noting-changes))
          (fn [client]
            (some-> (jack-in/other-cider-nrepl (:tool project) (:cider-version client)) warn)
            (reset! output #(nrepl/unclaimed client {:err (str % "\n")}))
