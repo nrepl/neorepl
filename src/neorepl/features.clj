@@ -1311,12 +1311,14 @@
   there's nothing called that, and the :status: traced, untraced,
   already-traced or not-traced when it was that way already, not-traceable,
   as macros are, refused, for the functions the server's own tools call,
-  or not-found."
+  or not-found. Those never get toggled, not even to stop tracing them,
+  which would trace them first."
   ([client names ctx on?] (trace client names ctx on? {}))
   ([client names {:keys [ns]} on? opts]
    (check-tracer client "toggle-trace-var")
-   (mapv #(or (when on? (refusal (info-or-nil client % ns opts) %))
-              (trace-one client % ns on? opts))
+   (mapv #(if-let [refused (refusal (info-or-nil client % ns opts) %)]
+            (cond-> refused (not on?) (assoc :status "not-traced"))
+            (trace-one client % ns on? opts))
          names)))
 
 (defn traced
