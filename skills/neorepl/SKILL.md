@@ -57,7 +57,9 @@ in the wrong form. Fix it by hand when `--fix` says it can't.
 
 Loading matters: `neorepl test` loads namespaces that aren't loaded yet, but
 not your changes to ones that are. `neorepl reload` reloads every namespace
-that changed since the last reload, when the server has cider-nrepl.
+that changed since the last reload, when the server has cider-nrepl, and
+`neorepl eval --reload` does that before evaluating, keeping what `defonce`
+defined. When the reload fails, the code doesn't run.
 
 ## Evaluating
 

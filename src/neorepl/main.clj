@@ -192,7 +192,12 @@ when it times out.")
     (warn (str "Starting an nREPL server in " dir ": " (shell-words command)))
     ;; Printing from the thread that follows the server's output, with this
     ;; one's *out* and *err*.
-    (jack-in/with-server dir command port-file (bound-fn* on-line) f)))
+    (jack-in/with-server dir command port-file (bound-fn* on-line)
+                         (fn [{:keys [host port] :as server}]
+                           ;; babashka's has no cider-nrepl to start it.
+                           (when-not (= "bb" tool)
+                             (features/note-changes host port))
+                           (f server)))))
 
 (defn- with-started-server
   "Calls f with a client for a server started for project, the way
@@ -363,7 +368,9 @@ when it times out.")
            {:long "--line" :arg "N[:COL]" :parse parse-position
             :doc "Evaluate only the top-level form at line N of FILE"}
            {:long "--ns" :arg "NS" :parse not-empty
-            :doc "Evaluate in NS, loading it first unless it's there"}]
+            :doc "Evaluate in NS, loading it first unless it's there"}
+           {:long "--reload"
+            :doc "Reload what changed first, which takes cider-nrepl"}]
           evaluation-options
           common-options))
 
@@ -380,7 +387,12 @@ own. With --line, only the top-level form of FILE that line N, column COL is
 in gets evaluated, or the last one before it, in the namespace of the file's
 ns form, which goes first, so that what it requires is loaded. That's how an
 editor evaluates the form at the cursor. With both -f FILE and -, FILE's text
-comes from standard input, so an editor can send a buffer it hasn't saved."
+comes from standard input, so an editor can send a buffer it hasn't saved.
+
+With --reload, the namespaces whose files changed since the last reload get
+reloaded first, and the ones that use them, keeping what defonce defined. If
+that fails, the code doesn't run. On a server neorepl didn't start, the first
+reload only starts noting what changes."
    eval-options
    discovery-note
    sessions-note
@@ -389,6 +401,7 @@ comes from standard input, so an editor can send a buffer it hasn't saved."
   neorepl eval '(+ 1 2)'
   neorepl eval --format json -f script.clj
   neorepl eval -f src/my/app.clj --line 12:3
+  neorepl eval --reload '(my.app/handler {})'
   echo '(start)' | neorepl eval --ns my.app -
   neorepl eval --max-output 2000 '(slurp \"big.txt\")'
   echo '(range 3)' | neorepl eval -"))
@@ -428,7 +441,7 @@ comes from standard input, so an editor can send a buffer it hasn't saved."
        :ns (or ns (:name ns-form))
        :ns-msg (when ns-form (part (:start ns-form) (:end ns-form)))})))
 
-(defn- eval-command [{:keys [file line ns] :as options} args ctx]
+(defn- eval-command [{:keys [file line ns reload] :as options} args ctx]
   (when (and line (not file))
     (throw (usage-error "--line needs a --file")))
   (let [msg (cond-> {:op "eval" :code (read-code file args)}
@@ -439,7 +452,8 @@ comes from standard input, so an editor can send a buffer it hasn't saved."
         ;; input.
         evaluate-options (when (= ["-"] args)
                            {:read-line (constantly nil)})]
-    (report-run #(features/evaluate-in-ns %1 (assoc msg :session %2) ns ns-msg (merge %3 evaluate-options))
+    (report-run #(features/evaluate-in-ns %1 (assoc msg :session %2) ns ns-msg
+                                          (merge %3 evaluate-options {:reload? reload}))
                 options
                 ctx
                 (constantly nil))))

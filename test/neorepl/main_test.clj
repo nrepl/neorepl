@@ -254,6 +254,20 @@
       (is (= {:status 0 :out "1\n" :err ""}
              (run "-s" "stdin-code" "--timeout" "5" "1"))))))
 
+(deftest eval-reload-test
+  (testing "--reload: what changed gets reloaded first"
+    (let [before @test-server/reloads]
+      (is (= {:status 0 :out (str (inc before) "\n") :err ""}
+             (run "-s" "reload" "--reload" "@neorepl.test-server/reloads")))
+      (testing "and the code doesn't run when that fails"
+        (let [{:keys [status out err]} (test-server/answering-reloads :error
+                                         #(run "-s" "reload" "--reload" "(swap! neorepl.test-server/reloads inc)"))]
+          (is (= 1 status))
+          (is (= "" out))
+          (is (str/includes? err "Unable to resolve symbol: whom"))
+          (is (str/ends-with? err "Reloading what changed failed\n")))
+        (is (= (inc before) @test-server/reloads))))))
+
 (deftest eval-in-ns-test
   (testing "--ns: in the namespace, loaded first unless it's there, leaving the session in its own"
     (is (= {:status 0 :out "\"clojure.set #{1 2}\"\n" :err ""}

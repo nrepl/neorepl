@@ -1433,16 +1433,84 @@
                     opts
                     (fn [_]))))
 
+(def ^:private reenter-code
+  "Puts the session back in its namespace, by its name, which a reload can
+  make anew, leaving the session in the old one. The REPL then sets *3 to
+  *2, *2 to *1 and *1 to the value, so the code sets them a step back and
+  comes to *1, which leaves all three as they were."
+  "(clojure.core/let [v1 clojure.core/*1 v2 clojure.core/*2 v3 clojure.core/*3]
+     (clojure.core/in-ns (clojure.core/ns-name clojure.core/*ns*))
+     (set! clojure.core/*2 v3)
+     (set! clojure.core/*1 v2)
+     v1)")
+
+(defn reload-changed
+  "Reloads the namespaces whose files changed since the last time, the ones
+  that depend on them after them, with cider-nrepl's clj-reload, which
+  keeps what defonce defined and leaves alone namespaces nothing loaded,
+  and puts session back in its namespace. It runs in session, the way
+  evaluation/evaluate does, whose opts it takes. Returns nil once it's
+  done, or else what evaluate does, saying why not, with :clojurescript?
+  in a ClojureScript session, where there's nothing for it to reload."
+  [client session opts]
+  (when-not (supports? client "cider.clj-reload/reload")
+    (throw (ex-info "Reloading what changed takes cider-nrepl on the server" {:type ::failed})))
+  (let [clojure-only? (atom false)
+        reloaded (atom nil)
+        {:keys [status] :as result}
+        (evaluate-for client {:op "cider.clj-reload/reload" :session session}
+                      ;; The message says what the server would.
+                      (cond-> opts
+                        (:on-response opts) (update :on-response (fn [f] #(when-not (nrepl/status? % "clojure-only") (f %)))))
+                      (fn [{:keys [progress] :as response}]
+                        (when (nrepl/status? response "clojure-only")
+                          (reset! clojure-only? true))
+                        (when-let [[_ n] (some->> progress (re-find #"^Reloaded (\d+) namespaces"))]
+                          (reset! reloaded n))))]
+    (cond
+      @clojure-only? (assoc result :status "error" :clojurescript? true
+                            :message "Reloading what changed takes a Clojure session")
+      (= "error" status) (assoc result :message "Reloading what changed failed")
+      (not= "ok" status) result
+      ;; Without a count, as from a project's own clj-reload, it may have.
+      (= "0" @reloaded) nil
+      :else (do (nrepl/request client {:op "eval" :session session :code reenter-code
+                                       ;; *1 could be anything, even endless.
+                                       :nrepl.middleware.print/quota 1})
+                nil))))
+
+(defn note-changes
+  "Has cider-nrepl's clj-reload, if the server at host and port has it,
+  start noting which files change, in the background, so that the first
+  reload-changed reloads what changed since now, rather than since it got
+  there. It gets there on the first reload, which takes about half a
+  second. Returns the thread."
+  [host port]
+  (doto (Thread. #(try
+                    (let [client (nrepl/connect {:host host :port port})]
+                      (try
+                        (when (supports? client "cider.clj-reload/reload")
+                          (nrepl/request client {:op "cider.clj-reload/reload"} {:timeout-ms nil}))
+                        (finally
+                          (nrepl/close client))))
+                    ;; Nothing depends on it.
+                    (catch Exception _))
+                 "neorepl-note-changes")
+    (.setDaemon true)
+    .start))
+
 (defn evaluate-in-ns
   "Evaluates msg, an eval, the way evaluation/evaluate does, whose opts it
   takes, in the namespace called name, when there's one, which ensure-ns
   makes sure of first, with ns-msg, the namespace's ns form, if there's one
-  to evaluate. The :timeout covers both, and the session stays in its
-  namespace."
-  [client {:keys [session] :as msg} name ns-msg {:keys [timeout] :as opts}]
-  (if-not name
-    (evaluation/evaluate client msg opts)
-    (let [opts (cond-> opts
-                 timeout (assoc :deadline (+ (System/currentTimeMillis) (long (* 1000 timeout)))))]
-      (or (ensure-ns client session name ns-msg opts)
-          (evaluation/evaluate client (assoc msg :ns name) opts)))))
+  to evaluate. With :reload? in opts, what changed gets reloaded before
+  that, as reload-changed does. The :timeout covers it all, and the session
+  stays in its namespace."
+  [client {:keys [session] :as msg} name ns-msg {:keys [timeout reload?] :as opts}]
+  (let [opts (cond-> opts
+               timeout (assoc :deadline (+ (System/currentTimeMillis) (long (* 1000 timeout)))))]
+    (or (when reload?
+          (reload-changed client session opts))
+        (when name
+          (ensure-ns client session name ns-msg opts))
+        (evaluation/evaluate client (cond-> msg name (assoc :ns name)) opts))))

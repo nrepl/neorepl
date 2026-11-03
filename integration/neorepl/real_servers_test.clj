@@ -175,6 +175,37 @@
         (spit file servers/core)
         (run :clojure "reload")))))
 
+(deftest eval-reload-test
+  (testing "cider-nrepl"
+    ;; Gone after, so the other tests have the project as it was.
+    (let [file (io/file (project-dir :lein) "src" "demo" "reloaded.clj")
+          write! #(spit file (str "(ns demo.reloaded)\n\n(defonce state (atom 0))\n\n(defn f [] " % ")\n"))
+          run-reloading #(run :lein "eval" "-s" "reloading" "--reload" %)]
+      (try
+        (write! ":before")
+        ;; Reloading first, where clj-reload starts noting what changes.
+        (run-reloading "(require 'demo.reloaded) (swap! demo.reloaded/state inc)")
+        (write! ":after")
+        (is (= {:status 0 :out "[:after 1]\n" :err ""} (run-reloading "[(demo.reloaded/f) @demo.reloaded/state]")))
+        (testing "and not running the code when a file doesn't compile"
+          (write! "nope")
+          (let [{:keys [status out err]} (run-reloading "(swap! demo.reloaded/state inc)")]
+            (is (= 1 status))
+            (is (= "" out))
+            (is (str/includes? err "Unable to resolve symbol: nope"))
+            (is (str/ends-with? err "Reloading what changed failed\n")))
+          (write! ":fixed")
+          (is (= {:status 0 :out "[:fixed 1]\n" :err ""} (run-reloading "[(demo.reloaded/f) @demo.reloaded/state]"))))
+        (testing "with the session back in the namespace it's in, which a reload makes anew"
+          (run-reloading "(in-ns 'demo.reloaded)")
+          (spit file "\n(defn added [] :added)\n" :append true)
+          (is (= {:status 0 :out ":added\n" :err ""} (run-reloading "(added)"))))
+        (finally
+          (io/delete-file file true)))))
+  (testing "babashka"
+    (is (= {:status 1 :out "" :err "neorepl: Reloading what changed takes cider-nrepl on the server\n"}
+           (run :bb "eval" "--reload" "1")))))
+
 (deftest edit-test
   ;; The editor's a shell script.
   (when-not (test-server/windows?)

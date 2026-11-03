@@ -282,13 +282,71 @@
   []
   (count @trace-subscriptions))
 
+(def reloads
+  "How many times wrap-fake-reload has reloaded, which code evaluated on the
+  server can read."
+  (atom 0))
+
+(def reload-answer
+  "How wrap-fake-reload answers: :ok, :error, as cider-nrepl does when a
+  file doesn't compile, or :clojure-only, as it does in a ClojureScript
+  session."
+  (atom :ok))
+
+(defn answering-reloads
+  "Calls f with wrap-fake-reload answering as answer, as reload-answer says."
+  [answer f]
+  (reset! reload-answer answer)
+  (try
+    (f)
+    (finally
+      (reset! reload-answer :ok))))
+
+(defn- remake-reloaded!
+  "Makes the namespace neorepl.reloaded anew, as clj-reload does the ones it
+  reloads, with a var it didn't have before, named after what reloads
+  holds, as reloaded-1."
+  []
+  (remove-ns 'neorepl.reloaded)
+  (let [n (create-ns 'neorepl.reloaded)]
+    (binding [*ns* n]
+      (refer 'clojure.core))
+    (intern n (symbol (str "reloaded-" @reloads)) true)))
+
+(defn wrap-fake-reload
+  "cider-nrepl's cider.clj-reload/reload, answering as reload-answer says,
+  with what cider-nrepl 0.64.0 sends. It reloads neorepl.reloaded."
+  [handler]
+  (fn [{:keys [op] :as msg}]
+    (if (= "cider.clj-reload/reload" op)
+      (case @reload-answer
+        :ok (do (swap! reloads inc)
+                (remake-reloaded!)
+                (transport/respond-to msg :progress "Reloading 1 namespaces...")
+                (transport/respond-to msg :progress "Reloaded 1 namespaces in 3 ms")
+                (transport/respond-to msg :status "ok")
+                (transport/respond-to msg :status "done"))
+        :error (do (transport/respond-to msg :progress "Reloading 1 namespaces...")
+                   (transport/respond-to msg :progress "  failed to load demo.core Syntax error compiling at (demo/core.clj:5:19).")
+                   (transport/respond-to msg :status "error" :error [])
+                   (transport/respond-to msg :err "Syntax error compiling at (demo/core.clj:5:19).\nUnable to resolve symbol: whom in this context\n")
+                   (transport/respond-to msg :status "done"))
+        :clojure-only (transport/respond-to msg :status ["done" "clojure-only"]
+                                            :err "The \"cider.clj-reload/reload\" op is Clojure-only and isn't available in a ClojureScript REPL.\n"))
+      (handler msg))))
+
+(middleware/set-descriptor! #'wrap-fake-reload {:handles {"cider.clj-reload/reload" {}}})
+
 (defn fixture
   "A :once fixture that runs the tests with an nREPL server listening on
-  *port*, with wrap-stuck, wrap-fake-inspector and wrap-fake-tracer unless
-  opts, which go to nrepl.server/start-server, give it a :handler."
+  *port*, with wrap-stuck, wrap-fake-inspector, wrap-fake-tracer and
+  wrap-fake-reload unless opts, which go to nrepl.server/start-server, give
+  it a :handler."
   [& opts]
   (fn [f]
-    (let [srv (apply server/start-server :port 0 :handler (server/default-handler #'wrap-stuck #'wrap-fake-inspector #'wrap-fake-tracer) opts)]
+    (let [srv (apply server/start-server :port 0 :handler (server/default-handler #'wrap-stuck #'wrap-fake-inspector #'wrap-fake-tracer
+                                                                                  #'wrap-fake-reload)
+                     opts)]
       (try
         (binding [*port* (:port srv)]
           (f))
