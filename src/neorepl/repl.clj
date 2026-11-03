@@ -59,7 +59,7 @@
                      (.interrupt thread)
                      thread))}))
 
-(declare edit enter-ns switch-session inspect run-tests browse-error)
+(declare edit enter-ns switch-session inspect run-tests browse-error autoreload)
 
 (def ^:private commands
   "The REPL's commands, the CIDER way: a comma, which Clojure reads as
@@ -85,6 +85,9 @@
            {:name "sessions" :arg "NAME" :optional? true
             :help "Switch to the session called NAME, or - for the REPL's own, or list them"
             :run #(switch-session %1 %2)}
+           {:name "autoreload" :arg "on|off" :optional? true
+            :help "Reload what changed before each evaluation, or stop"
+            :run #(autoreload %1 %2)}
            {:name "help" :help "List the commands"}
            {:name "quit" :help "Leave the REPL"}]))
 
@@ -292,6 +295,25 @@
         (out (render/inspector-text lines false)))
       {})))
 
+(defn- autoreload
+  "Turns reloading what changed before each evaluation on or off, as arg
+  says, or the other way from how it is without it. The REPL's :reloading
+  says which. Turning it on reloads right away, the way the REPL :evaluates
+  code, which is when clj-reload starts noting changes on a server that
+  hasn't reloaded yet, and leaves it off when that fails. Returns what to
+  print, as command-output does."
+  [{:keys [client session evaluate reloading]} arg]
+  (case (or arg (if @reloading "off" "on"))
+    "off" (do (reset! reloading false)
+              (out "Not reloading before evaluations"))
+    "on" (cond
+           @reloading (out "Already reloading what changed before each evaluation")
+           ;; Having said why.
+           (evaluate #(features/reload-changed client session %)) (out "Not reloading before evaluations")
+           :else (do (reset! reloading true)
+                     (out "Reloading what changed before each evaluation")))
+    (out "Usage: ,autoreload [on|off]")))
+
 (defn- enter-ns
   "Switches to the namespace called ns, loading it the way the REPL
   :evaluates code if need be, or lists the project's loaded namespaces
@@ -363,9 +385,10 @@
   ,stacktrace find, as browser/browse does, partly applied to the editor,
   if the REPL can, an atom with the last test run's :test-errors, functions
   that have the REPL :show-traces and :hide-traces, the :sessions-file and
-  the REPL's :own session, where it started, for ,sessions, and a function
-  to run lookups :quietly with, as editor/quietly takes f. What to print
-  can have the :ns the REPL goes on in, or the :session and its
+  the REPL's :own session, where it started, for ,sessions, an atom saying
+  whether it's :reloading what changed before each evaluation, and a
+  function to run lookups :quietly with, as editor/quietly takes f. What to
+  print can have the :ns the REPL goes on in, or the :session and its
   :session-name too, as switch-session says."
   [{:keys [client quietly] :as state} name arg]
   (let [{arg-name :arg :keys [code? args? optional?] :as command} (command name)]
@@ -442,10 +465,19 @@
                        (try
                          (features/unsubscribe-traces client subscription)
                          (catch Exception _)))
-        ;; Evaluates with (run opts), opts being evaluation/evaluate's, and
-        ;; returns the result after printing its message.
-        evaluate (fn [run]
-                   (let [{:keys [status message] :as result}
+        ;; Whether what changed gets reloaded before each evaluation.
+        reloading (atom false)
+        ;; Evaluates with (run opts) in session, opts being
+        ;; evaluation/evaluate's, after reloading what changed when it's
+        ;; reloading, and returns the result after printing its message.
+        evaluate (fn [session run]
+                   (let [run (if @reloading
+                               ;; Nothing to reload for ClojureScript.
+                               #(or (let [failed (features/reload-changed client session %)]
+                                      (when-not (:clojurescript? failed) failed))
+                                    (run %))
+                               run)
+                         {:keys [status message] :as result}
                          (try
                            (quietly
                             (fn []
@@ -495,7 +527,8 @@
                output (when name
                         (reset! command-thread (Thread/currentThread))
                         (try
-                          (command-output (merge io place {:client client :evaluate evaluate :test-errors test-errors
+                          (command-output (merge io place {:client client :evaluate (partial evaluate session)
+                                                           :test-errors test-errors :reloading reloading
                                                            :show-traces show-traces :hide-traces hide-traces
                                                            :own own :quietly quietly})
                                           name arg)
@@ -509,7 +542,7 @@
              output (do (print-response output)
                         (recur (merge place (select-keys output [:session :session-name :ns])) more))
              :else
-             (let [result (evaluate #(evaluation/evaluate client (eval-msg session code (width)) %))]
+             (let [result (evaluate session #(evaluation/evaluate client (eval-msg session code (width)) %))]
                (recur (assoc place :ns (or (:ns result) ns)) nil)))))))))
 
 (defn- read-input
