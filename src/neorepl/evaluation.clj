@@ -20,7 +20,8 @@
     ;; error on stderr.
     (= ":repl/exception!" value) (update :statuses conj "eval-error")
     ;; nbb's, an :ex with no status, rather than one with eval-error, or
-    ;; cider-nrepl's inspect-eval-error.
+    ;; cider-nrepl's inspect-eval-error. nbb sends eval-error after 1.6.214
+    ;; (nbb#425).
     (and ex (empty? status)) (update :statuses conj "eval-error")
     (and collect? value) (update :values conj value)
     (and collect? (seq out)) (update :out conj out)

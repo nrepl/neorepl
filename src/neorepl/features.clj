@@ -313,8 +313,8 @@
   for a namespace, which names it twice, has no :ns."
   [client response]
   (let [{:keys [file arglists-str forms forms-str macro special-form class member doc-fragments column] :as info}
-        ;; As nbb has them for what it doesn't find, and nREPL's lookup the
-        ;; file of a var with none.
+        ;; As nbb has them for what it doesn't find (nbb#431), and nREPL's
+        ;; lookup the file of a var with none (nrepl#511).
         (into {} (filter (comp some? blank->nil val)) response)
         file (source-file file)
         info (cond-> info
@@ -1420,7 +1420,7 @@
   [client session name opts]
   (or (ensure-ns client session name nil opts)
       (evaluate-for client
-                    ;; nbb's server only switches for an ns form.
+                    ;; nbb only switches for an ns form (nbb#427).
                     {:op "eval" :session session
                      :code (format "#?(:clj (clojure.core/in-ns '%1$s) :org.babashka/nbb (ns %1$s) :cljs (in-ns '%1$s) :default (in-ns '%1$s))" name)}
                     opts
