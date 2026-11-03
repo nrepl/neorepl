@@ -222,6 +222,21 @@
                {:name "welcome" :arglists "([who])"}]
               (features/ns-vars client "demo.core" {} {})))))))
 
+(deftest specs-test
+  ;; What the spec browser shows: the list from cider-nrepl's spec-list,
+  ;; or from the registry on babashka, and the forms evaluated.
+  (on-each-server
+   (fn [server]
+     (run server "eval" "(require '[clojure.spec.alpha :as s]) (s/def :demo/age pos-int?) (s/def :demo/person (s/keys :req [:demo/age]))")
+     (with-client [client {:port (discovery/read-port (io/file (project-dir server) ".nrepl-port"))}]
+       (is (every? (set (features/specs client {})) [":demo/age" ":demo/person"]))
+       (is (= "(s/keys :req [:demo/age])\n" (features/spec-form client ":demo/person" 80 {})))
+       (testing "and an example, from cider-nrepl's spec-example, which takes test.check, as projects rarely have"
+         (if (= :bb server)
+           (is (re-matches #"#:demo\{:age \d+\}\n" (features/spec-example client ":demo/person" 80 {})))
+           (is (thrown-with-msg? clojure.lang.ExceptionInfo #"^Generating examples takes test.check on the server$"
+                                 (features/spec-example client ":demo/person" 80 {})))))))))
+
 (deftest edit-test
   ;; The editor's a shell script.
   (when-not (test-server/windows?)

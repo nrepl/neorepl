@@ -682,6 +682,38 @@
           (type ",autoreload maybe\r")
           (is (screen #"\nUsage: ,autoreload \[on\|off\]\nuser=> $")))))))
 
+(deftest spec-test
+  (call-with-repl {}
+    (fn [type screen]
+      (type "(require '[clojure.spec.alpha :as s]) (s/def :neorepl.repl-specs/age pos-int?) (s/def :neorepl.repl-specs/person (s/keys :req [:neorepl.repl-specs/age]))\r")
+      (screen #":neorepl\.repl-specs/person\nuser=> $")
+      (testing "a spec's form, from the list of them"
+        (type ",spec repl-specs\r")
+        (is (screen #"Specs(?s).*:neorepl\.repl-specs/age.*:neorepl\.repl-specs/person.*q quit"))
+        (type "\u001b[B\r")
+        (is (screen #"(?s)\(s/keys :req \[:neorepl\.repl-specs/age\]\).*x example"))
+        (testing "and the ones it names"
+          ;; The screen is drawn by moving the cursor, not line by line.
+          (type "\r")
+          ;; The help line's the same, so it isn't drawn again.
+          (is (screen #"(?s)x example.*pos-int\?")))
+        (type "q")
+        (is (screen #"user=> $")))
+      (testing "without a terminal, printed"
+        (call-with-temp-dir
+         (fn [dir]
+           (is (= "user=> (s/keys :req [:neorepl.repl-specs/age])\nuser=> :neorepl.repl-specs/age\nuser=> \n"
+                  (lf (with-out-str
+                        (with-in-str ",spec :neorepl.repl-specs/person\n,spec REPL-SPECS/A\n"
+                          (main/run ["repl" "-p" (str *port*)]
+                                    {:dir dir
+                                     :sessions-file (io/file dir "sessions.edn")
+                                     :history-dir (io/file dir "history")
+                                     :terminal {:input (ByteArrayInputStream. (byte-array 0))
+                                                :output (ByteArrayOutputStream.)
+                                                :width 80
+                                                :type "dumb"}}))))))))))))
+
 (deftest sessions-test
   (call-with-temp-dir
    (fn [dir]

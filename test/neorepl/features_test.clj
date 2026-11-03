@@ -142,6 +142,12 @@
                                                  ["clojure.core" "neorepl.features" "made.at.the.repl"
                                                   "nrepl.core" "cider.nrepl.middleware"]
                                                  ["clojure.core"]))
+      "spec-list" (transport/respond-to msg :status "done" :spec-list [":cider/spec"])
+      "spec-example" (if (= ":cider/spec" (:spec-name msg))
+                       (transport/respond-to msg :status "done" :example "cider's example\n")
+                       ;; As cider-nrepl fails without test.check.
+                       (do (transport/respond-to msg :err "java.io.FileNotFoundException: Could not locate clojure/test/check/generators__init.class\n")
+                           (transport/respond-to msg :status ["done" "spec-example-error"])))
       ;; With docs printed, as cider-nrepl has them.
       "ns-vars-with-meta" (transport/respond-to msg :status "done"
                                                 :ns-vars-with-meta {:greet {:arglists "([who])" :doc "\"Says hi.\""}
@@ -221,7 +227,7 @@
       (handler msg))))
 
 (middleware/set-descriptor! #'wrap-fake-cider {:handles {"info" {} "complete" {} "apropos" {} "ns-list" {} "cider-version" {}
-                                                         "ns-vars-with-meta" {}
+                                                         "ns-vars-with-meta" {} "spec-list" {} "spec-example" {}
                                                          "macroexpand" {} "analyze-last-stacktrace" {} "test-stacktrace" {}
                                                          "refresh" {} "refresh-clear" {} "test-var-query" {} "retest" {}
                                                          "inspect-last-exception" {} "fn-refs" {} "fn-deps" {}}
@@ -426,6 +432,33 @@
         (is (str/starts-with? doc "Returns a string"))
         (testing "and no namespace"
           (is (thrown? clojure.lang.ExceptionInfo (features/ns-vars client "no.such.ns" user {}))))))))
+
+(deftest specs-test
+  (with-client [client {:port *port*}]
+    (nrepl/request client {:op "eval" :code (str "(require '[clojure.spec.alpha :as s])"
+                                                 "(s/def :neorepl.specs/age pos-int?)"
+                                                 "(s/def :neorepl.specs/person (s/keys :req [:neorepl.specs/age]))"
+                                                 "(s/def :neorepl.specs/alias :neorepl.specs/age)"
+                                                 "(s/def :neorepl.specs/f fn?)")})
+    (testing "the registry's, without cider-nrepl"
+      (let [names (features/specs client {})]
+        (is (every? (set names) [":neorepl.specs/age" ":neorepl.specs/person"]))
+        (is (= names (sort names)))))
+    (testing "a spec's form, with s/ for clojure.spec.alpha and without clojure.core"
+      (is (= "(s/keys :req [:neorepl.specs/age])\n" (features/spec-form client ":neorepl.specs/person" 80 {})))
+      (is (= "pos-int?\n" (features/spec-form client ":neorepl.specs/age" 80 {})))
+      (testing "and an alias's target, rather than its form"
+        (is (= ":neorepl.specs/age\n" (features/spec-form client ":neorepl.specs/alias" 80 {}))))
+      (testing "and none for one that isn't there"
+        (is (nil? (features/spec-form client ":no/such" 80 {})))))
+    (testing "an example, which takes test.check on the server"
+      (if (try (require 'clojure.test.check.generators) true (catch Exception _ false))
+        (do (is (re-matches #"#:neorepl.specs\{:age \d+\}\n" (features/spec-example client ":neorepl.specs/person" 80 {})))
+            (testing "or a line saying why there's none"
+              (is (thrown-with-msg? clojure.lang.ExceptionInfo #"^[^\n]*Unable to construct gen[^\n]*$"
+                                    (features/spec-example client ":neorepl.specs/f" 80 {})))))
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo #"^Generating examples takes test.check on the server$"
+                              (features/spec-example client ":neorepl.specs/person" 80 {})))))))
 
 (deftest enter-ns-test
   (with-client [client {:port *port*}]
@@ -655,6 +688,11 @@
               (is (= ["clojure.core" "made.at.the.repl" "neorepl.features"] (features/loaded-namespaces client ctx {})))))
           (is (= [{:name "greet" :arglists "([who])" :doc "Says hi."} {:name "state"}]
                  (features/ns-vars client "demo.core" user {})))
+          (testing "specs"
+            (is (= [":cider/spec"] (features/specs client {})))
+            (is (= "cider's example\n" (features/spec-example client ":cider/spec" 80 {})))
+            (is (thrown-with-msg? clojure.lang.ExceptionInfo #"^Generating examples takes test.check on the server$"
+                                  (features/spec-example client ":demo/age" 80 {}))))
           (is (= [{:name "clojure.core/map" :type "function" :doc "Cider's map.\nMore."}]
                  (features/apropos client "map")))
           (is (= "Cider's macroexpand-all" (features/expand client "(when x y)" user true)))

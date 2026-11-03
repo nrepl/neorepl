@@ -1424,6 +1424,88 @@
                 doc (assoc :doc doc))))
        (sort-by :name)))
 
+(def ^:private specs-code
+  "The names of the specs in the registry."
+  "(do (require 'clojure.spec.alpha)
+       (map str (keys (clojure.spec.alpha/registry))))")
+
+(defn specs
+  "The names of the specs in the registry, sorted: keywords, colon and all,
+  and the symbols of functions with an fdef. From cider-nrepl's spec-list,
+  or the registry without it."
+  [client opts]
+  (sort (if (supports? client "spec-list")
+          (some :spec-list (ask client {:op "spec-list"} opts))
+          (eval-data client {} specs-code [] opts))))
+
+(def ^:private spec-code
+  "The spec the name %1$s names, a keyword or an fdef's symbol, or nil."
+  "(let [n %1$s] (clojure.spec.alpha/get-spec (if (= \\: (first n)) (keyword (subs n 1)) (symbol n))))")
+
+(defn- unix-lines
+  "text, pretty printed on the server, with its lines ending in a newline,
+  where on Windows they end in a carriage return too, which a terminal
+  takes for going back to the start of the line."
+  [text]
+  (str/replace text "\r\n" "\n"))
+
+(def ^:private spec-form-code
+  "The form of the spec the name %1$s names, pretty printed %2$s columns
+  wide, with s/ for clojure.spec.alpha/ and clojure.core/ left out, as
+  CIDER shows it. cider-nrepl's spec-form sends it as bencode lists, which
+  can't tell a vector from a list."
+  (str "(do (require 'clojure.spec.alpha 'clojure.pprint 'clojure.walk)
+            (let [shorter (fn [x]
+                            (case (and (symbol? x) (namespace x))
+                              \"clojure.spec.alpha\" (symbol \"s\" (name x))
+                              \"clojure.core\" (symbol (name x))
+                              x))]
+              (when-let [spec " spec-code "]
+                (binding [clojure.pprint/*print-right-margin* %2$s]
+                  (with-out-str
+                    (clojure.pprint/with-pprint-dispatch clojure.pprint/code-dispatch
+                      ;; An alias, as its target's name, rather than its form.
+                      (clojure.pprint/pprint (clojure.walk/postwalk shorter (if (ident? spec) spec (clojure.spec.alpha/form spec))))))))))"))
+
+(defn spec-form
+  "The form of the spec called spec, as specs names it, as text, pretty
+  printed width columns wide, or nil when there's no such spec."
+  [client spec width opts]
+  (some-> (eval-data client {} spec-form-code [spec width] opts) unix-lines))
+
+(def ^:private spec-example-code
+  "An example of the spec the name %1$s names, generated, pretty printed
+  %2$s columns wide."
+  (str "(do (require 'clojure.spec.alpha 'clojure.spec.gen.alpha 'clojure.pprint)
+            (when-let [spec " spec-code "]
+              (binding [clojure.pprint/*print-right-margin* %2$s]
+                (with-out-str
+                  (clojure.pprint/pprint (clojure.spec.gen.alpha/generate (clojure.spec.alpha/gen spec)))))))"))
+
+(defn spec-example
+  "An example of the spec called spec, as specs names it, generated, as
+  text, pretty printed width columns wide, with cider-nrepl's spec-example,
+  or without it, evaluating code, which comes to nil when there's no such
+  spec. Either takes test.check on the server. When there's no example,
+  it says why in a line, as when a spec has no generator."
+  [client spec width opts]
+  (try
+    (some-> (if (supports? client "spec-example")
+              (some :example (ask client {:op "spec-example" :spec-name spec} opts))
+              (eval-data client {} spec-example-code [spec width] opts))
+            unix-lines)
+    (catch clojure.lang.ExceptionInfo e
+      (let [message (str (ex-message e))]
+        (throw (if (= ::failed (:type (ex-data e)))
+                 (ex-info (if (str/includes? message "clojure/test/check")
+                            "Generating examples takes test.check on the server"
+                            ;; Out of what can be a whole stack trace.
+                            (or (first (re-find #"(?m)^.*(Unable to construct gen|Couldn't satisfy such-that).*$" message))
+                                (first (str/split-lines message))))
+                          {:type ::failed}
+                          e)
+                 e))))))
+
 (def ^:private ns-found-code
   "Whether the namespace %s names is there, in Clojure, ClojureScript or,
   unqualified, as best it can, the other dialects."
