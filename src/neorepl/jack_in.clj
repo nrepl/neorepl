@@ -205,10 +205,21 @@ for (const signal of ['SIGHUP', 'SIGTERM', 'SIGQUIT'])
       true)
     (catch IOException _ false)))
 
+(defn- await-port-file
+  "Waits up to timeout-ms for the port file f to have port in it, or for
+  process to end. nREPL's own says where it listens before it writes the
+  file, so the commands neorepl runs next could find none."
+  [f port ^Process process timeout-ms]
+  (let [deadline (+ (System/currentTimeMillis) timeout-ms)]
+    (while (and (not= port (discovery/read-port f))
+                (.isAlive process)
+                (< (System/currentTimeMillis) deadline))
+      (Thread/sleep 20))))
+
 (defn with-server
   "Starts the server command describes in dir and, once it says where it
-  listens, calls (f server) with its :host, :port and :process, returning
-  what f does. The server stops when f returns, or when neorepl exits
+  listens and has written its port file, calls (f server) with its :host,
+  :port and :process, returning what f does. The server stops when f returns, or when neorepl exits
   first, even before the server's up, and the port file it writes, the one
   called port-file in dir, goes too if it's left behind, as when the
   server gets killed. Each line it prints goes to (on-line line), on a
@@ -259,7 +270,8 @@ for (const signal of ['SIGHUP', 'SIGTERM', 'SIGQUIT'])
      (fn []
        (.start output)
        (cond
-         @up (f (assoc @up :process process))
+         @up (do (await-port-file (io/file dir port-file) (:port @up) process 5000)
+                 (f (assoc @up :process process)))
          (shutdown/exiting?) (throw (ex-info "Stopped the server" {:type ::stopped}))
          :else (let [status (.waitFor process)]
                  (throw (or (when (= 127 status) (missing))

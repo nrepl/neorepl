@@ -37,6 +37,7 @@
 - [#58](https://github.com/nrepl/neorepl/pull/58): Code that throws on nbb fails the evaluation, which nbb's server says only with an `:ex`, so `neorepl eval` exits 1 and the MCP `eval` tool reports an error.
 - [#58](https://github.com/nrepl/neorepl/pull/58): `source`, `macroexpand` and `apropos` work on Basilisp.
 - [#58](https://github.com/nrepl/neorepl/pull/58): `,ns` switches namespaces on nbb, whose server takes no notice of `in-ns`.
+- [#67](https://github.com/nrepl/neorepl/pull/67): `neorepl server` says the server's up once its port file is there, rather than as nREPL says where it listens, before writing the file, so a command run right after finds it.
 
 ## 0.4.1 (2026-10-31)
 
