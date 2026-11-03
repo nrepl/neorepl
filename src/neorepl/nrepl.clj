@@ -131,10 +131,10 @@
   10000)
 
 (def ^:private quickack
-  "Linux's TCP_QUICKACK on the JVM, or nil where there's none, as on
-  babashka. Servers write an eval's done right after its value, and nREPL's
-  sockets hold a write back until the one before it is acknowledged, which
-  Linux delays by up to 40ms otherwise."
+  "Linux's TCP_QUICKACK, or nil where there's none, as on macOS. Servers
+  write an eval's done right after its value, and nREPL's sockets hold a
+  write back until the one before it is acknowledged, which Linux delays by
+  up to 40ms otherwise."
   (try
     (let [option (.get (.getField (Class/forName "jdk.net.ExtendedSocketOptions") "TCP_QUICKACK") nil)]
       (when (.contains (.supportedOptions (Socket.)) option)

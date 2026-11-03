@@ -46,7 +46,7 @@ clj-kondo --lint src test integration
 ```
 
 Run both runtimes before pushing. CI runs the JVM on Java 17, 21 and 25 with
-Clojure 1.10 to 1.12, and bb 1.13.225 and the latest, on Linux, macOS and
+Clojure 1.10 to 1.12, and bb 1.13.227 and the latest, on Linux, macOS and
 Windows.
 
 The tests run against an in-process nREPL server from
@@ -63,7 +63,7 @@ not a failure.
 
 ## Rules the code keeps to
 
-- The same source runs on the JVM and on babashka 1.13.225+. That means no
+- The same source runs on the JVM and on babashka 1.13.227+. That means no
   `gen-class` or AOT, `reify` only of interfaces bb has, and only the JLine
   classes bb exposes (PLAN.md lists them). Before using a class, check that
   the oldest supported bb has it. Where the runtimes differ, `.cljc` with
@@ -95,8 +95,6 @@ in PLAN.md.
 The integration tests in `integration/` do that for all of them, each in a
 project of its own: nREPL with the cider-nrepl jack-in brings, started by
 the Clojure CLI and by Leiningen, and the server of the `bb` on the PATH,
-which has to be 1.13.227 or newer, as older ones never answer for a test
-that throws ([babashka#2201](https://github.com/babashka/babashka/issues/2201)),
 in `cljs_servers_test.clj`, ClojureScript sessions on Node, through
 piggieback and shadow-cljs, and in `dialects_test.clj`, nbb's and
 Basilisp's servers, which jack-in doesn't start, with nbb from npm and

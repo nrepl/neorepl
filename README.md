@@ -11,7 +11,7 @@ tools. [PLAN.md](PLAN.md) has the details on where this is going.
 ## Usage
 
 [bbin](https://github.com/babashka/bbin) installs the latest release as a
-`neorepl` command, which runs on [babashka](https://babashka.org) 1.13.225
+`neorepl` command, which runs on [babashka](https://babashka.org) 1.13.227
 or newer:
 
 ```shell
@@ -302,7 +302,7 @@ without one. It doesn't add middleware of its own.
 ## Development
 
 neorepl runs from the same source on the JVM (Java 17+, Clojure 1.10+) and on
-[babashka](https://babashka.org) (1.13.225+). The tests run on both:
+[babashka](https://babashka.org) (1.13.227+). The tests run on both:
 
 ```shell
 bb test             # on babashka
