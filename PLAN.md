@@ -233,6 +233,7 @@ src/neorepl/
   nrepl.clj         on top of nrepl.core: URLs, sessions, routing responses by id, async output
   evaluation.clj    following an evaluation: output, stdin, interrupts, output caps, the result
   sessions.clj      named sessions that outlive CLI calls
+  settings.clj      the REPL's settings and the config file
   discovery.clj     port files, liveness checks
   features.clj      the feature ladder; the API every front end uses
   lookups.clj       the lookups the CLI's commands and the REPL's share
@@ -248,7 +249,7 @@ src/neorepl/
   repair.clj        check --fix, delimiter repair from the indentation
   render.clj        colors, themes, errors, test reports
   json.clj          minimal JSON
-  xdg.clj           where the cache and history files go
+  xdg.clj           where the config, cache and history files go
 ```
 
 Size goal: the core was meant to stay around 3-4k lines through 1.0, and at 0.3 it's 5.7k, with `main.clj` at 1.1k and `features.clj` at 900. The goal is now around 6k through 1.0, with an audit of `main.clj` before then. If it grows well past that, something probably belongs on the server.
@@ -335,6 +336,7 @@ Upstream, alongside 0.4. The 0.1 announcement promised the first three.
 - Taps in the REPL, which CIDER shows since cider-nrepl 0.64.0. Done (2026-11-03): each value tapped shows up above the prompt, and `,tap` inspects the last one. Clojure's only, for now: ClojureScript's take a subscription in a ClojureScript session, and cider-nrepl can't inspect them.
 - What the server's own threads print, like a web server's handlers, in the REPL, which CIDER gets from nREPL's `forward-system-output`, or cider-nrepl's `out-subscribe` before nREPL 1.5. Done (2026-11-03): the REPL asks for the former, except from a server it started, whose output it shows already, see the gotcha above.
 - Profiling, as CIDER's `cider-profile-*` commands do: `neorepl profile` and `unprofile`, and `,profile`, `,unprofile` and `,profile-clear` in the REPL. Done (2026-11-03): on cider-nrepl's profile ops, with the summary as the table cider-nrepl's inspector shows, see the gotchas above.
+- Settings, and keys that toggle them, as rebel-readline's `:repl/toggle-*` commands do: a config file, `$XDG_CONFIG_HOME/neorepl/config.edn`, with what they start as, `,set` to list them and change them, and widgets the inputrc can bind. Done (2026-11-03): `eldoc`, `color`, `quiet`, `server-output`, `taps` and `autoreload`, each on or off, in one atom the line editor and the REPL loop read as they go. C-x C-h toggles eldoc and C-x C-q quiet, and every setting but autoreload, whose turning on reloads, has a `neorepl-toggle-` widget. The file's mistakes are warnings, and `NO_COLOR` wins over it. Turning `server-output` off only leaves out what comes, since nREPL can't stop forwarding ([nrepl#513](https://github.com/nrepl/nrepl/issues/513)), and the REPL asks for it only once it's on. Still to come: pretty printing and print limits, which differ by printer (`pr` takes `:print-length`, `clojure.pprint/write` `:length`), and a theme for the colors.
 
 0.6, distribution and Windows
 - Clojars, as `org.nrepl/neorepl`, which in-process mode and installing it as a Clojure tool need. An uberjar with `Enable-Native-Access: ALL-UNNAMED` in its manifest, and Homebrew. Native-image only if bb turns out not to be enough.

@@ -64,6 +64,22 @@ $if neorepl
 $endif
 ```
 
+`,set` lists the REPL's settings and turns them on or off: `eldoc`, the
+arglists under the input, `color`, `server-output`, what the server's
+System/out and System/err get, and `taps`, for what shows up above the
+prompt, `quiet`, which leaves all of that out for a while, and
+`autoreload`. C-x C-h toggles eldoc and C-x C-q quiet, and every
+setting but autoreload has a widget the inputrc can bind a key to, named
+`neorepl-toggle-` and the setting, like `"\C-xt": neorepl-toggle-taps`.
+What they start as goes in `~/.config/neorepl/config.edn`, or under
+`$XDG_CONFIG_HOME` if that's set, and `NO_COLOR` turns colors off whatever
+it says:
+
+```clojure
+{:eldoc false
+ :autoreload true}
+```
+
 With no server to connect to, `neorepl` starts one for the project, the way
 CIDER's jack-in does, and stops it when the REPL ends. The project's build
 tool runs it, with cider-nrepl: Leiningen for a `project.clj`, the Clojure

@@ -214,19 +214,21 @@
   goes without the pair or eldoc, so they don't stay behind in the
   scrollback. The names of the REPL's commands, a set, show as
   command-styled has them. under is where eldoc's line goes, see
-  show-under."
-  [styles raw? eldoc commands under]
+  show-under. (styles) is the styles to use, and eldoc shows something
+  only while (eldoc?), both as they are at each redisplay."
+  [styles raw? eldoc eldoc? commands under]
   (reify Highlighter
     (highlight [_ reader buffer]
       (if @raw?
         (AttributedString. buffer)
         (let [^LineReader reader reader
+              styles (styles)
               cursor (.cursor (.getBuffer reader))
               lexed (lexer/lex buffer)
               reading? (.isReading reader)]
           (when eldoc
             (show-under reader under buffer
-                        (when-let [pieces (when reading? (eldoc buffer cursor #(redisplay reader)))]
+                        (when-let [pieces (when (and reading? (eldoc?)) (eldoc buffer cursor #(redisplay reader)))]
                           ;; A column to spare, as a terminal can wrap a line
                           ;; that fills the last one.
                           (eldoc-string styles pieces (dec (.getWidth (.getTerminal reader)))))))
@@ -310,11 +312,26 @@
                      done)))))
 
 (defn- bind-widget
-  "Adds f as a widget called name, on keys in the Emacs and vi insert keymaps."
+  "Adds f as a widget called name, on keys in the Emacs and vi insert
+  keymaps, if there are keys. Bound or not, inputrc can bind it, by name."
   [^LineReader reader name keys f]
   (.put (.getWidgets reader) name (widget f))
-  (doseq [keymap [LineReader/EMACS LineReader/VIINS]]
-    (.bind ^KeyMap (.get (.getKeyMaps reader) keymap) (Reference. name) ^CharSequence keys)))
+  (when keys
+    (doseq [keymap [LineReader/EMACS LineReader/VIINS]]
+      (.bind ^KeyMap (.get (.getKeyMaps reader) keymap) (Reference. name) ^CharSequence keys))))
+
+(def ^:private menu-styles
+  [LineReader/COMPLETION_STYLE_STARTING LineReader/COMPLETION_STYLE_DESCRIPTION
+   LineReader/COMPLETION_STYLE_GROUP])
+
+(defn- color-menu
+  "Takes the colors out of the completion menu, unless color?, or puts back
+  the styles it had, by name, from the inputrc or JLine's own. JLine takes
+  a style that comes out as none for no style at all, and uses its own
+  instead."
+  [^LineReader reader color? styles]
+  (doseq [style menu-styles]
+    (.setVariable reader style (if color? (styles style) "fg:default"))))
 
 (defn- terminal
   "The system terminal, or one on input and output for tests."
@@ -353,7 +370,13 @@
   in Emacs' M-x shell. opts:
 
     :history-file  where to keep the history
-    :color?        false for no colors
+    :settings      an atom with the REPL's settings, as settings/defaults
+                   has them, whose :color and :eldoc it follows as they
+                   change
+    :toggles       the settings to bind widgets that toggle them for, maps
+                   with their :name and :key, as settings/all has them
+    :toggle        (toggle name) for toggling the setting called name, a
+                   keyword, which returns what to say about it
     :incomplete?   (incomplete? text) for whether Enter goes on to another
                    line (lexer/incomplete? by default)
     :complete      (complete prefix) for the completions of prefix, as
@@ -362,7 +385,6 @@
                    the input while typing, like the arglists of the
                    function being called, as render/eldoc-line's pieces,
                    calling (refresh) when that changes, from any thread
-    :eldoc?        false to show nothing there after all
     :doc           (doc text cursor) for the documentation C-x C-d shows
     :source        (source text cursor) for the code C-x C-s shows
     :apropos       (apropos text cursor) for what C-x C-a shows
@@ -374,8 +396,8 @@
                    would, $if neorepl taking in what's for neorepl alone
     :input, :output, :width and :type
                    a terminal on these streams instead, for tests"
-  [{:keys [history-file color? incomplete? complete eldoc eldoc? commands edit inputrc input]
-    :or {color? true incomplete? lexer/incomplete? eldoc? true}
+  [{:keys [history-file settings toggles toggle incomplete? complete eldoc commands edit inputrc input]
+    :or {incomplete? lexer/incomplete?}
     :as opts}]
   (when (or input (maybe-terminal?))
     (let [terminal (terminal opts)]
@@ -383,7 +405,7 @@
         (do (.close terminal)
             nil)
         (let [raw? (atom false)
-              styles (if color? colors {})
+              styles #(if (:color @settings) colors {})
               shown (atom nil)
               under {:shown shown
                      :supplier (reify Supplier
@@ -393,19 +415,13 @@
                           (.terminal terminal)
                           (.appName "neorepl")
                           (.parser (parser raw? incomplete?))
-                          (.highlighter (highlighter styles raw? (when eldoc? (some-> eldoc safely)) commands under))
+                          (.highlighter (highlighter styles raw? (some-> eldoc safely) #(:eldoc @settings) commands under))
                           (.variable LineReader/SECONDARY_PROMPT_PATTERN "%P #_=> ")
                           ;; The highlighter shows the pair, rather than JLine
                           ;; moving the cursor to it after a closer is typed.
                           (.variable LineReader/BLINK_MATCHING_PAREN 0)
                           ;; ! is just a character in Clojure code.
                           (.option LineReader$Option/DISABLE_EVENT_EXPANSION true))]
-          (when-not color?
-            ;; The completion menu's. JLine takes a style that comes out
-            ;; as none for no style at all, and uses its own instead.
-            (doseq [style [LineReader/COMPLETION_STYLE_STARTING LineReader/COMPLETION_STYLE_DESCRIPTION
-                           LineReader/COMPLETION_STYLE_GROUP]]
-              (.variable builder style "fg:default")))
           (when history-file
             (.variable builder LineReader/HISTORY_FILE (str history-file)))
           (when inputrc
@@ -416,6 +432,7 @@
                 editor {:terminal terminal
                         :reader reader
                         :raw? raw?
+                        :settings settings
                         :styles styles
                         :lock (Object.)
                         :suspended? (atom false)
@@ -435,7 +452,11 @@
                                ;; JLine's own.
                                (.callWidget reader (str "." LineReader/ACCEPT_LINE)))
                              true)))
-            (when (and eldoc eldoc?)
+            (let [styles (into {} (for [style menu-styles] [style (.getVariable reader style)]))]
+              (color-menu reader (:color @settings) styles)
+              (add-watch settings ::color (fn [_ _ _ new]
+                                            (color-menu reader (:color new) styles))))
+            (when eldoc
               (leaving-under reader under))
             ;; bash's and zsh's key for editing what's typed in EDITOR.
             (when edit
@@ -457,9 +478,14 @@
                                 ;; Straight to JLine: widgets run with its lock held,
                                 ;; and print-text would take the editor's on top.
                                 (.printAbove reader ^AttributedString (if code?
-                                                                        (highlight styles text)
+                                                                        (highlight (styles) text)
                                                                         (AttributedString. ^CharSequence text))))
                               true)))
+            ;; C-x and a Ctrl key, like the rest of neorepl's.
+            (doseq [{setting :name :keys [key]} toggles]
+              (bind-widget reader (str "neorepl-toggle-" (name setting)) (some->> key KeyMap/ctrl (str (KeyMap/ctrl \X)))
+                           #(do (.printAbove reader (AttributedString. ^CharSequence (toggle setting) (style (styles) :notice)))
+                                true)))
             editor))))))
 
 (defn close [{:keys [^Terminal terminal]}]
@@ -545,12 +571,12 @@
 (defn print-text
   "Prints text in the style k names, such as :err, or nil for none."
   [{:keys [styles] :as editor} k text]
-  (emit editor (AttributedString. ^CharSequence text (style styles k))))
+  (emit editor (AttributedString. ^CharSequence text (style (styles) k))))
 
 (defn print-code
   "Prints code highlighted."
   [{:keys [styles] :as editor} code]
-  (emit editor (highlight styles code)))
+  (emit editor (highlight (styles) code)))
 
 (defn fresh-line
   "Ends the line output left unfinished, if any."
@@ -709,7 +735,7 @@
                         (.clear display))
                       (.resize display height width)
                       (.update display
-                               ^List (mapv (partial screen-line styles width) (take height (draw width height)))
+                               ^List (mapv (partial screen-line (styles) width) (take height (draw width height)))
                                0
                                true)))
           previous (.handle terminal Terminal$Signal/WINCH (reify Terminal$SignalHandler

@@ -19,3 +19,6 @@
 
 (defn state-home ^File []
   (from-env "XDG_STATE_HOME" ".local/state"))
+
+(defn config-home ^File []
+  (from-env "XDG_CONFIG_HOME" ".config"))

@@ -30,8 +30,9 @@ issues filed upstream.
 - `lexer.clj`: tells finished forms from unfinished ones and classifies
   tokens. It doesn't read code, on purpose. `repair.clj` fixes delimiters
   from indentation.
-- `jack_in.clj`, `discovery.clj`, `sessions.clj`, `shutdown.clj`, `cli.clj`,
-  `json.clj`, `xdg.clj`: starting servers, finding them, named sessions,
+- `jack_in.clj`, `discovery.clj`, `sessions.clj`, `settings.clj`,
+  `shutdown.clj`, `cli.clj`, `json.clj`, `xdg.clj`: starting servers,
+  finding them, named sessions, the REPL's settings and its config file,
   cleaning up on exit, and the small parts done without libraries.
 
 ## Running things

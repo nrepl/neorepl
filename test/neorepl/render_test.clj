@@ -2,7 +2,8 @@
   (:require [clojure.java.io :as io]
             [clojure.test :refer [are deftest is testing]]
             [neorepl.lexer :as lexer]
-            [neorepl.render :as render]))
+            [neorepl.render :as render]
+            [neorepl.settings :as settings]))
 
 (deftest doc-text-test
   (testing "like clojure.repl/doc"
@@ -201,3 +202,13 @@
     {:phase "return" :name "my.app/g" :depth 1 :value "{:a 1}"} "│ └─→ {:a 1}"
     {:phase "throw" :name "my.app/g" :depth 1 :error "clojure.lang.ExceptionInfo: Boom"}
     "│ └─✗ clojure.lang.ExceptionInfo: Boom"))
+
+(deftest settings-text-test
+  (is (= (str "autoreload     off  Reload what changed before each evaluation\n"
+              "color          on   Colors, unless NO_COLOR is set\n"
+              "eldoc          on   The called function's arglists, under the input (C-x C-h)\n"
+              "quiet          off  Leave out server output, taps and trace events (C-x C-q)\n"
+              "server-output  on   What the server's System/out and System/err get\n"
+              "taps           on   The values sent to tap>")
+         (render/settings-text settings/defaults)))
+  (is (= "eldoc off" (render/setting-text :eldoc false))))
