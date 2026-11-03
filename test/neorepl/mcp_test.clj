@@ -183,6 +183,18 @@
          (let [{{:keys [isError] :as result} :result} (receive)]
            (is (true? isError))
            (is (= "Not the name of a namespace: a/b" (text {:result result}))))))
+     (testing "after reloading what changed"
+       (let [before @test-server/reloads]
+         (send (tool-call 17 "eval" {:code "@neorepl.test-server/reloads" :reload true}))
+         (is (= (str (inc before)) (text (receive))))
+         (testing "and not when that fails"
+           (let [{{:keys [isError] :as result} :result}
+                 (test-server/answering-reloads :error
+                   #(do (send (tool-call 18 "eval" {:code "(swap! neorepl.test-server/reloads inc)" :reload true}))
+                        (receive)))]
+             (is (true? isError))
+             (is (str/ends-with? (text {:result result}) "Reloading what changed failed")))
+           (is (= (inc before) @test-server/reloads)))))
      (testing "in the session called agent, unless the call names another"
        (is (str/includes? (slurp (sessions-file)) "\"agent\"")))
      (testing "a lookup"

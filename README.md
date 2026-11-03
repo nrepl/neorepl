@@ -102,6 +102,7 @@ runtime busy.
 neorepl eval '(+ 1 2)'
 neorepl eval --format json -f script.clj
 neorepl eval --ns my.app '(start)'
+neorepl eval --reload '(my.app/handler {})'
 echo '(range 3)' | neorepl eval -
 ```
 
@@ -110,6 +111,10 @@ leaves the session in its own. `-f FILE --line N:COL` evaluates only the
 top-level form at that spot of FILE, in the file's namespace, which is how an
 editor without a plugin evaluates the form at the cursor:
 [doc/editors.md](doc/editors.md) has setups for Neovim, Emacs and Helix.
+`--reload` first reloads the namespaces whose files changed, and the ones
+that use them, so code edited anywhere is what runs, keeping what `defonce`
+defined. That takes cider-nrepl, whose clj-reload notes what changes from
+the first reload on, which neorepl does as soon as a server it starts is up.
 
 Evaluations share a session, so `*ns*`, `*1` and `*e` carry over from one
 call to the next. `--session NAME` keeps separate ones apart, `neorepl

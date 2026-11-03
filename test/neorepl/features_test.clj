@@ -492,7 +492,51 @@
           (is (str/includes? err "Could not locate no/such/ns"))))
       (testing "with the timeout covering the loading too"
         (is (= "timeout" (:status (evaluate ":never" "neorepl.slow-ns"
-                                            {:op "eval" :code "(ns neorepl.slow-ns) (Thread/sleep 5000)"} {:timeout 0.5}))))))))
+                                            {:op "eval" :code "(ns neorepl.slow-ns) (Thread/sleep 5000)"} {:timeout 0.5})))))
+      (testing "after reloading what changed"
+        (let [before @test-server/reloads]
+          (is (= [(str (inc before))] (:values (evaluate "@neorepl.test-server/reloads" nil nil {:reload? true}))))
+          (testing "and not when that fails"
+            (let [{:keys [status message values]}
+                  (test-server/answering-reloads :error
+                    #(evaluate "(swap! neorepl.test-server/reloads inc)" nil nil {:reload? true}))]
+              (is (= "error" status))
+              (is (= "Reloading what changed failed" message))
+              (is (empty? values)))
+            (is (= (inc before) @test-server/reloads))))))))
+
+(deftest reload-changed-test
+  (with-client [client {:port *port*}]
+    (let [session (nrepl/clone-session client)
+          printed (atom [])
+          reload #(features/reload-changed client session {:collect? true :on-response (partial swap! printed conj)})
+          values #(keep :value (nrepl/request client {:op "eval" :session session :code %}))]
+      (testing "nothing, once it's reloaded"
+        (is (nil? (reload))))
+      (testing "with the session back in its namespace, made anew, and *1, *2 and *3 as they were"
+        (values "(in-ns 'neorepl.reloaded)")
+        (values "1 2 3")
+        (reload)
+        (is (= ["[true 3 2 1]"] (values (str "[reloaded-" @test-server/reloads " *1 *2 *3]")))))
+      (testing "the server's error, when a file doesn't compile"
+        (let [{:keys [status err message]} (test-server/answering-reloads :error reload)]
+          (is (= "error" status))
+          (is (str/includes? err "Unable to resolve symbol: whom"))
+          (is (= "Reloading what changed failed" message))))
+      (testing "and in a ClojureScript session, that it takes Clojure, in place of what the server says"
+        (reset! printed [])
+        (let [{:keys [status clojurescript? message]} (test-server/answering-reloads :clojure-only reload)]
+          (is (= "error" status))
+          (is (true? clojurescript?))
+          (is (= "Reloading what changed takes a Clojure session" message))
+          (is (not-any? :err @printed))))
+      (testing "that it takes cider-nrepl"
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo #"^Reloading what changed takes cider-nrepl on the server$"
+                              (features/reload-changed (without client "cider.clj-reload/reload") session {}))))
+      (testing "the first reload, in the background, for a server neorepl starts"
+        (let [before @test-server/reloads]
+          (.join ^Thread (features/note-changes "127.0.0.1" *port*) 5000)
+          (is (= (inc before) @test-server/reloads)))))))
 
 (deftest run-tests-test
   (with-client [client {:port *port*}]
