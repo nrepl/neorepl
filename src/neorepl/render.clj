@@ -290,6 +290,11 @@
     (or (seq nses) (seq vars)) (str/join "\n" (concat vars (map #(str "every function in " %) nses)))
     :else "Nothing's traced"))
 
+(defn tap-text
+  "A value tapped, as features/subscribe-taps summarizes it."
+  [{:keys [summary]}]
+  (str "tap> " summary))
+
 (defn trace-event-text
   "A traced call, its return or what it threw, the way orchard prints them,
   a line under the calls it's in: the call, with the arguments, └─→ and the

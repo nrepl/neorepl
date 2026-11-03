@@ -398,6 +398,11 @@
   (testing "the default command"
     (is (= "user=> 3\nuser=> \n" (:out (run-in *dir* "(+ 1 2)\n" "-p" (str *port*)))))))
 
+(deftest tap-test
+  (testing "the REPL without a terminal printing the value tapped last"
+    (is (str/includes? (:out (run-in *dir* "(tap> 42) (Thread/sleep 1000)\n,tap\n" "repl" "-p" (str *port*)))
+                       "Value: 42"))))
+
 (deftest jack-in-test
   (testing "without a server, the REPL starts one for the project"
     (call-with-temp-dir

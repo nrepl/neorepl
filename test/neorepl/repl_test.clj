@@ -798,6 +798,22 @@
         (reset! test-server/refuse-trace-subscriptions? false)
         (features/untrace-all client)))))
 
+(deftest tap-test
+  (call-with-repl {}
+    (fn [type screen]
+      (type ",tap\r")
+      (is (screen #"Nothing's been tapped yet\nuser=> $"))
+      (testing "each value tapped, above the prompt"
+        (type "(do (future (Thread/sleep 200) (tap> {:tapped [1 2]})) nil)\r")
+        (is (screen #"tap> \{:tapped \[1 2\]\}\nuser=> $")))
+      (testing "the last one inspected"
+        (type ",tap\r")
+        (is (screen #":tapped(?s).*q quit"))
+        (type "q")
+        (is (screen #"user=> $")))))
+  (testing "the subscription over once the REPL is"
+    (is (zero? (test-server/tap-subscribers)))))
+
 (deftest inspect-test
   (let [{:keys [out]}
         (call-with-repl {}

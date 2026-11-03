@@ -11,6 +11,8 @@
             [neorepl.features :as features]
             [neorepl.jack-in :as jack-in]
             [neorepl.json :as json]
+            [neorepl.nrepl :as nrepl]
+            [neorepl.render :as render]
             [neorepl.servers :as servers :refer [*dir* project-dir run run-with]]
             [neorepl.test-server :as test-server :refer [spit-file with-client]]))
 
@@ -243,6 +245,26 @@
            (is (re-matches #"#:demo\{:age \d+\}\n" (features/spec-example client ":demo/person" 80 {})))
            (is (thrown-with-msg? clojure.lang.ExceptionInfo #"^Generating examples takes test.check on the server$"
                                  (features/spec-example client ":demo/person" 80 {})))))))))
+
+(deftest taps-test
+  (on-each-server
+   (fn [server]
+     (let [tapped (promise)]
+       (with-client [client {:port (discovery/read-port (io/file (project-dir server) ".nrepl-port"))
+                             :on-unclaimed #(some->> (:cider/tap-value %) (deliver tapped))}]
+         (if (= :bb server)
+           (is (nil? (features/subscribe-taps client)))
+           (let [subscription (features/subscribe-taps client)
+                 session (nrepl/clone-session client)]
+             (try
+               (run server "eval" "(tap> {:tapped [1 2]})")
+               (let [{:keys [summary idx]} (deref tapped 5000 nil)]
+                 (is (= "{:tapped [1 2]}" summary))
+                 (is (str/includes? (render/inspector-text (:lines (features/inspect-tap client session idx 10)))
+                                    ":tapped")))
+               (finally
+                 (features/unsubscribe-taps client subscription)
+                 (nrepl/close-session client session))))))))))
 
 (deftest system-output-test
   (on-each-server
