@@ -2,7 +2,8 @@
   "What the features find, as text."
   (:require [clojure.string :as str]
             [neorepl.cli :as cli]
-            [neorepl.lexer :as lexer]))
+            [neorepl.lexer :as lexer]
+            [neorepl.settings :as settings]))
 
 (defn doc-text
   "info as text, the way clojure.repl/doc prints it, minus the dashes."
@@ -294,6 +295,19 @@
   "A value tapped, as features/subscribe-taps summarizes it."
   [{:keys [summary]}]
   (str "tap> " summary))
+
+(defn setting-text
+  "That the setting called k is on, or off."
+  [k on?]
+  (str (name k) (if on? " on" " off")))
+
+(defn settings-text
+  "settings, the REPL's, as ,set lists them: a line each, with whether it's
+  on, what it is, and the key that toggles it, if any."
+  [settings]
+  (str/join "\n" (cli/columns (for [{:keys [name help key]} settings/all]
+                                [(clojure.core/name name) (if (get settings name) "on" "off")
+                                 (cond-> help key (str " (C-x C-" (str/lower-case (str key)) ")"))]))))
 
 (defn profile-summary-text
   "The table in the inspector's view of what profiling measured, as

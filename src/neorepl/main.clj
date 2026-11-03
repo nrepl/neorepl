@@ -15,6 +15,7 @@
             [neorepl.render :as render]
             [neorepl.repair :as repair]
             [neorepl.sessions :as sessions]
+            [neorepl.settings :as settings]
             [neorepl.shutdown :as shutdown]
             [neorepl.xdg :as xdg])
   (:import (java.io BufferedReader File)
@@ -201,12 +202,13 @@ when it times out.")
 (defn- with-started-server
   "Calls f with a client for a server started for project, the way
   with-server does. What the server prints goes where output nobody asked
-  for goes, like an evaluation's that comes late, and to stderr before
-  something takes that over and after f, so the client :shares-output?
-  with the server. The client has the thread that has clj-reload start
-  :noting-changes too, if there's one. When the connection drops because
-  the server's gone, it says how that ended, and when the server runs
-  another cider-nrepl than jack-in adds, it says that first."
+  for goes, like an evaluation's that comes late, as what the server
+  prints itself, and to stderr before something takes that over and after
+  f, so the client :shares-output? with the server. The client has the
+  thread that has clj-reload start :noting-changes too, if there's one.
+  When the connection drops because the server's gone, it says how that
+  ended, and when the server runs another cider-nrepl than jack-in adds,
+  it says that first."
   [project options f]
   (let [output (atom print-err-line)]
     (with-server project options #(@output %)
@@ -218,7 +220,8 @@ when it times out.")
              (assoc :project-dir (:dir project) :shares-output? true :noting-changes noting-changes))
          (fn [client]
            (some-> (jack-in/other-cider-nrepl (:tool project) (:cider-version client)) warn)
-           (reset! output #(nrepl/unclaimed client {:err (str % "\n")}))
+           ;; As nREPL's forward-system-output does.
+           (reset! output #(nrepl/unclaimed client {:err (str % "\n") :source "system"}))
            (try
              (f client)
              (catch clojure.lang.ExceptionInfo e
@@ -1132,6 +1135,15 @@ drops and 130 when Ctrl-C ends it, as it does without a terminal."
   neorepl --session default
   neorepl --aliases :dev:test"))
 
+(defn- start-settings
+  "What the REPL's settings start as, where they're not the defaults: what
+  the ctx's :settings-file sets, under its :settings. It warns about what
+  the file has wrong."
+  [{:keys [settings-file] :as ctx}]
+  (let [{:keys [problems] from-file :settings} (settings/read-file settings-file)]
+    (run! warn problems)
+    (merge from-file (:settings ctx))))
+
 (defn- repl-command [{:keys [session] :as options} args {:keys [dir sessions-file] :as ctx}]
   (reject-args args)
   (with-repl-client options dir
@@ -1147,7 +1159,7 @@ drops and 130 when Ctrl-C ends it, as it does without a terminal."
             ;; There's nothing to close when the connection is gone.
             (try (nrepl/close-session client id) (catch Exception _ nil)))
          #(do (start client id (-> (select-keys ctx [:dir :history-dir :terminal :editor-command :sources-dir :sessions-file])
-                                   (assoc :session-name session)))
+                                   (assoc :session-name session :settings (start-settings ctx))))
               0))))))
 
 (def ^:private server-options
@@ -1319,7 +1331,8 @@ version."))
   "Runs the neorepl command line args and returns the exit status. ctx has
   the :dir to look for port files in, the :sessions-file, the REPL's
   :history-dir, the :terminal options for its line editor, without which the
-  REPL is the plain kind, and the :editor-command ,edit uses, with the
+  REPL is the plain kind, the :settings-file, the config file, and the
+  :settings that win over it, and the :editor-command ,edit uses, with the
   :sources-dir to copy files out of jars into for it."
   [args ctx]
   (let [[command & more] args
@@ -1355,11 +1368,13 @@ version."))
   (let [status (run args {:dir (System/getProperty "user.dir")
                           :sessions-file (io/file (xdg/cache-home) "neorepl" "sessions.edn")
                           :history-dir (io/file (xdg/state-home) "neorepl" "history")
-                          ;; See https://no-color.org.
-                          :terminal {:color? (str/blank? (System/getenv "NO_COLOR"))
-                                     ;; Where readline looks.
-                                     :inputrc (or (not-empty (System/getenv "INPUTRC"))
+                          ;; Where readline looks.
+                          :terminal {:inputrc (or (not-empty (System/getenv "INPUTRC"))
                                                   (io/file (System/getProperty "user.home") ".inputrc"))}
+                          :settings-file (io/file (xdg/config-home) "neorepl" "config.edn")
+                          ;; See https://no-color.org.
+                          :settings (when-not (str/blank? (System/getenv "NO_COLOR"))
+                                      {:color false})
                           :editor-command (some #(not-empty (System/getenv %)) ["VISUAL" "EDITOR"])
                           :sources-dir (io/file (xdg/cache-home) "neorepl" "sources")})]
     (flush)

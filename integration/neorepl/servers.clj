@@ -120,12 +120,14 @@
 
 (defn forwards-output?
   "Whether server, whose project tool started, sends what a thread no
-  session started prints to a client that asks for it, within 5s."
+  session started prints to a client that asks for it, within 5s, with the
+  :source system, by which the REPL's settings leave it out."
   [server tool]
   (let [printed (atom [])
         port-file (io/file (project-dir server) (:port-file (jack-in/tool tool)))]
     (with-client [client {:port (discovery/read-port port-file)
-                          :on-unclaimed #(some->> (:out %) (swap! printed conj))}]
+                          :on-unclaimed #(when (= "system" (:source %))
+                                           (some->> (:out %) (swap! printed conj)))}]
       (and (features/forward-system-output client)
            (do (nrepl/request client {:op "eval" :code "(.start (Thread. #(println \"printed elsewhere\")))"})
                (loop [tries 250]

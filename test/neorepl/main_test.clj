@@ -403,6 +403,20 @@
     (is (str/includes? (:out (run-in *dir* "(tap> 42) (Thread/sleep 1000)\n,tap\n" "repl" "-p" (str *port*)))
                        "Value: 42"))))
 
+(deftest settings-test
+  (call-with-temp-dir
+   (fn [dir]
+     (let [file (spit-file dir "config.edn" "{:taps false :color true :eldok false}")]
+       (testing "the REPL starting with what the config file sets, and saying what it has wrong"
+         (let [{:keys [out err]} (test-server/run-in {:dir *dir* :sessions-file (sessions-file) :settings-file file
+                                                      ;; As NO_COLOR has it.
+                                                      :settings {:color false}}
+                                                     ",set\n" "repl" "-p" (str *port*))]
+           (is (re-find #"(?m)^taps +off " out))
+           (testing "but what's set otherwise, like NO_COLOR, winning"
+             (is (re-find #"(?m)^color +off " out)))
+           (is (str/includes? err (str "neorepl: " file " sets :eldok, which is no setting\n")))))))))
+
 (deftest jack-in-test
   (testing "without a server, the REPL starts one for the project"
     (call-with-temp-dir
@@ -417,9 +431,17 @@
          (when-not (test-server/windows?)
            (testing "and stops it after"
              (is (not (.exists (io/file dir ".nrepl-port"))))))
-         (testing "passing on what it prints, so it gets no output forwarded"
-           (is (true? (binding [*err* (java.io.StringWriter.)]
-                        (#'main/with-started-server {:dir (str dir) :tool "bb"} {} :shares-output?)))))))))
+         (testing "passing on what it prints, as what the server prints itself, so it gets no output forwarded"
+           (let [{:keys [shares-output? passed-on]}
+                 (binding [*err* (java.io.StringWriter.)]
+                   (#'main/with-started-server {:dir (str dir) :tool "bb"} {}
+                    (fn [client]
+                      (let [passed-on (promise)]
+                        (nrepl/on-unclaimed! client #(when (= "passed on\n" (:err %)) (deliver passed-on %)))
+                        (nrepl/request client {:op "eval" :code "(.println System/out (str \"passed\" \" on\"))"})
+                        {:shares-output? (:shares-output? client) :passed-on (deref passed-on 5000 nil)}))))]
+             (is (true? shares-output?))
+             (is (= "system" (:source passed-on)))))))))
   (testing "saying how it ended, when it does before the REPL"
     (call-with-temp-dir
      (fn [dir]

@@ -462,6 +462,11 @@
   sends what print-system! prints to."
   (atom nil))
 
+(defn forwarding-request
+  "The last forward-system-output message wrap-fake-system-output got."
+  []
+  @forwarding)
+
 (defn print-system!
   "Has wrap-fake-system-output send text, as printed to System/out, or to
   System/err when stream is :err, to the last session that asked for it."

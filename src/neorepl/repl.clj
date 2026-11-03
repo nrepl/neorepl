@@ -14,6 +14,7 @@
             [neorepl.ns-browser :as ns-browser]
             [neorepl.render :as render]
             [neorepl.sessions :as sessions]
+            [neorepl.settings :as settings]
             [neorepl.shutdown :as shutdown]
             [neorepl.spec-browser :as spec-browser]
             [neorepl.stacktrace :as stacktrace])
@@ -61,7 +62,8 @@
                      (.interrupt thread)
                      thread))}))
 
-(declare edit enter-ns switch-session inspect inspect-tapped run-tests browse-error autoreload browse-specs)
+(declare edit enter-ns switch-session inspect inspect-tapped run-tests browse-error autoreload change-setting
+         browse-specs)
 
 (def ^:private commands
   "The REPL's commands, the CIDER way: a comma, which Clojure reads as
@@ -95,6 +97,9 @@
            {:name "autoreload" :arg "on|off" :optional? true
             :help "Reload what changed before each evaluation, or stop"
             :run #(autoreload %1 %2)}
+           {:name "set" :arg "NAME [on|off]" :optional? true
+            :help "List the settings, or turn NAME on or off, or the other way"
+            :run #(change-setting %1 %2)}
            {:name "help" :help "List the commands"}
            {:name "quit" :help "Leave the REPL"}]))
 
@@ -326,22 +331,44 @@
 
 (defn- autoreload
   "Turns reloading what changed before each evaluation on or off, as arg
-  says, or the other way from how it is without it. The REPL's :reloading
-  says which. Turning it on reloads right away, the way the REPL :evaluates
-  code, which is when clj-reload starts noting changes on a server that
-  hasn't reloaded yet, and leaves it off when that fails. Returns what to
-  print, as command-output does."
-  [{:keys [client session evaluate reloading]} arg]
-  (case (or arg (if @reloading "off" "on"))
-    "off" (do (reset! reloading false)
+  says, or the other way from how it is without it. The REPL's :settings
+  say which, as their :autoreload. Turning it on reloads right away, the
+  way the REPL :evaluates code, which is when clj-reload starts noting
+  changes on a server that hasn't reloaded yet, and leaves it off when that
+  fails. Returns what to print, as command-output does."
+  [{:keys [client session evaluate settings]} arg]
+  (case (if arg (settings/parse-value arg) (not (:autoreload @settings)))
+    false (do (swap! settings assoc :autoreload false)
               (out "Not reloading before evaluations"))
-    "on" (cond
-           @reloading (out "Already reloading what changed before each evaluation")
+    true (cond
+           (:autoreload @settings) (out "Already reloading what changed before each evaluation")
            ;; Having said why.
            (evaluate #(features/reload-changed client session %)) (out "Not reloading before evaluations")
-           :else (do (reset! reloading true)
+           :else (do (swap! settings assoc :autoreload true)
                      (out "Reloading what changed before each evaluation")))
     (out "Usage: ,autoreload [on|off]")))
+
+(defn- set-setting
+  "Sets the setting called k on or off in settings, an atom, as on? says,
+  or the other way from how it is when it's nil, and says so."
+  [settings k on?]
+  (render/setting-text k (k (swap! settings update k #(if (nil? on?) (not %) on?)))))
+
+(defn- change-setting
+  "Lists the REPL's :settings without arg, or sets the one arg names as the
+  rest of arg says, on or off, or the other way from how it is without it,
+  as autoreload does for :autoreload. Returns what to print, as
+  command-output does."
+  [{:keys [settings] :as state} arg]
+  (if-let [[name value] (some-> arg (str/split #"\s+" 2))]
+    (let [k (keyword name)
+          on? (some-> value settings/parse-value)]
+      (cond
+        (not (contains? settings/defaults k)) (out (str "No setting called " name ", ,set lists them"))
+        (and value (nil? on?)) (out (str "Usage: ,set " name " [on|off]"))
+        (= :autoreload k) (autoreload state value)
+        :else (out (set-setting settings k on?))))
+    (out (render/settings-text @settings))))
 
 (defn- browse-namespaces
   "Lets the user :browse the namespaces called names, the project's, or all
@@ -458,9 +485,9 @@
   that have the REPL :show-traces and :hide-traces, a promise of the
   subscription to :taps and an atom with the summary of the value :tapped
   last, for ,tap, the :sessions-file and
-  the REPL's :own session, where it started, for ,sessions, an atom saying
-  whether it's :reloading what changed before each evaluation, and a
-  function to run lookups :quietly with, as editor/quietly takes f. What to
+  the REPL's :own session, where it started, for ,sessions, an atom with
+  its :settings, for ,set and ,autoreload, and a function to run lookups
+  :quietly with, as editor/quietly takes f. What to
   print can have the :ns the REPL goes on in, or the :session and its
   :session-name too, as switch-session says."
   [{:keys [client quietly] :as state} name arg]
@@ -503,7 +530,10 @@
   else they need, and can switch sessions. Responses go to print-response,
   late ones and what commands print too, and result messages to
   print-message. Evaluations, and commands' lookups, run through quietly,
-  if there is one, as editor/quietly takes f.
+  if there is one, as editor/quietly takes f. The :settings, an atom, say
+  what gets printed above the prompt, and whether what changed gets
+  reloaded before each evaluation, which :autoreload? turns on at the
+  start, as ,autoreload does.
 
   What an interrupted evaluation says from then on is left out, since it
   comes from it dying: an InterruptedException, or code carrying on after a
@@ -511,7 +541,7 @@
   does, even once the next evaluation's started. So is what evaluations say
   once neorepl's exiting, which interrupts them."
   [client session {:keys [running interrupted command-thread]}
-   {:keys [read-code read-line width print-response print-message session-name quietly]
+   {:keys [read-code read-line width print-response print-message session-name quietly settings autoreload?]
     :or {quietly #(%)}
     :as io}]
   (let [print-response #(let [stopped @interrupted
@@ -539,19 +569,21 @@
                          (features/unsubscribe-traces client subscription)
                          (catch Exception _)))
         ;; The session that has the server forward what gets printed on
-        ;; threads no session started.
-        forwarding (atom nil)
+        ;; threads no session started, once it's forced, which is once
+        ;; that's shown.
+        forwarding (delay (try
+                            (features/forward-system-output client)
+                            (catch clojure.lang.ExceptionInfo _ nil)))
+        shows-server-output? #(and (:server-output %) (not (:quiet %)))
         ;; The subscription to what gets tapped, once there's an answer, and
         ;; the summary of the value tapped last.
         taps (promise)
         tapped (atom nil)
-        ;; Whether what changed gets reloaded before each evaluation.
-        reloading (atom false)
         ;; Evaluates with (run opts) in session, opts being
         ;; evaluation/evaluate's, after reloading what changed when it's
         ;; reloading, and returns the result after printing its message.
         evaluate (fn [session run]
-                   (let [run (if @reloading
+                   (let [run (if (:autoreload @settings)
                                ;; Nothing to reload for ClojureScript.
                                #(or (let [failed (features/reload-changed client session %)]
                                       (when-not (:clojurescript? failed) failed))
@@ -590,18 +622,24 @@
                      result))]
     ;; Late output comes on the client's reader thread, which mustn't wait
     ;; for the terminal: it has the responses lookups are waiting for.
-    ;; So do trace events, and taps.
-    (nrepl/on-unclaimed! client (fn [{event :cider/trace-event value :cider/tap-value :as response}]
+    ;; So do trace events, and taps, and what the server prints itself,
+    ;; unless the settings leave them out.
+    (nrepl/on-unclaimed! client (fn [{event :cider/trace-event value :cider/tap-value :keys [source] :as response}]
                                   (some->> value (reset! tapped))
-                                  (send-off late (fn [_]
-                                                   (print-response (cond
-                                                                     event (out (render/trace-event-text event))
-                                                                     value (out (render/tap-text value))
-                                                                     :else response))))))
-    ;; So does what gets printed on threads no session started.
-    (try
-      (reset! forwarding (features/forward-system-output client))
-      (catch clojure.lang.ExceptionInfo _))
+                                  (let [{:keys [quiet taps] :as current} @settings]
+                                    (when-let [shown (cond
+                                                       event (when-not quiet (out (render/trace-event-text event)))
+                                                       value (when (and taps (not quiet)) (out (render/tap-text value)))
+                                                       (= "system" source) (when (shows-server-output? current) response)
+                                                       :else response)]
+                                      (send-off late (fn [_] (print-response shown)))))))
+    ;; nREPL keeps forwarding till the connection's gone, so leaving it out
+    ;; again only leaves it out.
+    (when (shows-server-output? @settings)
+      (force forwarding))
+    (add-watch settings ::server-output (fn [_ _ old new]
+                                          (when (and (shows-server-output? new) (not (shows-server-output? old)))
+                                            (future (force forwarding)))))
     ;; Without waiting, since cider-nrepl loads what it takes the first time.
     (future
       (deliver taps (try
@@ -615,11 +653,18 @@
             (try
               (features/unsubscribe-taps client subscription)
               (catch Exception _)))
-          (when-let [session @forwarding]
+          (when-let [session (when (realized? forwarding) @forwarding)]
             (try
               (nrepl/close-session client session)
               (catch Exception _))))
      (fn []
+       ;; Turned on in the config file, it starts off the way ,autoreload
+       ;; turns it on, saying so only when that fails.
+       (when autoreload?
+         (let [output (command-output (merge io {:client client :session session :evaluate (partial evaluate session)})
+                                      "autoreload" "on")]
+           (when-not (:autoreload @settings)
+             (print-response output))))
        (loop [{:keys [ns session] :as place} (assoc own :ns (nrepl/evaluation-ns client session))
               pending nil]
          (let [code (or pending (read-code place))
@@ -628,7 +673,7 @@
                         (reset! command-thread (Thread/currentThread))
                         (try
                           (command-output (merge io place {:client client :evaluate (partial evaluate session)
-                                                           :test-errors test-errors :reloading reloading
+                                                           :test-errors test-errors
                                                            :show-traces show-traces :hide-traces hide-traces
                                                            :taps taps :tapped tapped :own own :quietly quietly})
                                           name arg)
@@ -852,12 +897,21 @@
     :sources-dir  where ,edit copies the files in jars it opens to
     :sessions-file
                   the named sessions' file, for ,sessions
-    :session-name session's name in it, if it has one"
+    :session-name session's name in it, if it has one
+    :settings     what the REPL's settings start as, where they're not
+                  settings/defaults"
   [client session {:keys [terminal history-dir dir editor-command] :as opts}]
-  (let [{:keys [in-ns] :as lookups} (lookups client)]
+  (let [{:keys [in-ns] :as lookups} (lookups client)
+        {:keys [autoreload] :as start} (merge settings/defaults (:settings opts))
+        ;; Autoreload's off till run-loop turns it on, which can fail.
+        settings (atom (assoc start :autoreload false))
+        opts (assoc opts :settings settings :autoreload? autoreload)]
     (if-let [editor (some-> terminal
                             (merge (select-keys lookups [:complete :eldoc :doc :source :apropos])
                                    {:incomplete? incomplete?
+                                    :settings settings
+                                    :toggles (remove #(false? (:toggle? %)) settings/all)
+                                    :toggle #(set-setting settings % nil)
                                     :commands (set (map :name commands))
                                     :edit (partial edit-text editor-command)
                                     :history-file (history-file history-dir (or (:project-dir client) dir))})

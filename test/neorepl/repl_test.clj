@@ -10,6 +10,7 @@
             [neorepl.nrepl :as nrepl]
             [neorepl.repl :as repl]
             [neorepl.sessions :as sessions]
+            [neorepl.settings :as settings]
             [neorepl.test-server :as test-server :refer [*port* call-with-temp-dir lf with-client]])
   (:import (java.io ByteArrayInputStream ByteArrayOutputStream PipedInputStream PipedOutputStream)
            (org.jline.reader CompletingParsedLine Parser Parser$ParseContext)
@@ -32,17 +33,20 @@
       (str/replace #"\u001b\(0([^\u001b]*)\u001b\(B" #(str/escape (second %) line-drawing))
       (str/replace #"\u001b\[[0-9;?]*[A-Za-z]|\u001b[=>]|\r" "")))
 
-(defn- call-with-repl
-  "Starts a REPL on a fake terminal, with the editor options in opts, and
-  calls (f type screen): type types a string, screen waits for a regex to
-  show up in the output, ANSI codes stripped, and returns it. Then ends the
-  REPL with Ctrl-D and returns its raw output and the history file's
-  contents. The named sessions are in opts' :sessions-file, if it has one,
-  and its :editor-command is the REPL's.
+(def ^:private setting-names (keys settings/defaults))
 
-  Eldoc is off unless opts say :eldoc? true, since what it shows after the
+(defn- call-with-repl
+  "Starts a REPL on a fake terminal, with the editor options and the
+  settings in opts, and calls (f type screen): type types a string, screen
+  waits for a regex to show up in the output, ANSI codes stripped, and
+  returns it. Then ends the REPL with Ctrl-D and returns its raw output and
+  the history file's contents. The named sessions are in opts'
+  :sessions-file, if it has one, its :editor-command is the REPL's, and its
+  :settings-file the config file.
+
+  Eldoc is off unless opts say :eldoc true, since what it shows after the
   cursor gets in the way of reading the screen, and so are colors unless
-  they say :color? true, since showing the delimiter that pairs with the
+  they say :color true, since showing the delimiter that pairs with the
   one at the cursor redraws the line."
   [opts f]
   (call-with-temp-dir
@@ -55,8 +59,12 @@
                                      :sessions-file (or (:sessions-file opts) (io/file dir "sessions.edn"))
                                      :history-dir (io/file dir "history")
                                      :editor-command (:editor-command opts)
-                                     :terminal (merge {:input in :output out :width 80 :eldoc? false :color? false}
-                                                      (dissoc opts :sessions-file :editor-command))}))
+                                     :settings-file (:settings-file opts)
+                                     :settings (merge {:eldoc false :color false}
+                                                      (select-keys opts setting-names))
+                                     :terminal (merge {:input in :output out :width 80}
+                                                      (apply dissoc opts :sessions-file :editor-command :settings-file
+                                                             setting-names))}))
              type (fn [s]
                     (.write keys (.getBytes ^String s "UTF-8"))
                     (.flush keys))
@@ -80,7 +88,7 @@
 (deftest repl-test
   (testing "evaluating"
     (let [{:keys [out history]}
-          (call-with-repl {:color? true}
+          (call-with-repl {:color true}
             (fn [type screen]
               (type "(+ 40 2)\r")
               (is (screen #"(?m)^42\nuser=> $"))))]
@@ -108,13 +116,13 @@
           (type "\u001b[200~(let [a 2]\r a)\u001b[201~\r")
           (is (screen #"#_=>  a\)\n2\nuser=> $"))))))
   (testing "special forms in bold, the macros that read like them too"
-    (let [{:keys [out]} (call-with-repl {:color? true}
+    (let [{:keys [out]} (call-with-repl {:color true}
                           (fn [type screen]
                             (type "(-> 1 inc)\r")
                             (screen #"(?m)^2\nuser=> $")))]
       (is (str/includes? out "\u001b[34;1m->"))))
   (testing "commands highlighted"
-    (let [{:keys [out]} (call-with-repl {:color? true}
+    (let [{:keys [out]} (call-with-repl {:color true}
                           (fn [type screen]
                             (type ",doc map")
                             (screen #",doc map$")
@@ -135,7 +143,7 @@
         (type "(do (in-ns 'term.scratch) nil)\r")
         (is (screen #"term\.scratch=> $")))))
   (testing "no colors"
-    (let [{:keys [out]} (call-with-repl {:color? false}
+    (let [{:keys [out]} (call-with-repl {:color false}
                           (fn [type screen]
                             (type "42\r")
                             (screen #"(?m)^42\nuser=> $")))]
@@ -145,7 +153,7 @@
   (let [typed (fn [line end]
                 ;; What the REPL wrote, in color, as line was typed and then
                 ;; end, Enter or Ctrl-C.
-                (:out (call-with-repl {:color? true}
+                (:out (call-with-repl {:color true}
                         (fn [type screen]
                           (type line)
                           ;; JLine redraws from the opener the pair
@@ -176,7 +184,7 @@
     (testing "and so does one with nothing to close"
       (is (str/includes? (submitted ":a)") "\u001b[31m)")))
     (testing "not without colors"
-      (let [{:keys [out]} (call-with-repl {:color? false}
+      (let [{:keys [out]} (call-with-repl {:color false}
                             (fn [type screen]
                               (type "(+ 1 2)\r")
                               (screen #"(?m)^3\nuser=> $")))]
@@ -194,13 +202,18 @@
      (testing "and so do neorepl's own, like highlighting input past 1000 characters"
        (let [line (str "(str \"" (apply str (repeat 1100 "a")) "\")")
              {:keys [out]} (call-with-repl {:inputrc (test-server/spit-file dir "long" "$if neorepl\n  set features-max-buffer-size 10000\n$endif\n")
-                                            :color? true}
+                                            :color true}
                              (fn [type screen]
                                (type line)
                                (screen #"\)$")
                                (type "\r")
                                (screen #"\nuser=> $")))]
-         (is (str/includes? out "\u001b[7m(")))))))
+         (is (str/includes? out "\u001b[7m("))))
+     (testing "with keys for neorepl's widgets, toggling settings among them"
+       (call-with-repl {:inputrc (test-server/spit-file dir "taps" "$if neorepl\n  \"\\C-xt\": neorepl-toggle-taps\n$endif\n")}
+         (fn [type screen]
+           (type "\u0018t")
+           (is (screen #"taps off\nuser=> $"))))))))
 
 (deftest edit-input-test
   (testing "C-x C-e edits the input in the editor"
@@ -431,13 +444,28 @@
                              (.rawWordLength ^CompletingParsedLine line)]))
       (is (= "str/join" (str (.escape ^CompletingParsedLine line "str/join" false))))))
   (testing "the completion menu goes without colors too"
-    (let [{:keys [out]} (call-with-repl {:color? false}
+    (let [{:keys [out]} (call-with-repl {:color false}
                           (fn [type screen]
                             (type "(map-")
                             (type "\t")
                             (is (screen #"map-indexed"))
                             (type "\u0003")))]
       (is (not (re-find #"\u001b\[[0-9;]*m" out)))))
+  (testing "and with the inputrc's colors once they come back"
+    (call-with-temp-dir
+     (fn [dir]
+       (let [{:keys [out]} (call-with-repl {:color true
+                                            :inputrc (test-server/spit-file dir "inputrc" "$if neorepl\n  set COMPLETION_STYLE_STARTING fg:red\n$endif\n")}
+                             (fn [type screen]
+                               (type ",set color off\r")
+                               (screen #"color off\nuser=> $")
+                               (type ",set color on\r")
+                               (screen #"color on\nuser=> $")
+                               (type "(map-")
+                               (type "\t")
+                               (is (screen #"map-indexed"))
+                               (type "\u0003")))]
+         (is (str/includes? out "\u001b[31mmap-"))))))
   (testing "the completion menu shows a candidate's type and namespace"
     (let [description #'editor/description]
       (is (= "function, clojure.core" (description {:candidate "map" :type "function" :ns "clojure.core"})))
@@ -447,13 +475,13 @@
       (testing "and nothing for one the server says nothing about"
         (is (nil? (description {:candidate "map"}))))))
   (testing "eldoc shows the arglists of the function being called, under the input"
-    (call-with-repl {:eldoc? true}
+    (call-with-repl {:eldoc true}
       (fn [type screen]
         (type "(mapcat ")
         (is (screen #"user=> \(mapcat \nclojure\.core/mapcat: \(\[f\] \[f & colls\]\)"))
         (type "\u0003"))))
   (testing "eldoc wherever the cursor is, rather than only at the end"
-    (call-with-repl {:eldoc? true}
+    (call-with-repl {:eldoc true}
       (fn [type screen]
         (type "(inc (mapcat x))")
         ;; Ctrl-B twice, back into (mapcat x), after the x.
@@ -463,7 +491,7 @@
         (is (screen #"mapcat: \(\[f\] \[f & colls\]\)"))
         (type "\u0003"))))
   (testing "eldoc in bold for the parameter the argument at the cursor goes into, and faint for the arglists that can't take it"
-    (let [{:keys [out]} (call-with-repl {:eldoc? true :color? true}
+    (let [{:keys [out]} (call-with-repl {:eldoc true :color true}
                           (fn [type screen]
                             (type "(mapcat inc ")
                             (screen #"\nclojure\.core/mapcat: ")
@@ -473,7 +501,7 @@
       (is (re-find #"\u001b\[[0-9;]*2m\[f\]" out))
       (is (re-find #"\u001b\[[0-9;]*1m& colls" out))))
   (testing "eldoc matches a macro's arguments by their shape"
-    (let [{:keys [out]} (call-with-repl {:eldoc? true :color? true}
+    (let [{:keys [out]} (call-with-repl {:eldoc true :color true}
                           (fn [type screen]
                             (type "(defn f \"Does f.\" ")
                             ;; Too long for its namespace.
@@ -483,19 +511,19 @@
       ;; Past the docstring, rather than at the third parameter.
       (is (re-find #"\u001b\[[0-9;]*1mattr-map\?" out))))
   (testing "eldoc cut to fit, without the namespace first"
-    (call-with-repl {:eldoc? true :width 30}
+    (call-with-repl {:eldoc true :width 30}
       (fn [type screen]
         (type "(mapcat ")
         (is (screen #"\nmapcat: \(\[f\] \[f & colls\]\)"))
         (type "\u0003")))
     (testing "then with an ellipsis, a column short of the width"
-      (call-with-repl {:eldoc? true :width 20}
+      (call-with-repl {:eldoc true :width 20}
         (fn [type screen]
           (type "(mapcat ")
           (is (screen #"\nmapcat: \(\[f\] \[f & …"))
           (type "\u0003")))))
   (testing "eldoc's line goes once the input's accepted, so it doesn't stay in the scrollback"
-    (let [{:keys [out]} (call-with-repl {:eldoc? true}
+    (let [{:keys [out]} (call-with-repl {:eldoc true}
                           (fn [type screen]
                             (type "(mapcat ")
                             (screen #"\nclojure\.core/mapcat: ")
@@ -504,7 +532,7 @@
           shown (str/last-index-of out "clojure.core/mapcat: ")]
       (is (str/includes? (subs out shown (str/index-of out "([1])" shown)) "\u001b[K"))))
   (testing "the completion menu shows in eldoc's place"
-    (call-with-repl {:eldoc? true}
+    (call-with-repl {:eldoc true}
       (fn [type screen]
         (type "(mapcat map-")
         (screen #"\nclojure\.core/mapcat: ")
@@ -512,7 +540,7 @@
         (is (screen #"map-indexed"))
         (type "\u0003"))))
   (testing "eldoc's line comes back once the input changes after C-d's list of completions, or C-x ='s position"
-    (call-with-repl {:eldoc? true}
+    (call-with-repl {:eldoc true}
       (fn [type screen]
         (type "(mapcat map-")
         (screen #"\nclojure\.core/mapcat: ")
@@ -529,7 +557,7 @@
         (is (screen #"point 10 of 10[^\n]*\n(?s).*clojure\.core/mapcat: \(\[f\] \[f & colls\]\)$"))
         (type "\u0003"))))
   (testing "output from another thread goes above the prompt, with eldoc's line still under the input"
-    (call-with-repl {:eldoc? true}
+    (call-with-repl {:eldoc true}
       (fn [type screen]
         (type "(do (future (Thread/sleep 300) (println :later)) nil)\r")
         (screen #"nil\nuser=> $")
@@ -538,7 +566,7 @@
         (is (screen #":later\n(?s).*user=> \(mapcat \nclojure\.core/mapcat: \(\[f\] \[f & colls\]\)"))
         (type "\u0003"))))
   (testing "eldoc for something that isn't a function"
-    (call-with-repl {:eldoc? true}
+    (call-with-repl {:eldoc true}
       (fn [type screen]
         (type "(def cfg {:a 1})\r")
         (screen #"#'user/cfg\nuser=> $")
@@ -573,7 +601,7 @@
         (is (screen #"clojure\.core/mapcat"))
         (type "\u0003"))))
   (testing "Ctrl-R searches the history, its prompt in eldoc's place"
-    (call-with-repl {:eldoc? true}
+    (call-with-repl {:eldoc true}
       (fn [type screen]
         (type "(+ 40 2)\r")
         (screen #"(?m)^42\nuser=> $")
@@ -685,7 +713,115 @@
           (is (screen (reloads 2))))
         (testing "and saying how it goes"
           (type ",autoreload maybe\r")
-          (is (screen #"\nUsage: ,autoreload \[on\|off\]\nuser=> $")))))))
+          (is (screen #"\nUsage: ,autoreload \[on\|off\]\nuser=> $")))
+        (testing "as ,set does too"
+          (type ",set autoreload on\r")
+          (is (screen #"\nReloading what changed before each evaluation\nuser=> $"))
+          (type ",set autoreload\r")
+          (is (screen #"\nNot reloading before evaluations\nuser=> $"))))))
+  (testing "on from the start, as the config file has it"
+    (call-with-temp-dir
+     (fn [dir]
+       (let [file (test-server/spit-file dir "config.edn" "{:autoreload true}")
+             before @test-server/reloads]
+         (call-with-repl {:settings-file file}
+           (fn [type screen]
+             (is (= (inc before) @test-server/reloads))
+             (type ",set\r")
+             (is (screen #"(?m)^autoreload +on "))))
+         (testing "unless reloading fails, which it says"
+           (test-server/answering-reloads :error
+             #(call-with-repl {:settings-file file}
+                (fn [type screen]
+                  (is (screen #"Reloading what changed failed\nNot reloading before evaluations\nuser=> $"))
+                  (type ",set\r")
+                  (is (screen #"(?m)^autoreload +off ")))))))))))
+
+(deftest settings-test
+  (call-with-repl {}
+    (fn [type screen]
+      (type ",set\r")
+      (is (screen #"\nautoreload +off +Reload what changed before each evaluation\n(?s).*\ntaps +on +The values sent to tap>\nuser=> $"))
+      (is (screen #"(?m)^eldoc +off +The called function's arglists, under the input \(C-x C-h\)$"))
+      (testing "turning one on, off, or the other way"
+        (type ",set eldoc on\r")
+        (is (screen #"\neldoc on\nuser=> $"))
+        (type ",set eldoc\r")
+        (is (screen #"\neldoc off\nuser=> $")))
+      (testing "saying how it goes"
+        (type ",set eldoc maybe\r")
+        (is (screen #"\nUsage: ,set eldoc \[on\|off\]\nuser=> $"))
+        (type ",set eldok\r")
+        (is (screen #"\nNo setting called eldok, ,set lists them\nuser=> $")))))
+  (testing "eldoc going, and coming back, with C-x C-h"
+    (call-with-repl {:eldoc true}
+      (fn [type screen]
+        (type "(mapcat ")
+        (screen #"user=> \(mapcat \nclojure\.core/mapcat: ")
+        (type "\u0018\u0008")
+        (is (screen #"eldoc off\nuser=> \(mapcat $"))
+        (type "\u0018\u0008")
+        (is (screen #"eldoc on\nuser=> \(mapcat \nclojure\.core/mapcat: \(\[f\] \[f & colls\]\)$"))
+        (type "\u0003"))))
+  (testing "quiet leaving out what the server prints itself and taps, with C-x C-q"
+    (call-with-repl {}
+      (fn [type screen]
+        (type "\u0018\u0011")
+        (is (screen #"quiet on\nuser=> $"))
+        ;; Made up as it runs, so it's on the screen only if it's printed.
+        (type "(let [s (str \"hush\" \"ed\")] (future (Thread/sleep 200) (tap> s) (neorepl.test-server/print-system! :out s)) nil)\r")
+        (screen #"\nnil\nuser=> $")
+        (Thread/sleep 500)
+        (type "\u0018\u0011")
+        (is (screen #"quiet off\nuser=> $"))
+        (type "(do (future (Thread/sleep 200) (tap> :heard)) nil)\r")
+        (is (not (str/includes? (screen #"tap> :heard\nuser=> $") "hushed"))))))
+  (testing "what the server prints itself asked for once it's on, and left out once it's off"
+    (call-with-repl {:server-output false}
+      (fn [type screen]
+        (let [before (test-server/forwarding-request)]
+          (type ",set server-output on\r")
+          (screen #"server-output on\nuser=> $")
+          ;; It asks in the background.
+          (loop [tries 500]
+            (when (and (identical? before (test-server/forwarding-request)) (pos? tries))
+              (Thread/sleep 10)
+              (recur (dec tries)))))
+        (type ",set taps off\r")
+        (screen #"taps off\nuser=> $")
+        ;; Made up as they run, so they're on the screen only if they're printed.
+        (type "(let [s (str \"left\" \"-out\")] (future (Thread/sleep 300) (tap> s) (Thread/sleep 100) (neorepl.test-server/print-system! :out \"shown\\n\")) nil)\r")
+        (is (not (str/includes? (screen #"shown\nuser=> $") "left-out")))
+        (testing "though ,tap inspects what was tapped"
+          (type ",tap\r")
+          (is (screen #"\"left-out\"(?s).*q quit"))
+          (type "q")
+          (screen #"user=> $"))
+        (type ",set server-output off\r")
+        (screen #"server-output off\nuser=> $")
+        (type ",set taps on\r")
+        (screen #"taps on\nuser=> $")
+        (type "(let [s (str \"left\" \" out\")] (future (Thread/sleep 200) (neorepl.test-server/print-system! :out s) (tap> :shown)) nil)\r")
+        (is (not (str/includes? (screen #"tap> :shown\nuser=> $") "left out"))))))
+  (testing "colors coming and going"
+    (let [{:keys [out]} (call-with-repl {}
+                          (fn [type screen]
+                            (type ":plain\r")
+                            (screen #"(?m)^:plain\nuser=> $")
+                            (type ",set color on\r")
+                            (screen #"color on\nuser=> $")
+                            (type ":colored\r")
+                            (screen #"(?m)^:colored\nuser=> $")))]
+      (is (not (str/includes? out "\u001b[36m:plain")))
+      (is (str/includes? out "\u001b[36m:colored"))))
+  (testing "what the config file sets"
+    (call-with-temp-dir
+     (fn [dir]
+       (let [file (test-server/spit-file dir "config.edn" "{:quiet true :taps false}")]
+         (call-with-repl {:settings-file file}
+           (fn [type screen]
+             (type ",set\r")
+             (is (screen #"(?m)^quiet +on +(?s).*^taps +off ")))))))))
 
 (deftest spec-test
   (call-with-repl {}
