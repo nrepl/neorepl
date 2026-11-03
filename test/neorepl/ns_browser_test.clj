@@ -11,7 +11,7 @@
 (def ^:private ask
   "What the browser asks a server, answered here."
   {:namespaces #(if % ["clojure.core" "demo.core" "demo.core-test"] ["demo.core" "demo.core-test"])
-   :vars #(or (vars %) (throw (ex-info (str "No namespace: " %) {})))
+   :vars #(or (vars %) (throw (ex-info (str "No namespace: " % "\n  at somewhere") {})))
    :doc #(when (= "demo.core/greet" %) "demo.core/greet\n([who])\n  Says hi.\n  To who.")})
 
 (defn- press
@@ -74,10 +74,12 @@
         (is (= ["demo.core/greet" "([who])" "  Says hi." "  To who." "Space page  e edit  ← back  q quit"]
                (screen doc 5)))
         (is (= "demo.core/greet" (:edit (press doc "e"))))
+        (testing "and nothing to filter there"
+          (is (nil? (:prompt (press doc "/")))))
         (is (= "demo.core" (first (screen (press doc :left) 4))))))
     (testing "or saying the var's gone"
       (is (= "Nothing called demo.core/state" (last (screen (press vars :down :right) 4)))))))
 
 (deftest errors-test
-  (testing "a message saying why it couldn't ask"
+  (testing "a message saying why it couldn't ask, its first line"
     (is (= "No namespace: demo.core-test" (last (screen (press (start) :right) 4))))))

@@ -105,9 +105,10 @@
       (string? key) (update-in [:prompt :text] str key))))
 
 (defn filtering
-  "view, a list-view, with a prompt for its :filter."
+  "view, if it's a list-view, with a prompt for its :filter."
   [view]
-  (assoc view :prompt {:label "/" :text (or (:filter view) "")}))
+  (cond-> view
+    (:listed view) (assoc :prompt {:label "/" :text (or (:filter view) "")})))
 
 (defn filtered
   "view, a list-view, after key while the prompt filtering has it put up is
@@ -122,15 +123,34 @@
 
 (defn asked
   "What (f) comes to, a view, or view with a :message saying why it
-  couldn't, as when the server says no. Losing the connection ends the
-  browsing, so that goes on up."
+  couldn't, as when the server says no, its first line, which is all the
+  bottom line has room for. Losing the connection ends the browsing, so
+  that goes on up."
   [view f]
   (try
     (f)
     (catch clojure.lang.ExceptionInfo e
       (when (= ::nrepl/disconnected (:type (ex-data e)))
         (throw e))
-      (assoc view :message (ex-message e)))))
+      (assoc view :message (first (str/split-lines (str (ex-message e))))))))
+
+(defn listing-handle
+  "view after key, the way the browsers of lists of names take the keys
+  they have in common, or (own view key), without a :message, for the
+  rest: while a filter's prompt is up, it takes them all, the arrows and
+  the like move, q, Escape and Ctrl-C end the browsing, as (reduced nil), ←
+  and Backspace go back to the view's :back, if it has one, and / filters
+  a list-view."
+  [view key own]
+  (let [view (dissoc view :message)]
+    (if (:prompt view)
+      (filtered view key)
+      (or (moved view key)
+          (case key
+            ("q" :escape :ctrl-c) (reduced nil)
+            (:left :backspace) (or (:back view) view)
+            "/" (filtering view)
+            (own view key))))))
 
 (defn draw
   "What the screen shows of view, height lines of it: as

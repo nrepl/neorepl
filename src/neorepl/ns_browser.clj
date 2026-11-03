@@ -61,32 +61,27 @@
   nil when they're done. The views ask the server with the functions in
   ask: its :namespaces, given all?, a namespace's :vars, given its name,
   and a var's :doc, given its qualified name."
-  [{:keys [kind back all?] :as view} key {:keys [namespaces vars doc]}]
-  (let [view (dissoc view :message)
-        [_ picked] (browser/selected-value view)
-        ;; What e opens.
-        target (case kind
-                 :namespaces picked
-                 :vars (some->> picked (str (:ns view) "/"))
-                 :doc (:sym view))]
-    (if (:prompt view)
-      (browser/filtered view key)
-      (or (browser/moved view key)
-          (case key
-        ("q" :escape :ctrl-c) (reduced nil)
-        (:left :backspace) (or back view)
-        "e" (if target (reduced {:edit target :view view}) view)
-        "/" (if (= :doc kind) view (browser/filtering view))
-        (case [kind key]
-          [:namespaces :enter] (if picked (reduced {:ns picked :view view}) view)
-          [:namespaces :right] (if picked (browser/asked view #(vars-view picked (vars picked) view)) view)
-          [:namespaces "a"] (browser/asked view #(namespaces-view (namespaces (not all?)) (not all?) picked (:filter view)))
-          ([:vars :enter] [:vars :right]) (if target
-                                            (browser/asked view #(if-let [text (doc target)]
-                                                                   (doc-view target text view)
-                                                                   (assoc view :message (str "Nothing called " target))))
-                                            view)
-          view))))))
+  [view key {:keys [namespaces vars doc]}]
+  (browser/listing-handle
+   view key
+   (fn [{:keys [kind all?] :as view} key]
+     (let [[_ picked] (browser/selected-value view)
+           ;; What e opens.
+           target (case kind
+                    :namespaces picked
+                    :vars (some->> picked (str (:ns view) "/"))
+                    :doc (:sym view))]
+       (case [kind key]
+         ([:namespaces "e"] [:vars "e"] [:doc "e"]) (if target (reduced {:edit target :view view}) view)
+         [:namespaces :enter] (if picked (reduced {:ns picked :view view}) view)
+         [:namespaces :right] (if picked (browser/asked view #(vars-view picked (vars picked) view)) view)
+         [:namespaces "a"] (browser/asked view #(namespaces-view (namespaces (not all?)) (not all?) picked (:filter view)))
+         ([:vars :enter] [:vars :right]) (if target
+                                           (browser/asked view #(if-let [text (doc target)]
+                                                                  (doc-view target text view)
+                                                                  (assoc view :message (str "Nothing called " target))))
+                                           view)
+         view)))))
 
 (defn browse
   "Shows the namespaces called names, the project's, full-screen with
