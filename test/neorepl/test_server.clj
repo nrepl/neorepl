@@ -2,6 +2,7 @@
   "An nREPL server and temporary directories for the tests that need them."
   (:require [clojure.edn :as edn]
             [clojure.java.io :as io]
+            [clojure.repl]
             [clojure.string :as str]
             [neorepl.main :as main]
             [neorepl.nrepl :as nrepl]
@@ -364,6 +365,14 @@
                              :expects #{#'nrepl-io/wrap-out}
                              :handles {"forward-system-output" {}}})
 
+(def ^:private builtin-sources
+  "babashka finding the source of its built-ins, as source-fn does for the
+  servers in this process. It resolves its own dependencies for that the
+  first time, which on a fresh machine is a download that can outlast the
+  timeout of whichever test asks first (babashka#2220). On the JVM, the
+  source is in Clojure's jar."
+  (delay (clojure.repl/source-fn 'when)))
+
 (defn fixture
   "A :once fixture that runs the tests with an nREPL server listening on
   *port*, with wrap-stuck, wrap-fake-inspector, wrap-fake-tracer,
@@ -371,6 +380,7 @@
   nrepl.server/start-server, give it a :handler."
   [& opts]
   (fn [f]
+    @builtin-sources
     (let [srv (apply server/start-server :port 0 :handler (server/default-handler #'wrap-stuck #'wrap-fake-inspector #'wrap-fake-tracer
                                                                                   #'wrap-fake-reload #'wrap-fake-system-output)
                      opts)]
