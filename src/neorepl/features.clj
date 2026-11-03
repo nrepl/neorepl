@@ -1375,14 +1375,14 @@
       (cond-> refused (not on?) (assoc :status "not-profiled"))
       (if (and on? the-var (not (eval-data client {} fn-code [the-var] opts)))
         ;; orchard profiles whatever can be called, so a map or a
-        ;; multimethod would end up holding a function.
+        ;; multimethod would end up holding a function (orchard#445).
         (assoc result :status "not-profilable")
         (let [status (toggle-profile client msg opts)]
           (cond
             (nil? status) {:name name :status "not-found"}
             (= status (if on? "unprofiled" "profiled"))
             ;; It was that way already, and cider-nrepl only toggles, so
-            ;; back it goes.
+            ;; back it goes (cider-nrepl#1073).
             (do (toggle-profile client msg opts)
                 (assoc result :status (if on? "already-profiled" "not-profiled")))
             :else (assoc result :status status)))))))
@@ -1409,7 +1409,7 @@
   (try
     (:lines (inspector client nil {:op "cider/profile-summary" :page-size Integer/MAX_VALUE} opts))
     (catch clojure.lang.ExceptionInfo e
-      ;; cider-nrepl 0.64.0 can't show an empty table.
+      ;; cider-nrepl 0.64.0 can't show an empty table (cider-nrepl#1072).
       (when-not (str/includes? (str (ex-message e)) "view-mode-supported?")
         (throw e)))))
 
@@ -1461,7 +1461,8 @@
   with a server in its process, where it would get sent what it prints,
   over and over, or one neorepl started and passes on what it prints.
   nREPL never stops, not even once the session's closed, and keeps the
-  session, with its values, so it's one that never evaluates anything."
+  session, with its values (nrepl#513), so it's one that never evaluates
+  anything."
   [client]
   (when (and (supports? client "forward-system-output") (not (:shares-output? client)))
     (let [session (nrepl/clone-session client)

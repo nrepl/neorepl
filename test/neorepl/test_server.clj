@@ -374,7 +374,7 @@
           (instance? Exception v) (transport/respond-to msg :ex (str (class v)) :err (str v "\n")
                                                         :status ["done" "cider/profile-toggle-var-error"])
           (not (var? v)) (transport/respond-to msg :status ["done" "profile-no-such-var"])
-          ;; As orchard does, which profiles maps too.
+          ;; As orchard does, which profiles maps too (orchard#445).
           (or (:macro (meta v)) (not (ifn? @v))) (transport/respond-to msg :status ["done" "profile-invalid-var"])
           :else (transport/respond-to msg :value (toggle-profile! v) :status "done")))
       "cider/profile-toggle-ns"
