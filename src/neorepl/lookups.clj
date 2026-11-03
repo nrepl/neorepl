@@ -8,9 +8,10 @@
             [neorepl.render :as render]))
 
 (defn- untraceable?
-  "Whether tracing, or untracing, didn't do what it was asked to."
+  "Whether tracing or profiling, or stopping it, didn't do what it was
+  asked to."
   [{:keys [results]}]
-  (boolean (some #(#{"not-found" "not-traceable" "refused"} (:status %)) results)))
+  (boolean (some #(#{"not-found" "not-traceable" "not-profilable" "refused"} (:status %)) results)))
 
 (def all
   "Each lookup takes the :arg it names, unless it has none: :code-arg? says
@@ -83,6 +84,23 @@
               (features/untrace-all client)))
     :text render/tracing-text
     :failed? untraceable?}
+   {:name "profile" :arg "SYM..." :args? true :optional? true
+    :help "Profile the functions SYM, or a namespace's, or show what's measured"
+    :find (fn [client ctx syms]
+            (if (seq syms)
+              {:results (features/profile client syms ctx true)}
+              (some->> (features/profile-summary client {}) render/profile-summary-text (hash-map :summary))))
+    :text render/profiling-text
+    :none (fn [_ _] "No profiled function has been called yet")
+    :failed? untraceable?}
+   {:name "unprofile" :arg "SYM..." :args? true
+    :help "Stop profiling the functions SYM, or a namespace's"
+    :find (fn [client ctx syms] {:results (features/profile client syms ctx false)})
+    :text render/profiling-text
+    :failed? untraceable?}
+   {:name "profile-clear" :help "Forget what profiling measured so far"
+    :find (fn [client _ _] (features/clear-profile client))
+    :text render/profiling-text}
    {:name "pst" :help "Show the stack trace of the last error"
     :find (fn [client {:keys [session]} _] (features/last-error client session))
     :text render/error-text
