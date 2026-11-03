@@ -1,7 +1,9 @@
 (ns neorepl.browser
   "Full-screen views of lines to move around in, from one value marked in
   them to the next, like the inspector's and the stack trace's."
-  (:require [neorepl.editor :as editor]))
+  (:require [clojure.string :as str]
+            [neorepl.editor :as editor]
+            [neorepl.nrepl :as nrepl]))
 
 (defn view
   "The view of lines, vectors of segments, maps with the :text and, for the
@@ -25,6 +27,24 @@
   "The selected value in view, as its [line index] pair."
   [{:keys [values selected]}]
   (some->> selected (get values)))
+
+(defn text-view
+  "The view of text, a line for each of its lines, with nothing to select."
+  [text]
+  (view (mapv (fn [line] [{:text line}]) (str/split-lines text))))
+
+(defn list-view
+  "listing, with the :listed lines it lists under its :heading, as a view
+  of those whose name, the :index of their first segment, has its :filter
+  in it, whatever the case, with the one called selected selected, if it's
+  shown, or else the first."
+  [{:keys [heading listed] :as listing} selected]
+  (let [typed (str/lower-case (or (:filter listing) ""))
+        shown (filter #(str/includes? (str/lower-case (:index (first %))) typed) listed)
+        {:keys [values] :as fresh} (view (cons [{:text heading :heading? true}] shown))
+        i (first (keep-indexed (fn [i [_ index]] (when (= selected index) i)) values))]
+    (cond-> (merge listing fresh)
+      i (assoc :selected i))))
 
 (defn scrolled
   "view on a screen height lines high, which it remembers as its :height,
@@ -84,11 +104,39 @@
     (cond-> view
       (string? key) (update-in [:prompt :text] str key))))
 
+(defn filtering
+  "view, a list-view, with a prompt for its :filter."
+  [view]
+  (assoc view :prompt {:label "/" :text (or (:filter view) "")}))
+
+(defn filtered
+  "view, a list-view, after key while the prompt filtering has it put up is
+  there: it shows the lines with what's typed in their names, Enter keeps
+  that, and Escape drops it."
+  [view key]
+  (if (= :enter key)
+    (dissoc view :prompt)
+    (let [view (prompted view key)]
+      (list-view (assoc view :filter (get-in view [:prompt :text] ""))
+                 (second (selected-value view))))))
+
+(defn asked
+  "What (f) comes to, a view, or view with a :message saying why it
+  couldn't, as when the server says no. Losing the connection ends the
+  browsing, so that goes on up."
+  [view f]
+  (try
+    (f)
+    (catch clojure.lang.ExceptionInfo e
+      (when (= ::nrepl/disconnected (:type (ex-data e)))
+        (throw e))
+      (assoc view :message (ex-message e)))))
+
 (defn draw
   "What the screen shows of view, height lines of it: as
   much of the view as fits and help, a line saying what the keys do, or the
-  view's :message, or its :prompt, at the bottom. Values are highlighted as
-  code, unless they have a :style."
+  view's own :help, or its :message, or its :prompt, at the bottom. Values
+  are highlighted as code, unless they have a :style."
   [{:keys [lines top message prompt] :as view} help height]
   (let [[_ selected-index] (selected-value view)
         body (for [line (take (dec height) (drop top lines))]
@@ -104,7 +152,7 @@
             [(if-let [{:keys [label text]} prompt]
                ;; A full-screen view hides the cursor, so this stands in.
                [{:text label :style :notice} {:text text} {:text " " :selected? true}]
-               [{:text (or message help) :style :notice}])])))
+               [{:text (or message (:help view) help) :style :notice}])])))
 
 (defn browse
   "Shows view full-screen on editor, with help at the bottom, until (handle

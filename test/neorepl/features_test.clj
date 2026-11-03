@@ -139,8 +139,13 @@
                                           :expansion (str "Cider's " (:expander msg) (some->> (:session msg) (str " in "))))
       "ns-list" (transport/respond-to msg :status "done"
                                       :ns-list (if (:session msg)
-                                                 ["clojure.core" "neorepl.features" "made.at.the.repl"]
+                                                 ["clojure.core" "neorepl.features" "made.at.the.repl"
+                                                  "nrepl.core" "cider.nrepl.middleware"]
                                                  ["clojure.core"]))
+      ;; With docs printed, as cider-nrepl has them.
+      "ns-vars-with-meta" (transport/respond-to msg :status "done"
+                                                :ns-vars-with-meta {:greet {:arglists "([who])" :doc "\"Says hi.\""}
+                                                                    :state {}})
       ("test-var-query" "retest")
       (do (swap! test-requests conj (select-keys msg [:op :var-query :stream]))
           (when (= "true" (:stream msg))
@@ -216,6 +221,7 @@
       (handler msg))))
 
 (middleware/set-descriptor! #'wrap-fake-cider {:handles {"info" {} "complete" {} "apropos" {} "ns-list" {} "cider-version" {}
+                                                         "ns-vars-with-meta" {}
                                                          "macroexpand" {} "analyze-last-stacktrace" {} "test-stacktrace" {}
                                                          "refresh" {} "refresh-clear" {} "test-var-query" {} "retest" {}
                                                          "inspect-last-exception" {} "fn-refs" {} "fn-deps" {}}
@@ -406,7 +412,20 @@
       (testing "the project's, whose source isn't in a jar"
         (is (some #{"neorepl.features"} names))
         (is (not-any? #{"clojure.core" "nrepl.server"} names)))
-      (is (= names (sort names))))))
+      (is (= names (sort names))))
+    (testing "all of them, but nREPL's own"
+      (let [names (features/loaded-namespaces client user {})]
+        (is (every? (set names) ["clojure.core" "neorepl.features"]))
+        (is (not-any? #(re-find #"^nrepl" %) names))
+        (is (= names (sort names)))))
+    (testing "a namespace's public vars, sorted, without cider-nrepl"
+      (let [vars (features/ns-vars client "clojure.string" user {})
+            {:keys [arglists doc]} (some #(when (= "join" (:name %)) %) vars)]
+        (is (= vars (sort-by :name vars)))
+        (is (= "([coll] [separator coll])" arglists))
+        (is (str/starts-with? doc "Returns a string"))
+        (testing "and no namespace"
+          (is (thrown? clojure.lang.ExceptionInfo (features/ns-vars client "no.such.ns" user {}))))))))
 
 (deftest enter-ns-test
   (with-client [client {:port *port*}]
@@ -631,8 +650,11 @@
           (is (= [{:candidate "map" :type "function" :ns "clojure.core"}]
                  (features/complete client "ma" user)))
           (testing "namespaces in the session's language"
-            (is (= ["neorepl.features"]
-                   (features/namespaces client (assoc user :session (nrepl/clone-session client))))))
+            (let [ctx (assoc user :session (nrepl/clone-session client))]
+              (is (= ["neorepl.features"] (features/namespaces client ctx)))
+              (is (= ["clojure.core" "made.at.the.repl" "neorepl.features"] (features/loaded-namespaces client ctx {})))))
+          (is (= [{:name "greet" :arglists "([who])" :doc "Says hi."} {:name "state"}]
+                 (features/ns-vars client "demo.core" user {})))
           (is (= [{:name "clojure.core/map" :type "function" :doc "Cider's map.\nMore."}]
                  (features/apropos client "map")))
           (is (= "Cider's macroexpand-all" (features/expand client "(when x y)" user true)))

@@ -11,6 +11,7 @@
             [neorepl.lookups :as lookups]
             [neorepl.lexer :as lexer]
             [neorepl.nrepl :as nrepl]
+            [neorepl.ns-browser :as ns-browser]
             [neorepl.render :as render]
             [neorepl.sessions :as sessions]
             [neorepl.shutdown :as shutdown]
@@ -80,7 +81,7 @@
             :help "Open where SYM, or this namespace, is defined in your EDITOR"
             :run #(edit %1 %2)}
            {:name "ns" :arg "NS" :optional? true
-            :help "Switch to NS, loading it if need be, or list the project's"
+            :help "Switch to NS, loading it if need be, or browse the namespaces"
             :run #(enter-ns %1 %2)}
            {:name "sessions" :arg "NAME" :optional? true
             :help "Switch to the session called NAME, or - for the REPL's own, or list them"
@@ -186,15 +187,21 @@
               (when-not (zero? status)
                 (str "The editor exited with status " status))))))
 
+(defn- open-definition
+  "Opens where sym, a var's or a namespace's name, is defined, as open does.
+  Returns nil, or a message saying why it couldn't."
+  [{:keys [client] :as state} sym]
+  (let [{:keys [found none]} (lookups/run "where" client state sym)]
+    (or none (open state (:file found) (:line found)))))
+
 (defn- edit
   "Opens the definition of sym in the editor, as open does, or without sym,
   the file of the namespace the REPL's in. Returns what to print, as
   command-output does."
-  [{:keys [client ns] :as state} sym]
-  (let [{:keys [found none]} (lookups/run "where" client state (or sym ns))]
-    (if-let [message (or none (open state (:file found) (:line found)))]
-      (out message)
-      {})))
+  [{:keys [ns] :as state} sym]
+  (if-let [message (open-definition state (or sym ns))]
+    (out message)
+    {}))
 
 (defn- edit-text
   "Has the user edit text with the editor-command, as open opens files, in a
@@ -314,19 +321,41 @@
                      (out "Reloading what changed before each evaluation")))
     (out "Usage: ,autoreload [on|off]")))
 
+(defn- browse-namespaces
+  "Lets the user :browse the namespaces called names, the project's, or all
+  of them, their vars and their docs, and switches to the namespace they
+  pick, as enter-ns does, or opens the namespace or var they pick, as open
+  does. Returns what to print, as command-output does."
+  [{:keys [client ns browse] :as state} names]
+  (let [ask {:namespaces #(if %
+                            (features/loaded-namespaces client state {})
+                            (features/namespaces client state))
+             :vars #(features/ns-vars client % state {})
+             :doc #(some-> (features/info client % state) render/doc-text)}]
+    (loop [view nil]
+      (let [{picked :ns :keys [edit view]} (ns-browser/browse browse names ns ask {:view view})]
+        (cond
+          picked (enter-ns state picked)
+          edit (recur (assoc view :message (open-definition state edit)))
+          :else {})))))
+
 (defn- enter-ns
   "Switches to the namespace called ns, loading it the way the REPL
-  :evaluates code if need be, or lists the project's loaded namespaces
-  without it. Returns what to print, as command-output does, with the
-  namespace the REPL's in now as its :ns."
-  [{:keys [client session evaluate] :as state} ns]
+  :evaluates code if need be, or without it, lets the user :browse the
+  project's loaded namespaces, or lists them when there's no browsing.
+  Returns what to print, as command-output does, with the namespace the
+  REPL's in now as its :ns."
+  [{:keys [client session evaluate browse] :as state} ns]
   (if ns
     (let [{:keys [status] :as result} (evaluate #(features/enter-ns client session ns %))]
       (if (= "ok" status)
         {:ns (or (:ns result) ns)}
         {}))
-    (out (or (some->> (features/namespaces client state) seq (str/join "\n"))
-             "None of the project's namespaces are loaded"))))
+    (let [names (features/namespaces client state)]
+      (cond
+        browse (browse-namespaces state names)
+        (seq names) (out (str/join "\n" names))
+        :else (out "None of the project's namespaces are loaded")))))
 
 (defn- switch-session
   "Switches to the session called name in the :sessions-file, or to the

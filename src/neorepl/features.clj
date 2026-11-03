@@ -1366,6 +1366,16 @@
                         (clojure.string/starts-with? \"file:\"))))
             %s)")
 
+(defn- ns-list
+  "The names of the loaded namespaces, from ns-list, in the language of
+  session, if there's one."
+  [client session opts]
+  (vec (some :ns-list (ask client (cond-> {:op "ns-list"} session (assoc :session session)) opts))))
+
+(def ^:private all-ns-code
+  "The names of the loaded namespaces, without ns-list."
+  "(map (comp str ns-name) (all-ns))")
+
 (defn namespaces
   "The names of the project's loaded namespaces, sorted: those whose source
   is in a directory on the classpath, rather than a jar. They're in the
@@ -1374,10 +1384,45 @@
   ([client ctx] (namespaces client ctx {}))
   ([client {:keys [session]} opts]
    (sort (if (supports? client "ns-list")
-           (eval-data client {} project-namespaces-code
-                      [(vec (some :ns-list (ask client (cond-> {:op "ns-list"} session (assoc :session session)) opts)))]
-                      opts)
-           (eval-data client {} (format project-namespaces-code "(map (comp str ns-name) (all-ns))") [] opts)))))
+           (eval-data client {} project-namespaces-code [(ns-list client session opts)] opts)
+           (eval-data client {} (format project-namespaces-code all-ns-code) [] opts)))))
+
+(defn loaded-namespaces
+  "The names of the loaded namespaces, sorted, as namespaces has the
+  project's, but for the nREPL tooling's own, which CIDER leaves out too."
+  [client {:keys [session]} opts]
+  (->> (if (supports? client "ns-list")
+         (ns-list client session opts)
+         (eval-data client {} all-ns-code [] opts))
+       (remove #(re-find #"^(cider\.nrepl|refactor-nrepl|nrepl)(\.|$)" %))
+       sort))
+
+(def ^:private ns-vars-code
+  "The public vars of the namespace %s names, each as its name, its
+  arglists, printed, and its doc."
+  "(clojure.core/for [[k v] (clojure.core/ns-publics (clojure.core/symbol %s))
+                      :let [m (clojure.core/meta v)]]
+     [(clojure.core/str k) (clojure.core/some-> (:arglists m) clojure.core/pr-str) (:doc m)])")
+
+(defn ns-vars
+  "The public vars of the namespace called ns, sorted by name, as maps of
+  their :name and, if they have them, their :arglists, printed, and :doc.
+  They're from cider-nrepl's ns-vars-with-meta, in ctx's :session, or else
+  from Clojure's ns-publics."
+  [client ns {:keys [session]} opts]
+  (->> (if (supports? client "ns-vars-with-meta")
+         (for [[k {:keys [arglists doc]}] (some :ns-vars-with-meta
+                                                (ask client (cond-> {:op "ns-vars-with-meta" :ns ns}
+                                                              session (assoc :session session))
+                                                     opts))]
+           ;; Its :doc comes printed.
+           [(name k) arglists (some-> doc edn/read-string)])
+         (eval-data client {} ns-vars-code [ns] opts))
+       (map (fn [[var-name arglists doc]]
+              (cond-> {:name var-name}
+                arglists (assoc :arglists arglists)
+                doc (assoc :doc doc))))
+       (sort-by :name)))
 
 (def ^:private ns-found-code
   "Whether the namespace %s names is there, in Clojure, ClojureScript or,
