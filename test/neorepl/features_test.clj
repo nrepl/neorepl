@@ -565,6 +565,11 @@
           values #(keep :value (nrepl/request client {:op "eval" :session session :code %}))]
       (testing "nothing, once it's reloaded"
         (is (nil? (reload))))
+      (testing "after the reload jack-in started in the background"
+        (let [noted (promise)
+              noting (doto (Thread. #(do (Thread/sleep 300) (deliver noted true))) .start)]
+          (features/reload-changed (assoc client :noting-changes noting) session {})
+          (is (realized? noted))))
       (testing "with the session back in its namespace, made anew, and *1, *2 and *3 as they were"
         (values "(in-ns 'neorepl.reloaded)")
         (values "1 2 3")
