@@ -25,8 +25,8 @@ issues filed upstream.
 - `features.clj`: everything else asked of a server. `lookups.clj` is what
   the commands and the REPL share, `render.clj` turns it into text.
 - `mcp.clj`: the MCP server, over the same features as the commands.
-- `inspector.clj`, `stacktrace.clj`, `ns_browser.clj` and `browser.clj`: the
-  full-screen views.
+- `inspector.clj`, `stacktrace.clj`, `ns_browser.clj`, `spec_browser.clj` and
+  `browser.clj`: the full-screen views.
 - `lexer.clj`: tells finished forms from unfinished ones and classifies
   tokens. It doesn't read code, on purpose. `repair.clj` fixes delimiters
   from indentation.

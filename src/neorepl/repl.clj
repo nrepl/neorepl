@@ -15,6 +15,7 @@
             [neorepl.render :as render]
             [neorepl.sessions :as sessions]
             [neorepl.shutdown :as shutdown]
+            [neorepl.spec-browser :as spec-browser]
             [neorepl.stacktrace :as stacktrace])
   (:import (java.io File)
            (java.lang ProcessBuilder$Redirect)
@@ -60,7 +61,7 @@
                      (.interrupt thread)
                      thread))}))
 
-(declare edit enter-ns switch-session inspect run-tests browse-error autoreload)
+(declare edit enter-ns switch-session inspect run-tests browse-error autoreload browse-specs)
 
 (def ^:private commands
   "The REPL's commands, the CIDER way: a comma, which Clojure reads as
@@ -83,6 +84,9 @@
            {:name "ns" :arg "NS" :optional? true
             :help "Switch to NS, loading it if need be, or browse the namespaces"
             :run #(enter-ns %1 %2)}
+           {:name "spec" :arg "NAME" :optional? true
+            :help "Browse the specs, or NAME's, or the ones with NAME in them"
+            :run #(browse-specs %1 %2)}
            {:name "sessions" :arg "NAME" :optional? true
             :help "Switch to the session called NAME, or - for the REPL's own, or list them"
             :run #(switch-session %1 %2)}
@@ -338,6 +342,26 @@
           picked (enter-ns state picked)
           edit (recur (assoc view :message (open-definition state edit)))
           :else {})))))
+
+(defn- browse-specs
+  "Lets the user :browse the specs, starting at the form of the one called
+  spec, or at those with spec in their names, or prints that when there's
+  no browsing. Returns what to print, as command-output does."
+  [{:keys [client browse width]} spec]
+  (let [names (features/specs client {})]
+    (cond
+      browse (do (spec-browser/browse browse names spec
+                                      {:form #(features/spec-form client % (width) {})
+                                       :example #(features/spec-example client % (width) {})})
+                 {})
+      (some #{spec} names) (out (or (some-> (features/spec-form client spec (width) {}) str/trimr)
+                                    (str "No spec called " spec)))
+      ;; Whatever the case, as the browser filters.
+      :else (out (or (some->> names
+                              (filter #(str/includes? (str/lower-case %) (str/lower-case (or spec ""))))
+                              seq
+                              (str/join "\n"))
+                     "No specs")))))
 
 (defn- enter-ns
   "Switches to the namespace called ns, loading it the way the REPL
