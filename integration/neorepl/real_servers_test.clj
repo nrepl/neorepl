@@ -138,6 +138,28 @@
     (is (= {:status 1 :out "" :err "neorepl: Tracing takes cider-nrepl on the server\n"}
            (run :bb "trace" "demo.core/greet")))))
 
+(deftest profile-test
+  (testing "cider-nrepl"
+    (run :clojure "profile" "--clear")
+    (try
+      (is (= "Profiling demo.core/greet\n" (:out (run :clojure "profile" "demo.core/greet"))))
+      (testing "with nothing to show until it's called, which cider-nrepl's summary fails on"
+        (is (= {:status 1 :out "" :err "neorepl: No profiled function has been called yet\n"}
+               (run :clojure "profile"))))
+      (run :clojure "eval" "(demo.core/greet \"p\")")
+      (let [[header separator row :as lines] (str/split-lines (:out (run :clojure "profile")))]
+        (is (= 3 (count lines)))
+        (is (re-find #"^\| # \| +:name \| :n \| :mean \|" header))
+        (is (str/starts-with? separator "|---+"))
+        (is (re-find #"^\| 0 \| #'demo\.core/greet \|  1 \| " row)))
+      (is (= "Stopped profiling demo.core/greet\n" (:out (run :clojure "unprofile" "demo.core/greet"))))
+      (finally
+        (run :clojure "unprofile" "demo.core/greet")
+        (run :clojure "profile" "--clear"))))
+  (testing "babashka"
+    (is (= {:status 1 :out "" :err "neorepl: Profiling takes cider-nrepl on the server\n"}
+           (run :bb "profile" "demo.core/greet")))))
+
 (deftest java-doc-test
   (testing "cider-nrepl, with the Javadoc"
     (is (str/includes? (:out (run :clojure "doc" "java.util.ArrayList"))

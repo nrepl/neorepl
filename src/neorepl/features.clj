@@ -1195,7 +1195,7 @@
   ([client session msg] (inspector client session msg {}))
   ([client session msg opts]
    (check-inspector client)
-   (let [responses (ask client (assoc msg :session session) opts)]
+   (let [responses (ask client (cond-> msg session (assoc :session session)) opts)]
      (if-let [value (some :value responses)]
        {:status "ok" :lines (inspector-lines value)}
        (throw (ex-info (str "The server couldn't do " (:op msg))
@@ -1284,17 +1284,21 @@
   down, tracing calls into tracing."
   #"^(clojure\.(core|core\.protocols|string|walk|set|java\.io|pprint|main|edn|repl|zip)$|(nrepl|cider|orchard)(\.|$))")
 
-(defn- refused
-  "What trace does for name, resolved in ns, when it's a function in a
-  namespace tooling-nses matches, as the :var or :ns with the :status
-  refused, or nil, for trace-one to have it, as when it's a macro, which
-  tracing leaves alone, or there's no telling."
+(defn- info-or-nil
+  "info on name, resolved in ns, or nil when there's no telling."
   [client name ns opts]
-  (let [{found-ns :ns found-name :name :keys [macro]} (try
-                                                         (info client name {:ns ns} opts)
-                                                         (catch clojure.lang.ExceptionInfo _ nil))
-        ;; A var's, or a namespace's, whose info has only the name.
-        target (or found-ns found-name name)]
+  (try
+    (info client name {:ns ns} opts)
+    (catch clojure.lang.ExceptionInfo _ nil)))
+
+(defn- refusal
+  "What trace and profile do for name, whose info found is, when it's a
+  function in a namespace tooling-nses matches, as the :var or :ns with the
+  :status refused, or nil, for them to have it, as when it's a macro, which
+  they leave alone, or there's no telling."
+  [{found-ns :ns found-name :name :keys [macro]} name]
+  ;; A var's, or a namespace's, whose info has only the name.
+  (let [target (or found-ns found-name name)]
     (when (and (re-find tooling-nses target) (not macro))
       (if found-ns
         {:var (str found-ns "/" found-name) :status "refused"}
@@ -1311,7 +1315,7 @@
   ([client names ctx on?] (trace client names ctx on? {}))
   ([client names {:keys [ns]} on? opts]
    (check-tracer client "toggle-trace-var")
-   (mapv #(or (when on? (refused client % ns opts))
+   (mapv #(or (when on? (refusal (info-or-nil client % ns opts) %))
               (trace-one client % ns on? opts))
          names)))
 
@@ -1333,6 +1337,87 @@
   ([client opts]
    (check-tracer client "cider/untrace-all")
    {:untraced (or (some :untraced-count (ask client {:op "cider/untrace-all"} opts)) 0)}))
+
+(defn- check-profiler [client]
+  (when-not (supports? client "cider/profile-toggle-var")
+    (throw (ex-info (if (supports? client "toggle-profile")
+                      "Profiling takes cider-nrepl 0.55 or later on the server"
+                      "Profiling takes cider-nrepl on the server")
+                    {:type ::failed}))))
+
+(defn- toggle-profile
+  "Toggles profiling as msg, a cider/profile-toggle-var or -ns, says, and
+  returns profiled or unprofiled, not-profilable for a macro or a var that
+  can't be called, or nil when there's no such var or namespace."
+  [client msg opts]
+  (let [responses (nrepl/request client msg opts)]
+    (if (some #(nrepl/status? % "profile-invalid-var") responses)
+      "not-profilable"
+      (some :value responses))))
+
+(def ^:private fn-code
+  "Whether the var %s names holds a function."
+  "(clojure.core/fn? (clojure.core/deref (clojure.core/resolve (clojure.core/symbol %s))))")
+
+(defn- profile-one
+  "Profiles name when on?, or stops profiling it, as profile does: a var,
+  resolved in ns, or else a namespace."
+  [client name ns on? opts]
+  (let [{found-ns :ns found-name :name :as found} (info-or-nil client name ns opts)
+        the-var (when found-ns (str found-ns "/" found-name))
+        [result msg] (if the-var
+                       [{:var the-var} {:op "cider/profile-toggle-var" :ns found-ns :sym found-name}]
+                       [{:ns name} {:op "cider/profile-toggle-ns" :ns name}])]
+    (if-let [refused (refusal found name)]
+      ;; It never got profiled, and toggling it would profile it.
+      (cond-> refused (not on?) (assoc :status "not-profiled"))
+      (if (and on? the-var (not (eval-data client {} fn-code [the-var] opts)))
+        ;; orchard profiles whatever can be called, so a map or a
+        ;; multimethod would end up holding a function.
+        (assoc result :status "not-profilable")
+        (let [status (toggle-profile client msg opts)]
+          (cond
+            (nil? status) {:name name :status "not-found"}
+            (= status (if on? "unprofiled" "profiled"))
+            ;; It was that way already, and cider-nrepl only toggles, so
+            ;; back it goes.
+            (do (toggle-profile client msg opts)
+                (assoc result :status (if on? "already-profiled" "not-profiled")))
+            :else (assoc result :status status)))))))
+
+(defn profile
+  "Profiles the functions names name, vars resolved in ctx's :ns or
+  namespaces, when on?, or stops profiling them, with cider-nrepl, which
+  times every call. Returns what happened to each, as trace does, with the
+  :status profiled, unprofiled, already-profiled, not-profiled,
+  not-profilable, refused or not-found. Stopping a namespace that isn't
+  profiled stops the functions in it that are."
+  ([client names ctx on?] (profile client names ctx on? {}))
+  ([client names {:keys [ns]} on? opts]
+   (check-profiler client)
+   (mapv #(profile-one client % ns on? opts) names)))
+
+(defn profile-summary
+  "What profiling measured, the :lines of cider-nrepl's inspector showing
+  it, a table with a row for each function, all on a page, or nil when no
+  function profiled has been called. It asks outside any session, since it
+  takes over the inspector of the session it's asked in."
+  [client opts]
+  (check-profiler client)
+  (try
+    (:lines (inspector client nil {:op "cider/profile-summary" :page-size Integer/MAX_VALUE} opts))
+    (catch clojure.lang.ExceptionInfo e
+      ;; cider-nrepl 0.64.0 can't show an empty table.
+      (when-not (str/includes? (str (ex-message e)) "view-mode-supported?")
+        (throw e)))))
+
+(defn clear-profile
+  "Forgets what profiling measured so far."
+  ([client] (clear-profile client {}))
+  ([client opts]
+   (check-profiler client)
+   (ask client {:op "cider/profile-clear"} opts)
+   {:cleared true}))
 
 (defn- subscribe
   "Sends msg, which has the server send a stream of responses, and returns

@@ -23,6 +23,7 @@
 - [#66](https://github.com/nrepl/neorepl/pull/66): `,spec` browses the specs, filtering them as their names are typed, a spec's form with the specs it names to go to, and examples generated from it.
 - [#69](https://github.com/nrepl/neorepl/pull/69): The REPL shows what the server's own threads print, like a web server's handlers, above the prompt, with nREPL 1.5 or later and babashka.
 - [#71](https://github.com/nrepl/neorepl/pull/71): The REPL shows the values sent to `tap>` above the prompt, and `,tap` opens the last one in the inspector, with cider-nrepl 0.64 or later.
+- [#70](https://github.com/nrepl/neorepl/pull/70): `neorepl profile` and `,profile` time every call of the functions named, or of a namespace's, and show what was measured, with `unprofile` to stop and `--clear`, or `,profile-clear`, to start over, on cider-nrepl's profiler.
 
 ### Changes
 

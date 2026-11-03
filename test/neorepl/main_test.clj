@@ -676,6 +676,33 @@
     (finally
       (run-command "untrace"))))
 
+(deftest profile-test
+  (run "-s" "profiling" "(ns profiled.cli) (defn f [x] (inc x))")
+  (run-command "profile" "--clear")
+  (try
+    (is (= {:status 0 :out "Profiling profiled.cli/f\n" :err ""} (run-command "profile" "--ns" "profiled.cli" "f")))
+    (testing "what can't be profiled"
+      (is (= {:status 1 :out "Already profiling profiled.cli/f\nNo var or namespace called nope\n" :err ""}
+             (run-command "profile" "profiled.cli/f" "nope"))))
+    (testing "what's measured"
+      (is (= {:status 1 :out "" :err "neorepl: No profiled function has been called yet\n"} (run-command "profile")))
+      (run "-s" "profiling" "(profiled.cli/f 1)")
+      (is (= {:status 0 :out "0. {:name \"profiled.cli/f\", :n 1}\n" :err ""} (run-command "profile")))
+      (is (= {:summary "0. {:name \"profiled.cli/f\", :n 1}"} (edn/read-string (:out (run-command "profile" "--format" "edn"))))))
+    (testing "forgetting it"
+      (is (= {:status 0 :out "Forgot what profiling measured\n" :err ""} (run-command "profile" "--clear")))
+      (is (= 1 (:status (run-command "profile"))))
+      (testing "and nothing else"
+        (is (= {:status 2 :out "" :err "neorepl: Unexpected argument: profiled.cli/f\nRun neorepl profile --help for usage.\n"}
+               (run-command "profile" "--clear" "profiled.cli/f")))))
+    (testing "stopping"
+      (is (= {:status 0 :out "Stopped profiling profiled.cli/f\n" :err ""} (run-command "unprofile" "profiled.cli/f")))
+      (is (= {:status 2 :out "" :err "neorepl: Give a SYM\nRun neorepl unprofile --help for usage.\n"}
+             (run-command "unprofile"))))
+    (finally
+      (run-command "unprofile" "profiled.cli/f")
+      (run-command "profile" "--clear"))))
+
 (deftest pst-test
   (run "-s" "pst" "(throw (ex-info \"boom\" {:k 1}))")
   (let [{:keys [status out]} (run-command "pst" "-s" "pst")]
@@ -997,6 +1024,8 @@
     ["server" "--help"] "Usage: neorepl server"
     ["trace" "--help"] "Usage: neorepl trace"
     ["untrace" "--help"] "Usage: neorepl untrace"
+    ["profile" "--help"] "Usage: neorepl profile"
+    ["unprofile" "--help"] "Usage: neorepl unprofile"
     ["mcp" "--help"] "Usage: neorepl mcp")
   (testing "within 80 columns, for terminals that wide"
     (doseq [args (cons ["--help"] (for [{:keys [name]} @#'main/commands] [name "--help"]))

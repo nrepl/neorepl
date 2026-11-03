@@ -1,6 +1,6 @@
 ---
 name: neorepl
-description: Work with a running Clojure, ClojureScript or babashka program through its nREPL server, with the neorepl command line client. Use it to evaluate code, load edited files, run tests, look up docs and source, read stack traces, trace function calls and repair unbalanced parens.
+description: Work with a running Clojure, ClojureScript or babashka program through its nREPL server, with the neorepl command line client. Use it to evaluate code, load edited files, run tests, look up docs and source, read stack traces, trace and profile function calls and repair unbalanced parens.
 ---
 
 # neorepl
@@ -104,6 +104,17 @@ server:
 neorepl trace my.app/parse-date
 neorepl eval -s agent '(my.app/import "data.csv")'
 neorepl untrace my.app/parse-date
+```
+
+To find out where the time goes, profile the functions, or a whole
+namespace, run the code, and read what was measured: each function's calls
+and how long they took. `--clear` forgets it, for the next try:
+
+```shell
+neorepl profile my.app.db
+neorepl eval -s agent '(my.app/import "data.csv")'
+neorepl profile
+neorepl unprofile my.app.db
 ```
 
 ## Looking things up

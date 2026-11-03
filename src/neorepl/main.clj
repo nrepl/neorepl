@@ -705,11 +705,15 @@ when there's no server to talk to."
   flag."
   ([name] (lookup-command name nil nil))
   ([name flag other]
-   (let [{arg-name :arg :keys [args?]} (lookups/lookup name)]
-     (fn [{:keys [format] :as options} args ctx]
-       (let [arg (if args? args (the-arg args arg-name))]
-         (with-lookup-context options ctx
-           #(report-lookup format (if (get options flag) other name) %1 %2 arg)))))))
+   (fn [{:keys [format] :as options} args ctx]
+     (let [name (if (get options flag) other name)
+           {arg-name :arg :keys [args? optional?]} (lookups/lookup name)
+           arg (cond
+                 (nil? arg-name) (reject-args args)
+                 (and args? (or optional? (seq args))) args
+                 :else (the-arg args (str/replace arg-name "..." "")))]
+       (with-lookup-context options ctx
+         #(report-lookup format name %1 %2 arg))))))
 
 (def ^:private source-help
   (help-text
@@ -876,6 +880,46 @@ server to talk to."
    "Examples:
   neorepl untrace my.app/start
   neorepl untrace"))
+
+(def ^:private profile-options
+  (concat connection-options
+          [ns-option
+           lookup-session-option
+           {:long "--clear"
+            :doc "Forget what profiling measured so far"}]
+          common-options))
+
+(def ^:private profile-help
+  (help-text
+   "Usage: neorepl profile [options] [SYM...]"
+   "Profiles the functions SYM, or every function in a namespace SYM, timing
+each call. Without SYM it shows what's been measured: how many calls each
+function had and how long they took, from the shortest to the longest. It
+takes cider-nrepl on the server."
+   profile-options
+   discovery-note
+   "Exit status: 0 when everything SYM names is profiled, or there's something
+to show, 1 when something isn't a function or a namespace, or nothing
+profiled has been called, 2 on usage errors and 3 when there's no server to
+talk to."
+   "Examples:
+  neorepl profile my.app/handler
+  neorepl profile my.app.db
+  neorepl profile
+  neorepl profile --clear"))
+
+(def ^:private unprofile-help
+  (help-text
+   "Usage: neorepl unprofile [options] SYM..."
+   "Stops profiling the functions SYM, or the functions in a namespace SYM,
+keeping what's been measured."
+   lookup-options
+   discovery-note
+   "Exit status: 0 when nothing SYM names is profiled anymore, 1 when something
+isn't a function or a namespace, 2 on usage errors and 3 when there's no
+server to talk to."
+   "Examples:
+  neorepl unprofile my.app/handler"))
 
 (def ^:private pst-options
   (concat connection-options [session-option] common-options))
@@ -1228,6 +1272,10 @@ agent and the eval tool see the same *ns*, *1 and *e."
     :main (lookup-command "trace")}
    {:name "untrace" :summary "Stop tracing functions" :options lookup-options :help untrace-help
     :main (lookup-command "untrace")}
+   {:name "profile" :summary "Profile functions" :options profile-options :help profile-help
+    :main (lookup-command "profile" :clear "profile-clear")}
+   {:name "unprofile" :summary "Stop profiling functions" :options lookup-options :help unprofile-help
+    :main (lookup-command "unprofile")}
    {:name "reload" :summary "Reload code" :options reload-options :help reload-help
     :main reload-command}
    {:name "test" :summary "Run tests" :options test-options :help test-help :main test-command}

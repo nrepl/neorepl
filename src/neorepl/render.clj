@@ -295,6 +295,35 @@
   [{:keys [summary]}]
   (str "tap> " summary))
 
+(defn profile-summary-text
+  "The table in the inspector's view of what profiling measured, as
+  features/profile-summary has it: its Contents section, without the rest."
+  [lines]
+  (let [heading? #(:heading? (first %))
+        table (->> lines (drop-while (complement heading?)) rest (take-while (complement heading?)))]
+    (-> (inspector-text table false)
+        (str/replace #"(?m)^  " "")
+        str/trim)))
+
+(defn profiling-text
+  "What profile and unprofile did: the :results of profiling or stopping, a
+  line each, what was measured, as the :summary, or that it got :cleared."
+  [{:keys [results summary cleared]}]
+  (cond
+    results (str/join "\n" (for [{:keys [status var ns name]} results
+                                 :let [what (or var (str "every function in " ns))]]
+                             (case status
+                               "profiled" (str "Profiling " what)
+                               "unprofiled" (str "Stopped profiling " what)
+                               "already-profiled" (str "Already profiling " what)
+                               "not-profiled" (str "Wasn't profiling " what)
+                               "not-profilable" (str "Can't profile " var ", which is a macro or not a function")
+                               "refused" (str "Won't profile " what ", which the server's own tools call: profiling it"
+                                              " would take the server down")
+                               "not-found" (str "No var or namespace called " name))))
+    summary summary
+    cleared "Forgot what profiling measured"))
+
 (defn trace-event-text
   "A traced call, its return or what it threw, the way orchard prints them,
   a line under the calls it's in: the call, with the arguments, └─→ and the

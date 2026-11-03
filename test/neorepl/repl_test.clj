@@ -814,6 +814,28 @@
   (testing "the subscription over once the REPL is"
     (is (zero? (test-server/tap-subscribers)))))
 
+(deftest profile-test
+  (with-client [client {:port *port*}]
+    (features/clear-profile client)
+    (try
+      (call-with-repl {}
+        (fn [type screen]
+          (type "(defn profiled-in-repl [x] (inc x))\r")
+          (type ",profile profiled-in-repl\r")
+          (is (screen #"Profiling user/profiled-in-repl\nuser=> $"))
+          (type "(profiled-in-repl 1)\r")
+          (is (screen #"(?m)^2\nuser=> $"))
+          (type ",profile\r")
+          (is (screen #"0\. \{:name \"user/profiled-in-repl\", :n 1\}\nuser=> $"))
+          (type ",profile-clear\r")
+          (is (screen #"Forgot what profiling measured\nuser=> $"))
+          (type ",unprofile\r")
+          (is (screen #"Usage: ,unprofile SYM\.\.\.\nuser=> $"))
+          (type ",unprofile profiled-in-repl\r")
+          (is (screen #"Stopped profiling user/profiled-in-repl\nuser=> $"))))
+      (finally
+        (features/clear-profile client)))))
+
 (deftest inspect-test
   (let [{:keys [out]}
         (call-with-repl {}

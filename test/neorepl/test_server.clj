@@ -331,6 +331,77 @@
 
 (middleware/set-descriptor! #'wrap-fake-taps {:handles (zipmap tap-ops (repeat {}))})
 
+(def ^:private profiled
+  "The vars wrap-fake-profiler profiles, and what they held before."
+  (atom {}))
+
+(def ^:private profiled-nses (atom #{}))
+
+(def ^:private profiled-calls
+  "How many times each var wrap-fake-profiler profiles got called."
+  (atom {}))
+
+(defn- toggle-profile!
+  "Profiles v, or stops profiling it, and returns which: profiled or
+  unprofiled."
+  [v]
+  (if-let [f (get @profiled v)]
+    (do (alter-var-root v (constantly f))
+        (swap! profiled dissoc v)
+        "unprofiled")
+    (do (swap! profiled assoc v @v)
+        (alter-var-root v (fn [f]
+                            (fn [& args]
+                              (swap! profiled-calls update v (fnil inc 0))
+                              (apply f args))))
+        "profiled")))
+
+(def ^:private profile-ops
+  #{"cider/profile-toggle-var" "cider/profile-toggle-ns" "cider/profile-summary" "cider/profile-clear"})
+
+(defn wrap-fake-profiler
+  "Profiles functions the way cider-nrepl does, roughly, with its profile
+  ops, counting calls rather than timing them. Its summary is a list of
+  maps on show in the session's inspector, which fails when it's empty, as
+  cider-nrepl 0.64.0's does."
+  [handler]
+  (fn [{:keys [op ns sym] :as msg}]
+    (case op
+      "cider/profile-toggle-var"
+      (let [v (try (ns-resolve (symbol ns) (symbol sym)) (catch Exception e e))]
+        (cond
+          ;; As when ns isn't there.
+          (instance? Exception v) (transport/respond-to msg :ex (str (class v)) :err (str v "\n")
+                                                        :status ["done" "cider/profile-toggle-var-error"])
+          (not (var? v)) (transport/respond-to msg :status ["done" "profile-no-such-var"])
+          ;; As orchard does, which profiles maps too.
+          (or (:macro (meta v)) (not (ifn? @v))) (transport/respond-to msg :status ["done" "profile-invalid-var"])
+          :else (transport/respond-to msg :value (toggle-profile! v) :status "done")))
+      "cider/profile-toggle-ns"
+      (if-let [the-ns (find-ns (symbol ns))]
+        (let [on? (not (contains? @profiled-nses the-ns))]
+          (swap! profiled-nses (if on? conj disj) the-ns)
+          (doseq [v (filter traceable? (vals (ns-interns the-ns)))
+                  :when (= on? (not (contains? @profiled v)))]
+            (toggle-profile! v))
+          (transport/respond-to msg :value (if on? "profiled" "unprofiled") :status "done"))
+        (transport/respond-to msg :ex "class java.lang.Exception" :err (str "java.lang.Exception: No namespace: " ns " found\n")
+                              :status ["done" "cider/profile-toggle-ns-error"]))
+      "cider/profile-summary"
+      (if-let [calls (seq @profiled-calls)]
+        (do (swap! inspected assoc (:session msg) [(vec (for [[v n] (sort-by (comp str key) calls)]
+                                                          {:name (str (symbol v)) :n n}))])
+            (show msg))
+        (transport/respond-to msg :ex "class clojure.lang.ExceptionInfo"
+                              :err "clojure.lang.ExceptionInfo: Precondition failed: (view-mode-supported? inspector mode)\n"
+                              :status ["done" "cider/profile-summary-error"]))
+      "cider/profile-clear"
+      (do (reset! profiled-calls {})
+          (transport/respond-to msg :status ["done" "profile-cleared"]))
+      (handler msg))))
+
+(middleware/set-descriptor! #'wrap-fake-profiler {:handles (zipmap profile-ops (repeat {}))})
+
 (def reloads
   "How many times wrap-fake-reload has reloaded, which code evaluated on the
   server can read."
@@ -423,14 +494,15 @@
 (defn fixture
   "A :once fixture that runs the tests with an nREPL server listening on
   *port*, with wrap-stuck, wrap-fake-inspector, wrap-fake-tracer,
-  wrap-fake-reload, wrap-fake-system-output and wrap-fake-taps unless opts,
-  which go to nrepl.server/start-server, give it a :handler."
+  wrap-fake-profiler, wrap-fake-reload, wrap-fake-system-output and
+  wrap-fake-taps unless opts, which go to nrepl.server/start-server, give
+  it a :handler."
   [& opts]
   (fn [f]
     @builtin-sources
     (let [srv (apply server/start-server :port 0 :handler (server/default-handler #'wrap-stuck #'wrap-fake-inspector #'wrap-fake-tracer
-                                                                                  #'wrap-fake-reload #'wrap-fake-system-output
-                                                                                  #'wrap-fake-taps)
+                                                                                  #'wrap-fake-profiler #'wrap-fake-reload
+                                                                                  #'wrap-fake-system-output #'wrap-fake-taps)
                      opts)]
       (try
         (binding [*port* (:port srv)]

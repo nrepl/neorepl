@@ -1028,6 +1028,60 @@
         (finally
           (features/untrace-all client))))))
 
+(deftest profile-test
+  (with-client [client {:port *port*}]
+    (nrepl/request client {:op "eval" :code "(ns profile.me) (defn f [x] (inc x)) (defn g [x] (f x)) (defmacro m [] 1) (def config {:port 1})"})
+    (features/clear-profile client)
+    (try
+      (testing "vars, the way the namespace has them"
+        (is (= [{:var "profile.me/f" :status "profiled"}
+                {:name "nope" :status "not-found"}
+                {:var "profile.me/m" :status "not-profilable"}
+                {:var "profile.me/config" :status "not-profilable"}]
+               (features/profile client ["f" "nope" "m" "config"] {:ns "profile.me"} true)))
+        (testing "leaving a map a map, which cider-nrepl would turn into a function"
+          (is (= "1" (some :value (nrepl/request client {:op "eval" :code "(:port profile.me/config)"}))))))
+      (testing "but not the functions the server's own tools call, which would take it down"
+        (is (= [{:var "clojure.core/map" :status "refused"}
+                {:ns "clojure.string" :status "refused"}]
+               (features/profile client ["map" "clojure.string"] {:ns "profile.me"} true)))
+        (testing "nor stopping them, which would toggle them on"
+          (is (= [{:var "clojure.core/map" :status "not-profiled"}]
+                 (features/profile client ["map"] {:ns "profile.me"} false)))))
+      (testing "only when they aren't profiled yet"
+        (is (= [{:var "profile.me/f" :status "already-profiled"}]
+               (features/profile client ["profile.me/f"] {:ns "user"} true))))
+      (testing "what's measured, once something's called"
+        (is (nil? (features/profile-summary client {})))
+        (nrepl/request client {:op "eval" :code "(profile.me/g 1) (profile.me/g 2)"})
+        (is (= "0. {:name \"profile.me/f\", :n 2}"
+               (render/profile-summary-text (features/profile-summary client {}))))
+        (testing "and forgetting it"
+          (is (= {:cleared true} (features/clear-profile client)))
+          (is (nil? (features/profile-summary client {})))))
+      (testing "stopping, only when they're profiled"
+        (is (= [{:var "profile.me/f" :status "unprofiled"}] (features/profile client ["f"] {:ns "profile.me"} false)))
+        (is (= [{:var "profile.me/f" :status "not-profiled"}] (features/profile client ["f"] {:ns "profile.me"} false))))
+      (testing "namespaces"
+        (is (= [{:ns "profile.me" :status "profiled"}] (features/profile client ["profile.me"] {:ns "user"} true)))
+        (is (= [{:ns "profile.me" :status "already-profiled"}] (features/profile client ["profile.me"] {:ns "user"} true)))
+        (is (= [{:ns "profile.me" :status "unprofiled"}] (features/profile client ["profile.me"] {:ns "user"} false)))
+        (is (= [{:ns "profile.me" :status "not-profiled"}] (features/profile client ["profile.me"] {:ns "user"} false))))
+      (finally
+        (features/profile client ["profile.me/f" "profile.me"] {:ns "user"} false)
+        (features/clear-profile client)))))
+
+(deftest profile-without-cider-test
+  (let [srv (server/start-server :port 0)]
+    (try
+      (with-client [client {:port (:port srv)}]
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Profiling takes cider-nrepl"
+                              (features/profile client ["inc"] {:ns "user"} true)))
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Profiling takes cider-nrepl"
+                              (features/profile-summary client {}))))
+      (finally
+        (server/stop-server srv)))))
+
 (deftest trace-without-cider-test
   (let [srv (server/start-server :port 0)]
     (try

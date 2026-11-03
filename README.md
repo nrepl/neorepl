@@ -41,13 +41,13 @@ your `$EDITOR`, as it does in bash, and brings back what you save.
 Commands start with a comma, the CIDER way: `,doc`, `,source`, `,apropos`,
 `,macroexpand`, `,pst` for the last error's stack trace, `,stacktrace` to
 browse it, `,reload`, `,autoreload` to reload what changed before each
-evaluation, `,test`, `,inspect`, `,trace`, `,edit` to open a definition in
-your `$EDITOR`, a copy of it for one in a jar, or with cider-nrepl, the
-namespace's file without a name, `,ns` to switch namespaces, loading the one
-you name if it isn't yet, or without a name, to browse them, their vars and
-their docs, `,spec` to browse the specs, from one to those its form names,
-`,sessions` to step into another session, like an agent's, and `,help` for
-the rest.
+evaluation, `,test`, `,inspect`, `,trace`, `,profile`, `,edit` to open a
+definition in your `$EDITOR`, a copy of it for one in a jar, or with
+cider-nrepl, the namespace's file without a name, `,ns` to switch
+namespaces, loading the one you name if it isn't yet, or without a name, to
+browse them, their vars and their docs, `,spec` to browse the specs, from
+one to those its form names, `,sessions` to step into another session, like
+an agent's, and `,help` for the rest.
 Without a terminal, say in a pipe or Emacs' `M-x shell`, it works like
 `clojure.main`'s REPL instead.
 
@@ -213,6 +213,19 @@ the server:
 neorepl trace my.app/handler my.app.db
 neorepl eval '(my.app/handler {:uri "/"})'
 neorepl untrace
+```
+
+`,profile` times every call of a function, or of every function in a
+namespace, and without a name shows what it measured: how many calls each
+function had, and how long they took, on average, in all, at the shortest
+and the longest. `,unprofile` stops and `,profile-clear` forgets what was
+measured, for the next try. `neorepl profile` does the same from the shell,
+with `--clear`, and it takes cider-nrepl on the server too:
+
+```shell
+neorepl profile my.app.db
+neorepl eval '(my.app/import "data.csv")'
+neorepl profile
 ```
 
 `neorepl check` finds unbalanced parens, brackets and braces, the most
