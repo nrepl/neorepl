@@ -441,6 +441,12 @@
                         :above (atom (AttributedString. ""))
                         ;; A token for the line waiting there.
                         :waiting (atom nil)
+                        ;; What was typed when C-x Enter evaluated part of
+                        ;; it, with the :text and the :cursor, for the next
+                        ;; read-code to start with.
+                        :put-back (atom nil)
+                        ;; Where the cursor starts in the next line read.
+                        :start-at (atom nil)
                         :system? (nil? input)}]
             ;; Enter in an unfinished form goes on to a line indented for it,
             ;; rather than to JLine's, which starts at the margin.
@@ -452,6 +458,27 @@
                                ;; JLine's own.
                                (.callWidget reader (str "." LineReader/ACCEPT_LINE)))
                              true)))
+            ;; JLine puts the cursor at the end of the text a read starts
+            ;; with, before it calls this.
+            (.put (.getWidgets reader) LineReader/CALLBACK_INIT
+                  (widget #(do (some->> @(:start-at editor) (.cursor (.getBuffer reader)))
+                               true)))
+            ;; Evaluating the form at the cursor goes the way evaluating
+            ;; what's typed does, with only that form typed, and what was
+            ;; comes back after, for read-code, rather than in the history.
+            (bind-widget reader "neorepl-eval-form" (str (KeyMap/ctrl \X) (KeyMap/ctrl \M))
+                         #(let [buffer (.getBuffer reader)
+                                text (str buffer)
+                                ;; In code points, as JLine counts.
+                                cursor (.cursor buffer)]
+                            (when-let [[start end] (when-not @raw?
+                                                     (lexer/form-at (lexer/lex text) (.offsetByCodePoints text 0 cursor)))]
+                              (reset! (:put-back editor) {:text text :cursor cursor})
+                              (.clear buffer)
+                              (.write buffer ^CharSequence (subs text start end))
+                              (.setVariable reader LineReader/DISABLE_HISTORY true)
+                              (.callWidget reader (str "." LineReader/ACCEPT_LINE))
+                              true)))
             (let [styles (into {} (for [style menu-styles] [style (.getVariable reader style)]))]
               (color-menu reader (:color @settings) styles)
               (add-watch settings ::color (fn [_ _ _ new]
@@ -601,33 +628,45 @@
                                             (f)))))
 
 (defn- read-with
-  "Reads a line with prompt. JLine always ends that line."
-  [{:keys [^Terminal terminal ^LineReader reader line lock] :as editor} prompt]
-  (try
-    (.readLine reader ^String prompt)
-    (catch UserInterruptException e
-      ;; On babashka, Ctrl-C during a read arrives as a signal and as a
-      ;; character too, and the character would interrupt the next read.
-      (let [input (.reader terminal)]
-        (when (= 3 (.peek input 20))
-          (.read input 20)))
-      (throw e))
-    (finally
-      (locking lock
-        (reset! line "")
-        ;; What's still waiting to go above the prompt goes after it now,
-        ;; rather than at the start of what's printed next.
-        (emit editor (AttributedString. ""))))))
+  "Reads a line with prompt, starting with opts' :text, if any, and the
+  cursor at their :cursor, or after the text. The line goes in the history
+  unless their :history? is false. JLine always ends that line. What turns
+  the history off for the line, like C-x Enter, has it back the way it was
+  after."
+  [{:keys [^Terminal terminal ^LineReader reader line lock start-at] :as editor} prompt
+   {:keys [text cursor history?] :or {history? true}}]
+  (let [history (.getVariable reader LineReader/DISABLE_HISTORY)]
+    (reset! start-at cursor)
+    (when-not history?
+      (.setVariable reader LineReader/DISABLE_HISTORY true))
+    (try
+      (let [^Character mask nil]
+        (.readLine reader ^String prompt mask ^String text))
+      (catch UserInterruptException e
+        ;; On babashka, Ctrl-C during a read arrives as a signal and as a
+        ;; character too, and the character would interrupt the next read.
+        (let [input (.reader terminal)]
+          (when (= 3 (.peek input 20))
+            (.read input 20)))
+        (throw e))
+      (finally
+        (.setVariable reader LineReader/DISABLE_HISTORY history)
+        (locking lock
+          (reset! line "")
+          ;; What's still waiting to go above the prompt goes after it now,
+          ;; rather than at the start of what's printed next.
+          (emit editor (AttributedString. "")))))))
 
 (defn read-code
   "Reads code from the user with prompt, on a line of its own. Enter only
-  submits it once its forms are complete, and Ctrl-C starts over. Returns
-  nil at the end of input, which is Ctrl-D on an empty line."
-  [editor prompt]
+  submits it once its forms are complete, and Ctrl-C starts over. After
+  C-x Enter evaluated the form at the cursor, it starts with what was typed
+  then. Returns nil at the end of input, which is Ctrl-D on an empty line."
+  [{:keys [put-back] :as editor} prompt]
   (loop []
     (fresh-line editor)
     (let [line (try
-                 (read-with editor prompt)
+                 (read-with editor prompt (first (reset-vals! put-back nil)))
                  (catch UserInterruptException _ ::interrupted)
                  (catch EndOfFileException _ nil))]
       (if (= ::interrupted line)
@@ -637,17 +676,15 @@
 (defn read-line
   "Reads a line as typed, for code reading *in*, leaving it out of the
   history. Returns nil at the end of input and ::interrupted on Ctrl-C."
-  [{:keys [^LineReader reader raw? line] :as editor}]
+  [{:keys [raw? line] :as editor}]
   (reset! raw? true)
-  (.setVariable reader LineReader/DISABLE_HISTORY true)
   (try
     ;; JLine redraws the line it reads, so whatever's been printed on it,
     ;; like a question the code asks, goes in the prompt.
-    (read-with editor @line)
+    (read-with editor @line {:history? false})
     (catch EndOfFileException _ nil)
     (catch UserInterruptException _ ::interrupted)
     (finally
-      (.setVariable reader LineReader/DISABLE_HISTORY false)
       (reset! raw? false))))
 
 (def ^:private keys-by-capability

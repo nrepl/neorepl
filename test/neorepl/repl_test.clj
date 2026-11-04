@@ -240,6 +240,36 @@
              (type "\r")
              (is (screen #"(?m)^2\nuser=> $")))))))))
 
+(deftest eval-form-test
+  (testing "C-x Enter evaluates the form at the cursor, and brings back the input"
+    (let [{:keys [history]}
+          (call-with-repl {}
+            (fn [type screen]
+              ;; Back to right after (inc 41). JLine redraws the line with
+              ;; only the form on it by changing what's different, so the
+              ;; screen has what's left of the input after it.
+              (type "(list (inc 41) 2)\u0002\u0002\u0002\u0018\r")
+              (is (screen #"inc 41\)\n42\nuser=> \(list \(inc 41\) 2\)"))
+              (testing "with the cursor where it was"
+                (type " 1\r")
+                (is (screen #"(?m)^\(42 1 2\)\nuser=> $")))
+              (testing "in a form that's not finished"
+                (type "(+ 1 (* 2 3)\u0018\r")
+                (is (screen #"\n6\nuser=> \(\+ 1 \(\* 2 3\)$"))
+                (type ")\r")
+                (is (screen #"(?m)^7\nuser=> $")))
+              (testing "counting the cursor as JLine does, in code points"
+                (type "(str \"😀\" (inc 1))\u0018\r")
+                (is (screen #"(?m)^\"😀2\"\nuser=> \(str \"😀\" \(inc 1\)\)$"))
+                (type "\u0003"))
+              (testing "or nothing between forms, but a bell"
+                (type "(inc 1) \u0018\r")
+                (is (screen #"\nuser=> \(inc 1\) \u0007$"))
+                (type "\u0003"))))]
+      (testing "keeping what was typed in the history, rather than what was evaluated of it"
+        (is (str/includes? history "(list (inc 41) 1 2)"))
+        (is (not (re-find #"(?m):\(inc 41\)$" history)))))))
+
 (deftest output-test
   (testing "stdout and stderr get lines of their own"
     (call-with-repl {}

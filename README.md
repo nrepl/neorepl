@@ -37,7 +37,9 @@ under the input, with the parameter the argument at the cursor goes into in
 bold, and a macro's, like `defn`'s, matched by their shape. C-x C-d shows
 the documentation of what's at the cursor, C-x C-s its source and C-x C-a
 the vars whose names have it in them. C-x C-e opens what you've typed in
-your `$EDITOR`, as it does in bash, and brings back what you save.
+your `$EDITOR`, as it does in bash, and brings back what you save, and C-x
+Enter evaluates only the form at the cursor, or the one right before it,
+then brings back what you'd typed.
 Commands start with a comma, the CIDER way: `,doc`, `,source`, `,apropos`,
 `,macroexpand`, `,pst` for the last error's stack trace, `,stacktrace` to
 browse it, `,reload`, `,autoreload` to reload what changed before each

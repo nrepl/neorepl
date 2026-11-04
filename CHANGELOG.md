@@ -26,6 +26,7 @@
 - [#70](https://github.com/nrepl/neorepl/pull/70): `neorepl profile` and `,profile` time every call of the functions named, or of a namespace's, and show what was measured, with `unprofile` to stop and `--clear`, or `,profile-clear`, to start over, on cider-nrepl's profiler.
 - [#74](https://github.com/nrepl/neorepl/pull/74): `,set` lists the REPL's settings and turns them on or off, C-x C-h and C-x C-q toggle eldoc and quiet, and `~/.config/neorepl/config.edn` says what they start as.
 - [#75](https://github.com/nrepl/neorepl/pull/75): The REPL's `pretty` setting, on C-x C-p, prints values pretty or plain, and `print-length` and `print-level` limit how much of them it shows.
+- [#77](https://github.com/nrepl/neorepl/pull/77): C-x Enter in the REPL evaluates only the form at the cursor, or the one right before it, and brings back what's typed, with the cursor where it was.
 
 ### Changes
 
