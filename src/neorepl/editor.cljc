@@ -24,8 +24,9 @@
 (def ^:private colors
   "Styles for lexer token types, for :err output and :notice messages, for
   the delimiter that pairs with the one at the cursor, its :match, for the
-  REPL's :commands, for the :headings of full-screen views, and for eldoc's
-  pieces, as render/eldoc-line has them."
+  REPL's :commands, for the :headings of full-screen views, for eldoc's
+  pieces, as render/eldoc-line has them, and for the :success
+  render/outcome shows."
   (let [faint (.faint AttributedStyle/DEFAULT)
         green (fg AttributedStyle/GREEN)
         magenta (fg AttributedStyle/MAGENTA)
@@ -53,7 +54,8 @@
      ;; Eldoc's parameter for the argument at the cursor, and the arglists
      ;; that can't take it.
      :eldoc-arg (.bold AttributedStyle/DEFAULT)
-     :eldoc-faint faint}))
+     :eldoc-faint faint
+     :success green}))
 
 (def ^:private specials
   "Symbols highlighted as :special: the special forms, the ones macros
@@ -136,16 +138,20 @@
         (throw (EOFError. -1 -1 "Incomplete form")))
       (parsed-line line cursor))))
 
+(defn- styled-pieces
+  "pieces, [text] or [text style], as an AttributedString."
+  ^AttributedString [styles pieces]
+  (let [b (AttributedStringBuilder.)]
+    (doseq [[text k] pieces]
+      (.styled b (style styles k) ^CharSequence text))
+    (.toAttributedString b)))
+
 (defn- eldoc-string
   "pieces, render/eldoc-line's, styled, and cut to fit in columns, if it
   has any: without the namespace first, then with an ellipsis for what's
   left out."
   ^AttributedString [styles pieces columns]
-  (let [styled (fn [pieces]
-                 (let [b (AttributedStringBuilder.)]
-                   (doseq [[text k] pieces]
-                     (.styled b (style styles k) ^CharSequence text))
-                   (.toAttributedString b)))
+  (let [styled (partial styled-pieces styles)
         fits? #(or (not (pos? columns)) (<= (.columnLength ^AttributedString %) columns))
         whole (styled pieces)
         short (delay (styled (remove #(= :eldoc-ns (second %)) pieces)))]
@@ -203,6 +209,25 @@
       (.styleMatches styled-code #"^\s*,[a-z][a-z-]*" (style styles k))
       styled-code)))
 
+(defn- with-right-prompt
+  "styled, the input, with right-prompt, an AttributedString, at the right
+  of its first line, after a prompt prompt-width columns wide, when that
+  leaves it a gap and a column to spare, as a terminal can wrap a line
+  that fills the last one. Not past a tab, whose width depends on where it
+  is."
+  ^AttributedString [^AttributedString styled ^AttributedString right-prompt prompt-width columns]
+  (let [text (str styled)
+        end (or (str/index-of text "\n") (count text))
+        first-line (.subSequence styled 0 (int end))
+        gap (- columns prompt-width (.columnLength first-line) (.columnLength right-prompt) 1)]
+    (if (or (< gap 2) (str/includes? (subs text 0 end) "\t"))
+      styled
+      (.toAttributedString (doto (AttributedStringBuilder.)
+                             (.append first-line)
+                             (.append (apply str (repeat gap \space)))
+                             (.append right-prompt)
+                             (.append (.subSequence styled (int end) (.length styled))))))))
+
 (defn- highlighter
   "Highlights code, with what the delimiter at the cursor pairs with, and
   has (eldoc text cursor refresh) say what to show under it, as
@@ -210,13 +235,16 @@
   again, for eldoc to call when what it shows changes, like when a lookup
   it started comes back. JLine highlights on every redisplay, so eldoc sees
   every change to the line, whatever made it, and the pair follows the
-  cursor. JLine's last redisplay of the line, once it's done reading it,
-  goes without the pair or eldoc, so they don't stay behind in the
-  scrollback. The names of the REPL's commands, a set, show as
-  command-styled has them. under is where eldoc's line goes, see
-  show-under. (styles) is the styles to use, and eldoc shows something
-  only while (eldoc?), both as they are at each redisplay."
-  [styles raw? eldoc eldoc? commands under]
+  cursor. The right prompt, when right has one, with the width of the
+  prompt, goes at the right of the first line, as with-right-prompt puts
+  it. JLine's last redisplay of the line, once it's done reading it, goes
+  without the pair, eldoc or the right prompt, so they don't stay behind
+  in the scrollback, where JLine's own right prompt would. The names of the
+  REPL's commands, a set, show as command-styled has them. under is where
+  eldoc's line goes, see show-under. (styles) is the styles to use, and
+  eldoc shows something only while (eldoc?), both as they are at each
+  redisplay."
+  [styles raw? eldoc eldoc? commands under right]
   (reify Highlighter
     (highlight [_ reader buffer]
       (if @raw?
@@ -232,10 +260,12 @@
                           ;; A column to spare, as a terminal can wrap a line
                           ;; that fills the last one.
                           (eldoc-string styles pieces (dec (.getWidth (.getTerminal reader)))))))
-          (command-styled styles commands buffer
-                          (styled styles lexed (if reading?
-                                                 (delimiter-marks (lexer/delimiter-match lexed cursor))
-                                                 {}))))))
+          (cond-> (command-styled styles commands buffer
+                                  (styled styles lexed (if reading?
+                                                         (delimiter-marks (lexer/delimiter-match lexed cursor))
+                                                         {})))
+            (and reading? @right) (with-right-prompt (:right-prompt @right) (:prompt-width @right)
+                                    (.getWidth (.getTerminal reader)))))))
     (setErrorPattern [_ _])
     (setErrorIndex [_ _])))
 
@@ -405,6 +435,8 @@
         (do (.close terminal)
             nil)
         (let [raw? (atom false)
+              ;; The right prompt of the line being read, if any.
+              right (atom nil)
               styles #(if (:color @settings) colors {})
               shown (atom nil)
               under {:shown shown
@@ -415,7 +447,7 @@
                           (.terminal terminal)
                           (.appName "neorepl")
                           (.parser (parser raw? incomplete?))
-                          (.highlighter (highlighter styles raw? (some-> eldoc safely) #(:eldoc @settings) commands under))
+                          (.highlighter (highlighter styles raw? (some-> eldoc safely) #(:eldoc @settings) commands under right))
                           (.variable LineReader/SECONDARY_PROMPT_PATTERN "%P #_=> ")
                           ;; The highlighter shows the pair, rather than JLine
                           ;; moving the cursor to it after a closer is typed.
@@ -447,6 +479,7 @@
                         :put-back (atom nil)
                         ;; Where the cursor starts in the next line read.
                         :start-at (atom nil)
+                        :right right
                         :system? (nil? input)}]
             ;; Enter in an unfinished form goes on to a line indented for it,
             ;; rather than to JLine's, which starts at the margin.
@@ -628,15 +661,19 @@
                                             (f)))))
 
 (defn- read-with
-  "Reads a line with prompt, starting with opts' :text, if any, and the
-  cursor at their :cursor, or after the text. The line goes in the history
-  unless their :history? is false. JLine always ends that line. What turns
-  the history off for the line, like C-x Enter, has it back the way it was
-  after."
-  [{:keys [^Terminal terminal ^LineReader reader line lock start-at] :as editor} prompt
-   {:keys [text cursor history?] :or {history? true}}]
+  "Reads a line with prompt, and opts' :right-prompt, an AttributedString,
+  at the right of it while it's read, starting with their :text, if any,
+  and the cursor at their :cursor, or after the text. The line goes in the
+  history unless their :history? is false. JLine always ends that line.
+  What turns the history off for the line, like C-x Enter, has it back the
+  way it was after."
+  [{:keys [^Terminal terminal ^LineReader reader line lock start-at right] :as editor} prompt
+   {:keys [right-prompt text cursor history?] :or {history? true}}]
   (let [history (.getVariable reader LineReader/DISABLE_HISTORY)]
     (reset! start-at cursor)
+    (reset! right (when right-prompt
+                    {:right-prompt right-prompt
+                     :prompt-width (.columnLength (AttributedString/fromAnsi prompt))}))
     (when-not history?
       (.setVariable reader LineReader/DISABLE_HISTORY true))
     (try
@@ -658,20 +695,23 @@
           (emit editor (AttributedString. "")))))))
 
 (defn read-code
-  "Reads code from the user with prompt, on a line of its own. Enter only
-  submits it once its forms are complete, and Ctrl-C starts over. After
-  C-x Enter evaluated the form at the cursor, it starts with what was typed
-  then. Returns nil at the end of input, which is Ctrl-D on an empty line."
-  [{:keys [put-back] :as editor} prompt]
-  (loop []
-    (fresh-line editor)
-    (let [line (try
-                 (read-with editor prompt (first (reset-vals! put-back nil)))
-                 (catch UserInterruptException _ ::interrupted)
-                 (catch EndOfFileException _ nil))]
-      (if (= ::interrupted line)
-        (recur)
-        line))))
+  "Reads code from the user with prompt, on a line of its own, and what
+  right-prompt's pieces say, as render/outcome has them, if any, at the
+  right of it. Enter only submits it once its forms are complete, and
+  Ctrl-C starts over. After C-x Enter evaluated the form at the cursor, it
+  starts with what was typed then. Returns nil at the end of input, which
+  is Ctrl-D on an empty line."
+  [{:keys [styles put-back] :as editor} prompt right-prompt]
+  (let [right-prompt (some->> right-prompt (styled-pieces (styles)))]
+    (loop []
+      (fresh-line editor)
+      (let [line (try
+                   (read-with editor prompt (assoc (first (reset-vals! put-back nil)) :right-prompt right-prompt))
+                   (catch UserInterruptException _ ::interrupted)
+                   (catch EndOfFileException _ nil))]
+        (if (= ::interrupted line)
+          (recur)
+          line)))))
 
 (defn read-line
   "Reads a line as typed, for code reading *in*, leaving it out of the
