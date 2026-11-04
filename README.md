@@ -335,18 +335,22 @@ and babashka's `bb repl --connect` are both nREPL clients too, but they're
 after different things. neorepl's goals are a CIDER-like REPL in the
 terminal, a CLI that serves coding agents as well as people, and working
 with any nREPL server out there. Here's how the three stack up in practice
-(as of October 2026):
+(as of November 2026):
 
 | | neorepl | clojure-cli.repl | `bb repl --connect` |
 |---|---|---|---|
-| Runs on | JVM or babashka | JVM, Clojure 1.12+ | babashka |
-| Servers | any nREPL server | its own; other servers only evaluate | any nREPL server |
+| Runs on | JVM or babashka | JVM | babashka |
+| Servers | any nREPL server, tested with nREPL, babashka, shadow-cljs, piggieback, nbb and Basilisp | its own; other servers only evaluate and complete | any nREPL server |
 | Starts a server for you | Leiningen, deps.edn, bb and shadow-cljs projects, with cider-nrepl | deps.edn projects | no |
-| Completion, arglists as you type | yes | no | yes |
+| Completion, arglists as you type | yes | completion | yes |
 | Docs | yes, and source, apropos, macroexpansion | yes, with Java docs | yes |
-| Structural editing, eval at the cursor | no | yes | no |
+| Eval at the cursor | yes | yes | no |
+| Structural editing | no | yes | no |
 | Inspector | yes | yes | no |
 | Test runner | yes | no | no |
+| Browsing namespaces and specs, cross-references | yes | no | no |
+| Reloading, tracing, profiling | yes, and reloading what changed before each evaluation | no | no |
+| Beside an editor | evaluates from Neovim, Emacs and Helix without a plugin | shows what the editor evaluates | no |
 | ClojureScript | shadow-cljs, piggieback, figwheel-main | no | evaluation only |
 | CLI for scripts and agents | yes: eval, docs, tests and more, with JSON output | no | no |
 
