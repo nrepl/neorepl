@@ -325,7 +325,7 @@
        (is (str/includes? out "Ran 1 test containing 1 assertion.\n1 failure, 0 errors.\n"))
        (testing "values printed as far as the limits say, pretty printed or not"
          (is (str/includes? out "demo.core=> [(0 1 2 ...) [#]]\ndemo.core=> pretty off\n"))
-         ;; bb's nrepl.util.print/pr ignores the limits.
+         ;; bb's nrepl.util.print/pr ignores the limits (babashka#2274).
          (is (str/includes? out (if (= :bb server)
                                   "demo.core=> [(0 1 2 3 4 5 6 7 8 9) [[1]]]\n"
                                   "demo.core=> [(0 1 2 ...) [#]]\ndemo.core=> \n"))))))))
