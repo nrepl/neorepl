@@ -378,9 +378,9 @@
 
 (defn references
   "The functions that use the var sym names where ctx says, or with deps?,
-  the ones it uses, as cider-nrepl finds them in the code that's loaded:
-  maps with the :name, qualified, and where it's defined, when it's in a
-  file, its :file, as source-file has it, :line and :column. Throws
+  the ones it uses, as cider-nrepl finds them in the project's code that's
+  loaded: maps with the :name, qualified, and where it's defined, when it's
+  in a file, its :file, as source-file has it, :line and :column. Throws
   ::failed when there's nothing called sym, which the server takes for a
   var nothing uses."
   ([client sym ctx deps?] (references client sym ctx deps? {}))

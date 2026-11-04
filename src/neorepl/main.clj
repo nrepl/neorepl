@@ -809,8 +809,9 @@ usage errors and 3 when there's no server to talk to."
   (help-text
    "Usage: neorepl refs [options] SYM"
    "Lists the functions that use the var SYM, each with where it's defined, in
-the code that's loaded: what calls a function before changing it, say.
-With --deps, it lists the functions SYM uses instead. Takes cider-nrepl."
+the project's code that's loaded: what calls a function before changing
+it, say. With --deps, it lists the functions SYM uses instead. Takes
+cider-nrepl."
    refs-options
    discovery-note
    "Exit status: 0 when it finds some, 1 when it finds none or the server
