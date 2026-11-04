@@ -45,9 +45,10 @@
   :settings-file the config file.
 
   Eldoc is off unless opts say :eldoc true, since what it shows after the
-  cursor gets in the way of reading the screen, and so are colors unless
-  they say :color true, since showing the delimiter that pairs with the
-  one at the cursor redraws the line."
+  cursor gets in the way of reading the screen, and so is the last
+  evaluation's outcome at the right of the prompt unless they say :outcome
+  true, and colors unless they say :color true, since showing the
+  delimiter that pairs with the one at the cursor redraws the line."
   [opts f]
   (call-with-temp-dir
    (fn [dir]
@@ -60,7 +61,7 @@
                                      :history-dir (io/file dir "history")
                                      :editor-command (:editor-command opts)
                                      :settings-file (:settings-file opts)
-                                     :settings (merge {:eldoc false :color false}
+                                     :settings (merge {:eldoc false :color false :outcome false}
                                                       (select-keys opts setting-names))
                                      :terminal (merge {:input in :output out :width 80}
                                                       (apply dissoc opts :sessions-file :editor-command :settings-file
@@ -269,6 +270,35 @@
       (testing "keeping what was typed in the history, rather than what was evaluated of it"
         (is (str/includes? history "(list (inc 41) 1 2)"))
         (is (not (re-find #"(?m):\(inc 41\)$" history)))))))
+
+(deftest outcome-test
+  (testing "the last evaluation's outcome and time at the right of the prompt"
+    (call-with-repl {:outcome true}
+      (fn [type screen]
+        (type "(+ 1 2)\r")
+        (is (screen #"(?m)^3\nuser=> +✓ \d[\d.m]*s$"))
+        (type "(/ 1 0)\r")
+        (is (screen #"ArithmeticException(?s).*\nuser=> +✗ \d[\d.m]*s$"))
+        (testing "till a command runs, but not an empty line"
+          (type "\r")
+          (is (screen #"\nuser=> +✗ \d[\d.m]*s$"))
+          (type ",set eldoc off\r")
+          (is (screen #"eldoc off\nuser=> $")))
+        (testing "unless it's off"
+          (type ",set outcome off\r")
+          (is (screen #"outcome off\nuser=> $"))
+          (type "(+ 1 2)\r")
+          (is (screen #"(?m)^3\nuser=> $"))))))
+  (let [right-prompt #(str (#'editor/with-right-prompt (AttributedString. ^String %1) (AttributedString. "✓ 3ms") 7 %2))]
+    (testing "on the first line, leaving the last column"
+      ;; 7 columns of prompt, then the line, the gap and the outcome in 79.
+      (is (= (str "(+ 1 2)" (apply str (repeat 60 \space)) "✓ 3ms")
+             (right-prompt "(+ 1 2)" 80)))
+      (is (= (str "(let [a 1]" (apply str (repeat 57 \space)) "✓ 3ms\n  a)")
+             (right-prompt "(let [a 1]\n  a)" 80))))
+    (testing "or not at all, without room for it, or past a tab"
+      (is (= "(+ 1 2)" (right-prompt "(+ 1 2)" 20)))
+      (is (= "(+\t1 2)" (right-prompt "(+\t1 2)" 80))))))
 
 (deftest output-test
   (testing "stdout and stderr get lines of their own"

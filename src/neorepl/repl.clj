@@ -535,14 +535,16 @@
   "Reads code with read-code and evaluates it until the input ends or says
   :repl/quit. read-code gets where the REPL is: the :ns, the :session,
   session to begin with, and its :session-name, if it has one,
-  session-name to begin with. Runs commands too, which get io for what
-  else they need, and can switch sessions. Responses go to print-response,
-  late ones and what commands print too, and result messages to
-  print-message. Evaluations, and commands' lookups, run through quietly,
-  if there is one, as editor/quietly takes f. The :settings, an atom, say
-  what gets printed above the prompt, and whether what changed gets
-  reloaded before each evaluation, which :autoreload? turns on at the
-  start, as ,autoreload does.
+  session-name to begin with, and how the last evaluation went, with its
+  :status and the :ms it took, or nil before one and once a command's run
+  since. Runs commands too, which get io for what else they need, and can
+  switch sessions. Responses go to print-response, late ones and what
+  commands print too, and result messages to print-message. Evaluations,
+  and commands' lookups, run through quietly, if there is one, as
+  editor/quietly takes f. The :settings, an atom, say what gets printed
+  above the prompt, and whether what changed gets reloaded before each
+  evaluation, which :autoreload? turns on at the start, as ,autoreload
+  does.
 
   What an interrupted evaluation says from then on is left out, since it
   comes from it dying: an InterruptedException, or code carrying on after a
@@ -675,8 +677,9 @@
            (when-not (:autoreload @settings)
              (print-response output))))
        (loop [{:keys [ns session] :as place} (assoc own :ns (nrepl/evaluation-ns client session))
-              pending nil]
-         (let [code (or pending (read-code place))
+              pending nil
+              last-eval nil]
+         (let [code (or pending (read-code place last-eval))
                [name arg more] (some-> code command-call)
                output (when name
                         (reset! command-thread (Thread/currentThread))
@@ -692,12 +695,15 @@
                             (Thread/interrupted))))]
            (cond
              (or (nil? code) (= ":repl/quit" (str/trim code)) (= :quit output)) nil
-             (str/blank? code) (recur place nil)
+             (str/blank? code) (recur place nil last-eval)
              output (do (print-response output)
-                        (recur (merge place (select-keys output [:session :session-name :ns])) more))
+                        (recur (merge place (select-keys output [:session :session-name :ns])) more nil))
              :else
-             (let [result (evaluate session #(evaluation/evaluate client (eval-msg session code (width) @settings) %))]
-               (recur (assoc place :ns (or (:ns result) ns)) nil)))))))))
+             (let [started (System/nanoTime)
+                   result (evaluate session #(evaluation/evaluate client (eval-msg session code (width) @settings) %))]
+               (recur (assoc place :ns (or (:ns result) ns))
+                      nil
+                      {:status (:status result) :ms (quot (- (System/nanoTime) started) 1000000)})))))))))
 
 (defn- read-input
   "Reads lines from *in* until they hold complete forms, or nil at the end of
@@ -755,7 +761,7 @@
     (try
       (run-loop client session interruptions
                 (assoc opts
-                       :read-code (fn [place]
+                       :read-code (fn [place _]
                                     ;; Rather than run into a line stderr left open.
                                     (print-response :end)
                                     (print (prompt place))
@@ -863,16 +869,19 @@
 
 (defn- interactive
   "The REPL with a line editor. in-ns gets called with where the REPL is, as
-  run-loop's read-code gets it, at each prompt."
-  [client session editor in-ns opts]
+  run-loop's read-code gets it, at each prompt, which shows how the last
+  evaluation went at its right, when the settings say so."
+  [client session editor in-ns {:keys [settings] :as opts}]
   (let [{:keys [interrupt] :as interruptions} (interruptions)]
     (editor/on-interrupt editor interrupt)
     (editor/print-text editor :notice (banner client))
     (run-loop client session interruptions
               (assoc opts
-                     :read-code (fn [place]
+                     :read-code (fn [place last-eval]
                                   (in-ns place)
-                                  (editor/read-code editor (prompt place)))
+                                  (editor/read-code editor (prompt place)
+                                                    (when (:outcome @settings)
+                                                      (some-> last-eval render/outcome))))
                      :read-line #(let [line (editor/read-line editor)]
                                    (if (= ::editor/interrupted line)
                                      (do (interrupt) :interrupted)

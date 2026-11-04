@@ -39,7 +39,9 @@ the documentation of what's at the cursor, C-x C-s its source and C-x C-a
 the vars whose names have it in them. C-x C-e opens what you've typed in
 your `$EDITOR`, as it does in bash, and brings back what you save, and C-x
 Enter evaluates only the form at the cursor, or the one right before it,
-then brings back what you'd typed.
+then brings back what you'd typed. After an evaluation, the prompt shows
+at its right whether it worked, ✓ or ✗, and how long it took, until you
+press Enter.
 Commands start with a comma, the CIDER way: `,doc`, `,source`, `,apropos`,
 `,macroexpand`, `,pst` for the last error's stack trace, `,stacktrace` to
 browse it, `,reload`, `,autoreload` to reload what changed before each
@@ -70,7 +72,8 @@ $endif
 arglists under the input, `color`, `pretty`, for values pretty printed as
 wide as the terminal, `server-output`, what the server's System/out and
 System/err get, and `taps`, for what shows up above the prompt, `quiet`,
-which leaves all of that out for a while, and `autoreload`. `print-length`
+which leaves all of that out for a while, `outcome`, for how the last
+evaluation went at the right of the prompt, and `autoreload`. `print-length`
 and `print-level` take a number, how many items of a collection a value
 shows and how deep it goes, or `off`, which leaves that to the session's
 `*print-length*` and `*print-level*`. Pretty printing counts a map's

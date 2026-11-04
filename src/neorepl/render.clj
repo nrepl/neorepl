@@ -309,6 +309,23 @@
   [k v]
   (str (name k) " " (setting-value-text v)))
 
+(defn- duration-text
+  "ms, a duration in milliseconds, in milliseconds under a second, then in
+  seconds, to a tenth, and minutes and seconds past a minute."
+  [ms]
+  (cond
+    (< ms 1000) (str ms "ms")
+    (< ms 60000) (str (quot ms 1000) "." (quot (rem ms 1000) 100) "s")
+    :else (str (quot ms 60000) "m" (quot (rem ms 60000) 1000) "s")))
+
+(defn outcome
+  "How an evaluation went, by its :status, as evaluation/evaluate has it,
+  and how long it took, :ms, as pieces like eldoc-line's: a check mark in
+  the :success style or a cross as an :err, and the time as a :notice."
+  [{:keys [status ms]}]
+  [(if (= "ok" status) ["✓" :success] ["✗" :err])
+   [(str " " (duration-text ms)) :notice]])
+
 (defn settings-text
   "settings, the REPL's, as ,set lists them: a line each, with what it's
   set to, what it is, and the key that toggles it, if any."

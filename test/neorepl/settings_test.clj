@@ -56,4 +56,4 @@
 
 (deftest toggles-test
   (testing "the settings on or off, but for autoreload"
-    (is (= [:color :eldoc :pretty :quiet :server-output :taps] (map :name settings/toggles)))))
+    (is (= [:color :eldoc :outcome :pretty :quiet :server-output :taps] (map :name settings/toggles)))))

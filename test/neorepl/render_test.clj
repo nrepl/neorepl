@@ -207,6 +207,7 @@
   (is (= (str "autoreload     off  Reload what changed before each evaluation\n"
               "color          on   Colors, unless NO_COLOR is set\n"
               "eldoc          on   The called function's arglists, under the input (C-x C-h)\n"
+              "outcome        on   The last evaluation's outcome and time, right of the prompt\n"
               "pretty         on   Values pretty printed, as wide as the terminal (C-x C-p)\n"
               "print-length   off  The items of a collection a value shows, or all\n"
               "print-level    off  How deep into collections a value shows, or all the way\n"
@@ -218,3 +219,15 @@
                (render/settings-text (assoc settings/defaults :print-length 100))))
   (is (= "eldoc off" (render/setting-text :eldoc false)))
   (is (= "print-level 5" (render/setting-text :print-level 5))))
+
+(deftest outcome-test
+  (is (= [["✓" :success] [" 12ms" :notice]] (render/outcome {:status "ok" :ms 12})))
+  (is (= [["✗" :err] [" 0ms" :notice]] (render/outcome {:status "eval-error" :ms 0})))
+  (testing "in seconds past one, and minutes past one of those"
+    (are [ms text] (= text (first (second (render/outcome {:status "ok" :ms ms}))))
+      999 " 999ms"
+      1000 " 1.0s"
+      1250 " 1.2s"
+      59999 " 59.9s"
+      60000 " 1m0s"
+      125400 " 2m5s")))
