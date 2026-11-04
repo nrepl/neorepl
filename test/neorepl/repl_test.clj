@@ -777,7 +777,7 @@
         (type ",set print-level 2\r")
         (is (screen #"print-level 2\nuser=> $"))
         ;; babashka's nrepl.util.print/pr ignores the limits, and its
-        ;; pprint the session's own *print-length*.
+        ;; pprint the session's own *print-length* (babashka#2274).
         (when-not (System/getProperty "babashka.version")
           (type "[(range 10) [[1]]]\r")
           (is (screen #"\n\[\(0 1 2 \.\.\.\) \[#\]\]\nuser=> $")))

@@ -75,5 +75,5 @@
        (is (= 0 status))
        (is (str/includes? out "demo.core=> \"hi r\"\n"))
        (is (str/includes? out "demo.core-test=> \"hi q\"\n"))
-       ;; Neither takes nREPL's printers' options.
+       ;; Neither takes nREPL's printers' options (nbb#436).
        (is (str/includes? out "demo.core-test=> (0 1 2 3 4 5 6 7 8 9)\n"))))))
