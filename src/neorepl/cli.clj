@@ -12,6 +12,18 @@
   [{:keys [long]}]
   (keyword (subs long 2)))
 
+(defn parse-index
+  "The number s is, 0 or more, or nil when it's no number."
+  [s]
+  (when (re-matches #"\d{1,9}" s)
+    (Long/parseLong s)))
+
+(defn parse-count
+  "The number s is, 1 or more, or nil when it's no number or 0."
+  [s]
+  (when-let [n (parse-index s)]
+    (when (pos? n) n)))
+
 (defn- option?
   "Whether arg looks like an option: --name, a short -x, or one of the
   short options in by-name with more after it, so that symbols like -> and

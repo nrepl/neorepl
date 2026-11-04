@@ -117,13 +117,17 @@
 (deftest repl-test
   (on-each-server
    (fn [server]
-     (let [{:keys [status out]} (run-with server (str ",sessions cljs\n(js/parseInt \"7\")\n,ns demo.core\n(greet \"r\")\n"
+     (let [{:keys [status out]} (run-with server (str ",sessions cljs\n(js/parseInt \"7\")\n"
+                                                      ",set print-length 3\n(range 10)\n,set pretty off\n(range 10)\n"
+                                                      ",ns demo.core\n(greet \"r\")\n"
                                                       ",ns demo.a\n,ns demo.a-test\n(a/f)\n"
                                                       ",ns demo.b\n,test demo.b-test\n"
                                                       ",ns cljs.user\n,sessions -\n(+ 1 2)\n")
                                           "repl")]
        (is (= 0 status))
        (is (str/includes? out "cljs.user=> 7\n"))
+       ;; Printed again on the JVM, which takes the limit.
+       (is (str/includes? out "cljs:cljs.user=> (0 1 2 ...)\ncljs:cljs.user=> pretty off\ncljs:cljs.user=> (0 1 2 ...)\n"))
        (is (str/includes? out "demo.core=> \"hi r\"\n"))
        (is (str/includes? out "demo.a-test=> :a\n"))
        (is (str/includes? out "demo.b=> Ran 1 test containing 1 assertion.\n0 failures, 0 errors.\n"))
