@@ -257,6 +257,57 @@
       (is (= [3 nil false] (match "(a))" 4)))
       (is (= [0 nil false] (match "(a (b)" 0))))))
 
+(deftest form-at-test
+  ;; | marks the cursor.
+  (let [form-at (fn [s]
+                  (let [cursor (str/index-of s "|")
+                        s (str/replace s "|" "")]
+                    (some->> (lexer/form-at (lexer/lex s) cursor) (apply subs s))))]
+    (testing "the innermost collection the cursor's in or right after"
+      (are [s form] (= form (form-at s))
+        "(range 10)|" "(range 10)"
+        "|(range 10)" "(range 10)"
+        "(ran|ge 10)" "(range 10)"
+        "(map inc xs|)" "(map inc xs)"
+        "(map inc (range 10)|)" "(range 10)"
+        "(let [a| 1] a)" "[a 1]"
+        "#{1 2}|" "#{1 2}"
+        "(str \"(\" x|)" "(str \"(\" x)"))
+    (testing "the one before the cursor over the one after it"
+      (is (= "(a)" (form-at "(a)|(b)"))))
+    (testing "in a form that's not finished"
+      (is (= "(range 10)" (form-at "(defn f [x]\n  (map inc (range 10)|"))))
+    (testing "or the symbol or literal, without one around it"
+      (are [s form] (= form (form-at s))
+        "*1|" "*1"
+        "(a) b|" "b"
+        "(map inc xs|" "xs"
+        "\"a|b\"" "\"ab\""))
+    (testing "with its prefixes, but not its metadata"
+      (are [s form] (= form (form-at s))
+        "'(1 2)|" "'(1 2)"
+        "@(future 1)|" "@(future 1)"
+        "#?(:clj 1)|" "#?(:clj 1)"
+        "#inst \"2026-11-04\"|" "#inst \"2026-11-04\""
+        "#'map|" "#'map"
+        "^:private [x]|" "[x]"
+        "#_(a)|" "(a)"))
+    (testing "with the cursor on them too"
+      (are [s form] (= form (form-at s))
+        "|@state" "@state"
+        "(f |'(1 2))" "'(1 2)"
+        "#in|st \"2026-11-04\"" "#inst \"2026-11-04\""))
+    (testing "without unquoting and splicing"
+      (are [s form] (= form (form-at s))
+        "`(let [x# ~(foo)|] x#)" "(foo)"
+        "`(a ~@(b)|)" "(b)"
+        "[1 #?@(:clj [2 3])|]" "(:clj [2 3])"))
+    (testing "nothing between forms, or past a delimiter that doesn't balance"
+      (are [s] (nil? (form-at s))
+        "|"
+        "(a) | (b)"
+        "(a] (b)|"))))
+
 (deftest indentation-test
   (testing "a body by two"
     (are [s] (= 2 (lexer/indentation s))

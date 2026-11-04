@@ -365,6 +365,50 @@
                      :mismatched? (let [[open close] (if (= :open (:type at)) [at match] [match at])]
                                     (not= (closer s open) (text s close))))))))
 
+(def ^:private literal-types
+  #{:symbol :keyword :number :constant :string :regex :char})
+
+(defn form-at
+  "Where the form at the cursor in the lexed text starts and ends, as [start
+  end]: the innermost list, vector, map or set the cursor's in or right
+  after, or failing that, the symbol or literal it's in or right after,
+  each with the prefixes before it, like ' and #?, but not its metadata,
+  nor the unquoting and splicing that only work inside another form. Nil
+  when there's none there, as between forms. Delimiters past the first
+  that doesn't balance don't count."
+  [{s :text :keys [tokens]} cursor]
+  (let [tokens (vec tokens)
+        ;; The collections that close, as the indexes in tokens of their
+        ;; delimiters, innermost first.
+        closed (loop [i 0
+                      opens ()
+                      spans []]
+                 (if-let [{:keys [type] :as token} (get tokens i)]
+                   (case type
+                     :open (recur (inc i) (conj opens i) spans)
+                     :close (let [open (first opens)]
+                              (if (and open (= (text s token) (closer s (tokens open))))
+                                (recur (inc i) (rest opens) (conj spans [open i]))
+                                spans))
+                     (recur (inc i) opens spans))
+                   spans))
+        ;; The symbols and literals the same way, for when no collection's
+        ;; around the cursor.
+        literals (keep-indexed #(when (literal-types (:type %2)) [%1 %1]) tokens)
+        token-text #(some->> (get tokens %) (text s))
+        prefix? #(and (#{:macro-char :reader-macro} (:type (get tokens %)))
+                      (not (#{"^" "~" "#?@"} (token-text %)))
+                      ;; ~@ is two tokens.
+                      (not (and (= "@" (token-text %)) (= "~" (token-text (dec %))))))
+        with-prefixes (fn [[from to]]
+                        [(loop [i from]
+                           (if (prefix? (dec i)) (recur (dec i)) i))
+                         to])
+        around? (fn [[from to]]
+                  (<= (:start (tokens from)) cursor (:end (tokens to))))]
+    (when-let [[from to] (first (filter around? (map with-prefixes (concat closed literals))))]
+      [(:start (tokens from)) (:end (tokens to))])))
+
 (defn delimiter-error
   "The first delimiter in the lexed text that doesn't balance, or nil when
   they all do. A map with the kind of :error and the tokens involved:
