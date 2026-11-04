@@ -65,11 +65,17 @@ $endif
 ```
 
 `,set` lists the REPL's settings and turns them on or off: `eldoc`, the
-arglists under the input, `color`, `server-output`, what the server's
-System/out and System/err get, and `taps`, for what shows up above the
-prompt, `quiet`, which leaves all of that out for a while, and
-`autoreload`. C-x C-h toggles eldoc and C-x C-q quiet, and every
-setting but autoreload has a widget the inputrc can bind a key to, named
+arglists under the input, `color`, `pretty`, for values pretty printed as
+wide as the terminal, `server-output`, what the server's System/out and
+System/err get, and `taps`, for what shows up above the prompt, `quiet`,
+which leaves all of that out for a while, and `autoreload`. `print-length`
+and `print-level` take a number, how many items of a collection a value
+shows and how deep it goes, or `off`, which leaves that to the session's
+`*print-length*` and `*print-level*`. Pretty printing counts a map's
+entries as a level, as `clojure.pprint` does, so at level 1 `{:a 1}` is
+`{#}`. C-x C-h toggles eldoc, C-x C-p
+pretty printing and C-x C-q quiet, and every setting that's on or off,
+but autoreload, has a widget the inputrc can bind a key to, named
 `neorepl-toggle-` and the setting, like `"\C-xt": neorepl-toggle-taps`.
 What they start as goes in `~/.config/neorepl/config.edn`, or under
 `$XDG_CONFIG_HOME` if that's set, and `NO_COLOR` turns colors off whatever
@@ -77,8 +83,13 @@ it says:
 
 ```clojure
 {:eldoc false
+ :print-length 100
  :autoreload true}
 ```
+
+nbb and Basilisp print values their own way, not pretty and without the
+limits. babashka takes the limits only when it pretty prints, and ignores
+the session's own `*print-length*` and `*print-level*`.
 
 With no server to connect to, `neorepl` starts one for the project, the way
 CIDER's jack-in does, and stops it when the REPL ends. The project's build

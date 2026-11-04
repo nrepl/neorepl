@@ -25,14 +25,22 @@
            (sun.misc Signal SignalHandler)))
 
 (defn- eval-msg
-  "The eval message for code, with values pretty printed width columns wide.
-  Servers without nREPL's printer say so and print the plain way."
-  [session code width]
-  {:op "eval"
-   :code code
-   :session session
-   :nrepl.middleware.print/print "nrepl.util.print/pprint"
-   :nrepl.middleware.print/options {:right-margin width}})
+  "The eval message for code, with values printed the way settings say:
+  pretty printed width columns wide, or not, and to their print-length and
+  print-level. Servers without nREPL's printer say so and print the plain
+  way."
+  [session code width {:keys [pretty print-length print-level]}]
+  (let [[printer options] (if pretty
+                            ;; clojure.pprint/write's options.
+                            ["nrepl.util.print/pprint" {:right-margin width :length print-length :level print-level}]
+                            ;; The vars pr binds.
+                            ["nrepl.util.print/pr" {:print-length print-length :print-level print-level}])]
+    {:op "eval"
+     :code code
+     :session session
+     :nrepl.middleware.print/print printer
+     ;; Without the limits that are off, the session's vars count.
+     :nrepl.middleware.print/options (into {} (filter val) options)}))
 
 (defn- on-sigint
   "Calls f on SIGINT, returning the handler it replaces."
@@ -97,8 +105,8 @@
            {:name "autoreload" :arg "on|off" :optional? true
             :help "Reload what changed before each evaluation, or stop"
             :run #(autoreload %1 %2)}
-           {:name "set" :arg "NAME [on|off]" :optional? true
-            :help "List the settings, or turn NAME on or off, or the other way"
+           {:name "set" :arg "NAME [on|off|N]" :optional? true
+            :help "List the settings, or set NAME, or toggle it"
             :run #(change-setting %1 %2)}
            {:name "help" :help "List the commands"}
            {:name "quit" :help "Leave the REPL"}]))
@@ -337,7 +345,7 @@
   changes on a server that hasn't reloaded yet, and leaves it off when that
   fails. Returns what to print, as command-output does."
   [{:keys [client session evaluate settings]} arg]
-  (case (if arg (settings/parse-value arg) (not (:autoreload @settings)))
+  (case (if arg (settings/parse-value :autoreload arg) (not (:autoreload @settings)))
     false (do (swap! settings assoc :autoreload false)
               (out "Not reloading before evaluations"))
     true (cond
@@ -349,25 +357,26 @@
     (out "Usage: ,autoreload [on|off]")))
 
 (defn- set-setting
-  "Sets the setting called k on or off in settings, an atom, as on? says,
-  or the other way from how it is when it's nil, and says so."
-  [settings k on?]
-  (render/setting-text k (k (swap! settings update k #(if (nil? on?) (not %) on?)))))
+  "Sets the setting called k in settings, an atom, to v, or the other way
+  from how it is when v is nil, and says so."
+  [settings k v]
+  (render/setting-text k (k (swap! settings update k #(if (nil? v) (not %) v)))))
 
 (defn- change-setting
   "Lists the REPL's :settings without arg, or sets the one arg names as the
-  rest of arg says, on or off, or the other way from how it is without it,
-  as autoreload does for :autoreload. Returns what to print, as
-  command-output does."
+  rest of arg says, on or off, or to a number for a limit, or the other way
+  from how it is without it, as autoreload does for :autoreload. Returns
+  what to print, as command-output does."
   [{:keys [settings] :as state} arg]
   (if-let [[name value] (some-> arg (str/split #"\s+" 2))]
     (let [k (keyword name)
-          on? (some-> value settings/parse-value)]
+          limit? (contains? settings/limits k)
+          v (some->> value (settings/parse-value k))]
       (cond
         (not (contains? settings/defaults k)) (out (str "No setting called " name ", ,set lists them"))
-        (and value (nil? on?)) (out (str "Usage: ,set " name " [on|off]"))
+        (and (or value limit?) (nil? v)) (out (str "Usage: ,set " name (if limit? " N|off" " [on|off]")))
         (= :autoreload k) (autoreload state value)
-        :else (out (set-setting settings k on?))))
+        :else (out (set-setting settings k v))))
     (out (render/settings-text @settings))))
 
 (defn- browse-namespaces
@@ -687,7 +696,7 @@
              output (do (print-response output)
                         (recur (merge place (select-keys output [:session :session-name :ns])) more))
              :else
-             (let [result (evaluate session #(evaluation/evaluate client (eval-msg session code (width)) %))]
+             (let [result (evaluate session #(evaluation/evaluate client (eval-msg session code (width) @settings) %))]
                (recur (assoc place :ns (or (:ns result) ns)) nil)))))))))
 
 (defn- read-input
@@ -910,7 +919,7 @@
                             (merge (select-keys lookups [:complete :eldoc :doc :source :apropos])
                                    {:incomplete? incomplete?
                                     :settings settings
-                                    :toggles (remove #(false? (:toggle? %)) settings/all)
+                                    :toggles settings/toggles
                                     :toggle #(set-setting settings % nil)
                                     :commands (set (map :name commands))
                                     :edit (partial edit-text editor-command)

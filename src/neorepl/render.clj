@@ -296,17 +296,25 @@
   [{:keys [summary]}]
   (str "tap> " summary))
 
+(defn- setting-value-text
+  "A setting's value v: on, off, or a limit's number."
+  [v]
+  (cond
+    (true? v) "on"
+    v (str v)
+    :else "off"))
+
 (defn setting-text
-  "That the setting called k is on, or off."
-  [k on?]
-  (str (name k) (if on? " on" " off")))
+  "What the setting called k is set to, v."
+  [k v]
+  (str (name k) " " (setting-value-text v)))
 
 (defn settings-text
-  "settings, the REPL's, as ,set lists them: a line each, with whether it's
-  on, what it is, and the key that toggles it, if any."
+  "settings, the REPL's, as ,set lists them: a line each, with what it's
+  set to, what it is, and the key that toggles it, if any."
   [settings]
   (str/join "\n" (cli/columns (for [{:keys [name help key]} settings/all]
-                                [(clojure.core/name name) (if (get settings name) "on" "off")
+                                [(clojure.core/name name) (setting-value-text (get settings name))
                                  (cond-> help key (str " (C-x C-" (str/lower-case (str key)) ")"))]))))
 
 (defn profile-summary-text

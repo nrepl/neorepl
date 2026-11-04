@@ -36,21 +36,13 @@
   (let [port (Long/parseLong s)]
     (when (< 0 port 65536) port)))
 
-(defn- parse-index [s]
-  (when (re-matches #"\d{1,9}" s)
-    (Long/parseLong s)))
-
-(defn- parse-count [s]
-  (when-let [n (parse-index s)]
-    (when (pos? n) n)))
-
 
 (defn- parse-position
   "N or N:COL, as [N COL], COL being 1 without one."
   [s]
   (let [[line column & more] (str/split s #":" -1)
-        line (parse-count line)
-        column (if column (parse-count column) 1)]
+        line (cli/parse-count line)
+        column (if column (cli/parse-count column) 1)]
     (when (and line column (empty? more))
       [line column])))
 
@@ -79,7 +71,7 @@
 (def ^:private evaluation-options
   [session-option
    timeout-option
-   {:long "--max-output" :arg "CHARS" :parse parse-count
+   {:long "--max-output" :arg "CHARS" :parse cli/parse-count
     :doc "Cut each value, stdout and stderr at CHARS characters"}])
 
 (def ^:private help-option
@@ -1008,7 +1000,7 @@ server."
 (def ^:private inspector-actions
   "The options that do something with the inspector, the ops they send, and
   the key in those that takes the option's value, if it has one."
-  [[{:long "--push" :arg "N" :parse parse-index
+  [[{:long "--push" :arg "N" :parse cli/parse-index
      :doc "Inspect the value marked [N] in what's being inspected"}
     "inspect-push" :idx]
    [{:long "--pop" :doc "Go back to what was being inspected before"} "inspect-pop"]
@@ -1229,7 +1221,7 @@ with one, and 2 on usage errors."
   (concat connection-options
           [{:long "--timeout" :arg "SECS" :parse parse-seconds :default 60
             :doc "Interrupt evaluations after SECS seconds, unless a call says otherwise (default: 60)"}
-           {:long "--max-output" :arg "CHARS" :parse parse-count :default 10000
+           {:long "--max-output" :arg "CHARS" :parse cli/parse-count :default 10000
             :doc "Cut what an evaluation prints and returns at CHARS characters (default: 10000)"}
            help-option]))
 

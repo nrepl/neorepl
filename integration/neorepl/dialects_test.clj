@@ -69,7 +69,11 @@
 (deftest repl-test
   (on-each-server
    (fn [server]
-     (let [{:keys [status out]} (run-with server ",ns demo.core\n(greet \"r\")\n,ns demo.core-test\n(core/greet \"q\")\n" "repl")]
+     (let [{:keys [status out]} (run-with server (str ",ns demo.core\n(greet \"r\")\n,ns demo.core-test\n(core/greet \"q\")\n"
+                                                      ",set print-length 3\n(range 10)\n")
+                                          "repl")]
        (is (= 0 status))
        (is (str/includes? out "demo.core=> \"hi r\"\n"))
-       (is (str/includes? out "demo.core-test=> \"hi q\"\n"))))))
+       (is (str/includes? out "demo.core-test=> \"hi q\"\n"))
+       ;; Neither takes nREPL's printers' options.
+       (is (str/includes? out "demo.core-test=> (0 1 2 3 4 5 6 7 8 9)\n"))))))

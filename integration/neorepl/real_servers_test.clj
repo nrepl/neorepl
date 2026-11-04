@@ -312,14 +312,23 @@
 (deftest repl-test
   (on-each-server
    (fn [server]
-     (let [{:keys [status out]} (run-with server ",ns demo.core\n(greet \"r\")\n,test demo.core-test/failing-test\n" "repl")]
+     (let [{:keys [status out]} (run-with server (str ",ns demo.core\n(greet \"r\")\n,test demo.core-test/failing-test\n"
+                                                      ",set print-length 3\n,set print-level 2\n[(range 10) [[1]]]\n"
+                                                      ",set pretty off\n[(range 10) [[1]]]\n")
+                                          "repl")]
        (is (= 0 status))
        (is (str/includes? out "demo.core=> \"hi r\"\n"))
        ;; bb's comes as output nobody asked for, which the REPL prints from
        ;; another thread, where *out* isn't this one.
        (when-not (= :bb server)
          (is (str/includes? out "printed by failing-test\n")))
-       (is (str/includes? out "Ran 1 test containing 1 assertion.\n1 failure, 0 errors.\n"))))))
+       (is (str/includes? out "Ran 1 test containing 1 assertion.\n1 failure, 0 errors.\n"))
+       (testing "values printed as far as the limits say, pretty printed or not"
+         (is (str/includes? out "demo.core=> [(0 1 2 ...) [#]]\ndemo.core=> pretty off\n"))
+         ;; bb's nrepl.util.print/pr ignores the limits.
+         (is (str/includes? out (if (= :bb server)
+                                  "demo.core=> [(0 1 2 3 4 5 6 7 8 9) [[1]]]\n"
+                                  "demo.core=> [(0 1 2 ...) [#]]\ndemo.core=> \n"))))))))
 
 (deftest mcp-test
   (on-each-server

@@ -763,6 +763,43 @@
         (type "\u0018\u0008")
         (is (screen #"eldoc on\nuser=> \(mapcat \nclojure\.core/mapcat: \(\[f\] \[f & colls\]\)$"))
         (type "\u0003"))))
+  (testing "values pretty printed or not, with C-x C-p, and as far as the limits say"
+    (call-with-repl {:width 30}
+      (fn [type screen]
+        (type "(vec (range 20))\r")
+        (is (screen #"\n\[0\n 1\n(?: \d+\n)* 19\]\nuser=> $"))
+        (type "\u0018\u0010")
+        (is (screen #"pretty off\nuser=> $"))
+        (type "(vec (range 20))\r")
+        (is (screen #"\n\[0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19\]\nuser=> $"))
+        (type ",set print-length 3\r")
+        (is (screen #"print-length 3\nuser=> $"))
+        (type ",set print-level 2\r")
+        (is (screen #"print-level 2\nuser=> $"))
+        ;; babashka's nrepl.util.print/pr ignores the limits, and its
+        ;; pprint the session's own *print-length*.
+        (when-not (System/getProperty "babashka.version")
+          (type "[(range 10) [[1]]]\r")
+          (is (screen #"\n\[\(0 1 2 \.\.\.\) \[#\]\]\nuser=> $")))
+        (type "\u0018\u0010")
+        (is (screen #"pretty on\nuser=> $"))
+        (type "[(range 10) [[1]] :pretty-printed-across-lines]\r")
+        (is (screen #"\n\[\(0 1 2 \.\.\.\)\n \[#\]\n :pretty-printed-across-lines\]\nuser=> $"))
+        (type ",set print-length off\r")
+        (is (screen #"print-length off\nuser=> $"))
+        (type "(range 5)\r")
+        (is (screen #"\n\(0 1 2 3 4\)\nuser=> $"))
+        (when-not (System/getProperty "babashka.version")
+          (testing "and without them, the session's own"
+            (type "(set! *print-length* 2)\r")
+            (screen #"\n2\nuser=> $")
+            (type "(range 5)\r")
+            (is (screen #"\n\(0 1 \.\.\.\)\nuser=> $"))))
+        (testing "saying how they go"
+          (type ",set print-length\r")
+          (is (screen #"\nUsage: ,set print-length N\|off\nuser=> $"))
+          (type ",set print-level on\r")
+          (is (screen #"\nUsage: ,set print-level N\|off\nuser=> $"))))))
   (testing "quiet leaving out what the server prints itself and taps, with C-x C-q"
     (call-with-repl {}
       (fn [type screen]
@@ -817,11 +854,13 @@
   (testing "what the config file sets"
     (call-with-temp-dir
      (fn [dir]
-       (let [file (test-server/spit-file dir "config.edn" "{:quiet true :taps false}")]
+       (let [file (test-server/spit-file dir "config.edn" "{:quiet true :taps false :print-length 2}")]
          (call-with-repl {:settings-file file}
            (fn [type screen]
              (type ",set\r")
-             (is (screen #"(?m)^quiet +on +(?s).*^taps +off ")))))))))
+             (is (screen #"(?m)^print-length +2 +(?s).*^quiet +on +.*^taps +off "))
+             (type "(range 5)\r")
+             (is (screen #"\n\(0 1 \.\.\.\)\nuser=> $")))))))))
 
 (deftest spec-test
   (call-with-repl {}

@@ -374,7 +374,7 @@
                    has them, whose :color and :eldoc it follows as they
                    change
     :toggles       the settings to bind widgets that toggle them for, maps
-                   with their :name and :key, as settings/all has them
+                   with their :name and :key, as settings/toggles has them
     :toggle        (toggle name) for toggling the setting called name, a
                    keyword, which returns what to say about it
     :incomplete?   (incomplete? text) for whether Enter goes on to another

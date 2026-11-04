@@ -207,8 +207,14 @@
   (is (= (str "autoreload     off  Reload what changed before each evaluation\n"
               "color          on   Colors, unless NO_COLOR is set\n"
               "eldoc          on   The called function's arglists, under the input (C-x C-h)\n"
+              "pretty         on   Values pretty printed, as wide as the terminal (C-x C-p)\n"
+              "print-length   off  The items of a collection a value shows, or all\n"
+              "print-level    off  How deep into collections a value shows, or all the way\n"
               "quiet          off  Leave out server output, taps and trace events (C-x C-q)\n"
               "server-output  on   What the server's System/out and System/err get\n"
               "taps           on   The values sent to tap>")
          (render/settings-text settings/defaults)))
-  (is (= "eldoc off" (render/setting-text :eldoc false))))
+  (is (re-find #"(?m)^print-length   100  The items"
+               (render/settings-text (assoc settings/defaults :print-length 100))))
+  (is (= "eldoc off" (render/setting-text :eldoc false)))
+  (is (= "print-level 5" (render/setting-text :print-level 5))))
