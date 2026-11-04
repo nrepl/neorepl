@@ -232,7 +232,7 @@
    (symbol-tool "doc" "Show a var's arglists and documentation.")
    (symbol-tool "source" "Show a var's source.")
    (symbol-tool "where" "Show the file and line a var is defined at.")
-   (-> (symbol-tool "refs" "List the functions that use a var, or with deps, the ones it uses, each with where it's defined, in the code that's loaded. Takes cider-nrepl.")
+   (-> (symbol-tool "refs" "List the functions that use a var, or with deps, the ones it uses, each with where it's defined, in the project's code that's loaded. Takes cider-nrepl.")
        (assoc-in [:inputSchema :properties :deps] {:type "boolean" :description "List the functions the var uses instead"})
        (assoc :run (fn [server {:keys [symbol deps] :as args} _]
                      (wrap (lookup server args (if deps "deps" "refs") symbol) :refs))))

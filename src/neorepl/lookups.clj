@@ -54,7 +54,7 @@
    {:name "refs" :arg "SYM" :help "List the functions that use SYM"
     :find (fn [client ctx sym] (not-empty (features/references client sym ctx false)))
     :text render/references-text
-    :none (fn [_ sym] (str "Nothing loaded uses " sym))}
+    :none (fn [_ sym] (str "Nothing loaded from the project uses " sym))}
    {:name "deps" :arg "SYM" :help "List the functions SYM uses"
     :find (fn [client ctx sym] (not-empty (features/references client sym ctx true)))
     :text render/references-text

@@ -186,6 +186,10 @@
              (rows "refs" "demo.core/greet")))
       (testing "and the functions a function uses"
         (is (contains? (rows "refs" "--deps" "demo.core/welcome") ["demo.core/greet" (str core ":3:1")])))
+      (testing "only in the project, so not in a function defined in a namespace without a file"
+        (run :clojure "eval" "(defn uses-welcome [] (demo.core/welcome \"you\"))")
+        (is (= {:status 1 :out "" :err "neorepl: Nothing loaded from the project uses demo.core/welcome\n"}
+               (run :clojure "refs" "demo.core/welcome"))))
       (testing "but not for a var that isn't there, which cider-nrepl takes for one nothing uses"
         (is (= {:status 1 :out "" :err "neorepl: Nothing called demo.core/nope in user\n"}
                (run :clojure "refs" "demo.core/nope"))))))
