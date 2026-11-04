@@ -2,6 +2,10 @@
 
 ## main (unreleased)
 
+## 0.5.0 (2026-11-05)
+
+CIDER in a terminal.
+
 ### Features
 
 - [#45](https://github.com/nrepl/neorepl/pull/45): The REPL shows the delimiter that pairs with the one at the cursor, and a closer that pairs with nothing, or with the wrong kind, in red, rather than JLine moving the cursor to the opener for half a second.
