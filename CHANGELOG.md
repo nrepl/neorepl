@@ -2,6 +2,10 @@
 
 ## main (unreleased)
 
+## 0.5.1 (2026-11-05)
+
+Spec examples with cider-nrepl.
+
 ### Bug fixes
 
 - [#81](https://github.com/nrepl/neorepl/pull/81): `x` in the spec browser shows an example with cider-nrepl, rather than saying there's no such spec.
