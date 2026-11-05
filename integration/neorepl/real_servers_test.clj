@@ -21,7 +21,7 @@
   starts each and the project file it gets."
   (let [files (servers/sources "clj")]
     {:clojure {:tool "clojure" :project "{:paths [\"src\" \"test\"]}" :files files}
-     :lein {:tool "lein" :project "(defproject demo \"0.1.0\" :dependencies [[org.clojure/clojure \"1.12.6\"]])" :files files}
+     :lein {:tool "lein" :project "(defproject demo \"0.1.0\" :dependencies [[org.clojure/clojure \"1.12.6\"] [org.clojure/test.check \"1.1.1\"]])" :files files}
      :bb {:tool "bb" :project "{:paths [\"src\" \"test\"]}" :files files}}))
 
 (def ^:private on-each-server
@@ -269,11 +269,12 @@
      (with-client [client {:port (discovery/read-port (io/file (project-dir server) ".nrepl-port"))}]
        (is (every? (set (features/specs client {})) [":demo/age" ":demo/person"]))
        (is (= "(s/keys :req [:demo/age])\n" (features/spec-form client ":demo/person" 80 {})))
-       (testing "and an example, from cider-nrepl's spec-example, which takes test.check, as projects rarely have"
-         (if (= :bb server)
-           (is (re-matches #"#:demo\{:age \d+\}\n" (features/spec-example client ":demo/person" 80 {})))
-           (is (thrown-with-msg? clojure.lang.ExceptionInfo #"^Generating examples takes test.check on the server$"
-                                 (features/spec-example client ":demo/person" 80 {})))))))))
+       (testing "and an example, from cider-nrepl's spec-example, which takes test.check, as only the Leiningen project has"
+         (case server
+           :bb (is (re-matches #"#:demo\{:age \d+\}\n" (features/spec-example client ":demo/person" 80 {})))
+           :lein (is (re-matches #"\{:demo/age \d+\}" (features/spec-example client ":demo/person" 80 {})))
+           :clojure (is (thrown-with-msg? clojure.lang.ExceptionInfo #"^Generating examples takes test.check on the server$"
+                                          (features/spec-example client ":demo/person" 80 {})))))))))
 
 (deftest taps-test
   (on-each-server

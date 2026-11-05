@@ -144,7 +144,8 @@
                                                  ["clojure.core"]))
       "spec-list" (transport/respond-to msg :status "done" :spec-list [":cider/spec"])
       "spec-example" (if (= ":cider/spec" (:spec-name msg))
-                       (transport/respond-to msg :status "done" :example "cider's example\n")
+                       ;; As cider-nrepl 0.64.0 sends it, with no newline at the end.
+                       (transport/respond-to msg :status "done" :spec-example "cider's example")
                        ;; As cider-nrepl fails without test.check.
                        (do (transport/respond-to msg :err "java.io.FileNotFoundException: Could not locate clojure/test/check/generators__init.class\n")
                            (transport/respond-to msg :status ["done" "spec-example-error"])))
@@ -695,7 +696,7 @@
                  (features/ns-vars client "demo.core" user {})))
           (testing "specs"
             (is (= [":cider/spec"] (features/specs client {})))
-            (is (= "cider's example\n" (features/spec-example client ":cider/spec" 80 {})))
+            (is (= "cider's example" (features/spec-example client ":cider/spec" 80 {})))
             (is (thrown-with-msg? clojure.lang.ExceptionInfo #"^Generating examples takes test.check on the server$"
                                   (features/spec-example client ":demo/age" 80 {}))))
           (is (= [{:name "clojure.core/map" :type "function" :doc "Cider's map.\nMore."}]

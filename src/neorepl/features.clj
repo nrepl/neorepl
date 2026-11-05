@@ -1638,7 +1638,7 @@
   [client spec width opts]
   (try
     (some-> (if (supports? client "spec-example")
-              (some :example (ask client {:op "spec-example" :spec-name spec} opts))
+              (some :spec-example (ask client {:op "spec-example" :spec-name spec} opts))
               (eval-data client {} spec-example-code [spec width] opts))
             unix-lines)
     (catch clojure.lang.ExceptionInfo e
