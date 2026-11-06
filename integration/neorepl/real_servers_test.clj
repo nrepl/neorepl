@@ -154,6 +154,12 @@
         (is (= 2 (count lines)))
         (is (re-find #"^name +n +mean +std +sum +min +max +med$" header))
         (is (re-find #"^demo\.core/greet +1 +\d+([.,]\d)? [num]?s +\u00b1" row)))
+      (testing "and as data, in JSON"
+        (let [[{:keys [name n mean] :as row} :as rows] (:summary (json/read-str (:out (run :clojure "profile" "--format" "json"))))]
+          (is (= 1 (count rows)))
+          (is (= ["demo.core/greet" 1] [name n]))
+          (is (re-find #"^\d+([.,]\d)? [num]?s$" mean))
+          (is (= #{:name :n :mean :std :sum :min :max :med} (set (keys row))))))
       (is (= "Stopped profiling demo.core/greet\n" (:out (run :clojure "unprofile" "demo.core/greet"))))
       (finally
         (run :clojure "unprofile" "demo.core/greet")

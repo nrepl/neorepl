@@ -891,8 +891,10 @@ server to talk to."
    "Usage: neorepl profile [options] [SYM...]"
    "Profiles the functions SYM, or every function in a namespace SYM, timing
 each call. Without SYM it shows what's been measured: how many calls each
-function had and how long they took, from the shortest to the longest. It
-takes cider-nrepl on the server."
+function had and how long they took, from the shortest to the longest. In
+edn and JSON that's a list of maps, one for each function, with its :name,
+:n calls and the times as the server writes them, like \"4 us\". It takes
+cider-nrepl on the server."
    profile-options
    discovery-note
    "Exit status: 0 when everything SYM names is profiled, or there's something

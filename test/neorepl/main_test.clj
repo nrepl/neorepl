@@ -712,7 +712,9 @@
       (let [summary (str "name            n  mean  std    sum   min   max   med\n"
                          "profiled.cli/f  1  1 us  \u00b10 ns  1 us  1 us  1 us  1 us")]
         (is (= {:status 0 :out (str summary "\n") :err ""} (run-command "profile")))
-        (is (= {:summary summary} (edn/read-string (:out (run-command "profile" "--format" "edn")))))))
+        (let [summary {:summary [{:name "profiled.cli/f" :n 1 :mean "1 us" :std "\u00b10 ns" :sum "1 us" :min "1 us" :max "1 us" :med "1 us"}]}]
+          (is (= summary (edn/read-string (:out (run-command "profile" "--format" "edn")))))
+          (is (= summary (json/read-str (:out (run-command "profile" "--format" "json"))))))))
     (testing "forgetting it"
       (is (= {:status 0 :out "Forgot what profiling measured\n" :err ""} (run-command "profile" "--clear")))
       (is (= 1 (:status (run-command "profile"))))

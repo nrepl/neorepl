@@ -250,7 +250,8 @@
       125400 " 2m5s")))
 
 (deftest profile-summary-text-test
-  (testing "nothing, for a table with no rows, as cider-nrepl could show one"
-    (is (nil? (render/profile-summary-text [[{:text "--- Contents:" :heading? true}]
-                                            [{:text "| "} {:text "#" :index 1} {:text " | "} {:text ":name" :index 2} {:text " | "}]
-                                            [{:text "|---+---|"}]])))))
+  (is (= (str "name          n   mean\n"
+              "profile.me/f  2   1 us\n"
+              "other/g       10  2 ms")
+         (render/profile-summary-text [(array-map :name "profile.me/f" :n 2 :mean "1 us")
+                                       (array-map :name "other/g" :n 10 :mean "2 ms")]))))

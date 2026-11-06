@@ -342,20 +342,12 @@
                                  (cond-> help key (str " (C-x C-" (str/lower-case (str key)) ")"))]))))
 
 (defn profile-summary-text
-  "The table in the inspector's view of what profiling measured, as
-  features/profile-summary has it, its Contents section, in columns,
-  without the row numbers and the samples, which are for the inspector,
-  and with n for :n and names without #', or nil when it has no rows."
-  [lines]
-  (let [heading? #(:heading? (first %))
-        contents (->> lines (drop-while (complement heading?)) rest (take-while (complement heading?)))
-        ;; Each cell is a value to inspect, the bars around them aren't.
-        [header & rows :as table] (keep #(not-empty (keep (fn [{:keys [text index]}] (when index text)) %)) contents)]
-    (when rows
-      (str/join "\n" (cli/columns (for [row table]
-                                    (for [[column cell] (map vector header row)
-                                          :when (not (#{"#" ":samples"} column))]
-                                      (str/replace cell #"^(:|#')" ""))))))))
+  "What profiling measured, the rows of features/profile-summary, in
+  columns under their names."
+  [rows]
+  (let [columns (keys (first rows))]
+    (str/join "\n" (cli/columns (cons (map name columns)
+                                      (for [row rows] (map #(str (get row %)) columns)))))))
 
 (defn profiling-text
   "What profile and unprofile did: the :results of profiling or stopping, a
@@ -373,7 +365,7 @@
                                "refused" (str "Won't profile " what ", which the server's own tools call: profiling it"
                                               " would take the server down")
                                "not-found" (str "No var or namespace called " name))))
-    summary summary
+    summary (profile-summary-text summary)
     cleared "Forgot what profiling measured"))
 
 (defn trace-event-text

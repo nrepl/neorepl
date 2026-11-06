@@ -1091,9 +1091,15 @@
       (testing "what's measured, once something's called"
         (is (nil? (features/profile-summary client {})))
         (nrepl/request client {:op "eval" :code "(profile.me/g 1) (profile.me/g 2)"})
+        (is (= [{:name "profile.me/f" :n 2 :mean "1 us" :std "\u00b10 ns" :sum "2 us" :min "1 us" :max "1 us" :med "1 us"}]
+               (features/profile-summary client {})))
         (is (= (str "name          n  mean  std    sum   min   max   med\n"
                     "profile.me/f  2  1 us  \u00b10 ns  2 us  1 us  1 us  1 us")
                (render/profile-summary-text (features/profile-summary client {}))))
+        (testing "and nothing, from a table with no rows, as a cider-nrepl that can show one would"
+          (is (nil? (#'features/summary-rows [[{:text "--- Contents:" :heading? true}]
+                                              [{:text "| "} {:text "#" :index 1} {:text " | "}]
+                                              [{:text "|---|"}]]))))
         (testing "and forgetting it"
           (is (= {:cleared true} (features/clear-profile client)))
           (is (nil? (features/profile-summary client {})))))
