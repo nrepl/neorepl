@@ -430,7 +430,7 @@ reload only starts noting what changes."
                (let [[line column] (lexer/position code start)]
                  (assoc msg :code (subs code start end) :line line :column column)))]
     (when-not start
-      (throw (ex-info (str file ":" line ":" column ": No form there or before it to evaluate")
+      (throw (ex-info (str (render/location-text {:file file :line line :column column}) ": No form there or before it to evaluate")
                       {:type ::features/failed})))
     (let [ns-form (when-not ns
                     (last (take-while #(<= (:start %) start) (lexer/ns-forms lexed))))]
@@ -788,7 +788,8 @@ fails, 2 on usage errors and 3 when there's no server to talk to."
   (help-text
    "Usage: neorepl where [options] SYM"
    "Prints where SYM is defined, as file:line:column, the way compilers and
-editors write locations. A definition in a jar comes as a jar: URL."
+editors write locations, with a file in the current directory relative to
+it. A definition in a jar comes as a jar: URL."
    lookup-options
    discovery-note
    "Exit status: 0 when the server knows where SYM is, 1 when it doesn't, 2 on

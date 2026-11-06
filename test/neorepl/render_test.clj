@@ -92,7 +92,24 @@
   (are [location text] (= text (render/location-text location))
     {:file "/x.clj" :line 3 :column 1} "/x.clj:3:1"
     {:file "/x.clj" :line 3} "/x.clj:3"
-    {:file "/x.clj"} "/x.clj"))
+    {:file "/x.clj"} "/x.clj"
+    {:file (str (io/file (System/getProperty "user.dir") "x.clj"))} (str (io/file "x.clj")))
+  (let [dir (str (io/file "/work/app"))]
+    (testing "relative to the directory neorepl runs in, when it's in there"
+      (is (= (str (io/file "src/my/app.clj") ":12:1")
+             (render/location-text {:file (str (io/file dir "src/my/app.clj")) :line 12 :column 1} dir))))
+    (testing "but not a file in a jar, nor standard input"
+      (is (= "jar:file:/m2/clojure.jar!/clojure/core.clj:7"
+             (render/location-text {:file "jar:file:/m2/clojure.jar!/clojure/core.clj" :line 7} dir)))
+      (is (= "<stdin>:2:1" (render/location-text {:file "<stdin>" :line 2 :column 1} dir))))
+    (testing "nor the directory itself, or anything when it's a root, where everything is"
+      (is (= dir (render/location-text {:file dir} dir)))
+      (let [root (str (first (java.io.File/listRoots)))
+            file (str (io/file root "work" "app.clj"))]
+        (is (= (str file ":1") (render/location-text {:file file :line 1} root)))))
+    (testing "normalized first"
+      (is (= (str (io/file "src/b.clj"))
+             (render/location-text {:file (str (io/file dir "src" "a" ".." "b.clj"))} dir))))))
 
 (deftest test-report-text-test
   (testing "like clojure.test"
