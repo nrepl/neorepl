@@ -1438,19 +1438,41 @@
    (check-profiler client)
    (mapv #(profile-one client % ns on? opts) names)))
 
+(defn- summary-rows
+  "The rows of the table in lines, an inspector view's, as profile-summary
+  has them, or nil when it has none."
+  [lines]
+  (let [heading? #(:heading? (first %))
+        contents (->> lines (drop-while (complement heading?)) rest (take-while (complement heading?)))
+        ;; Each cell is a value to inspect, the bars around them aren't.
+        [header & rows] (keep #(not-empty (keep (fn [{:keys [text index]}] (when index text)) %)) contents)]
+    (when rows
+      (mapv (fn [row]
+              (apply array-map (mapcat (fn [column cell]
+                                         (case column
+                                           ("#" ":samples") nil
+                                           ":name" [:name (var-name cell)]
+                                           ":n" [:n (cond-> cell (re-matches #"\d+" cell) Long/parseLong)]
+                                           [(keyword (str/replace column #"^:" "")) cell]))
+                                       header row)))
+            rows))))
+
 (defn profile-summary
-  "What profiling measured, the :lines of cider-nrepl's inspector showing
-  it, a table with a row for each function, all on a page, or nil when no
-  function profiled has been called. It asks outside any session, since it
-  takes over the inspector of the session it's asked in."
+  "What profiling measured, all on a page: a map for each function from
+  the table cider-nrepl's inspector shows, in its columns' order, with :n
+  a number and the times as orchard writes them, like \"4 us\", without
+  the row numbers and samples. orchard cuts a :name past 70 characters.
+  nil when no profiled function has been called. It asks outside any
+  session, since it takes over that session's inspector."
   [client opts]
   (check-profiler client)
-  (try
-    (:lines (inspector client nil {:op "cider/profile-summary" :page-size Integer/MAX_VALUE} opts))
-    (catch clojure.lang.ExceptionInfo e
-      ;; cider-nrepl 0.64.0 can't show an empty table (cider-nrepl#1072).
-      (when-not (str/includes? (str (ex-message e)) "view-mode-supported?")
-        (throw e)))))
+  (summary-rows
+   (try
+     (:lines (inspector client nil {:op "cider/profile-summary" :page-size Integer/MAX_VALUE} opts))
+     (catch clojure.lang.ExceptionInfo e
+       ;; cider-nrepl 0.64.0 can't show an empty table (cider-nrepl#1072).
+       (when-not (str/includes? (str (ex-message e)) "view-mode-supported?")
+         (throw e))))))
 
 (defn clear-profile
   "Forgets what profiling measured so far."

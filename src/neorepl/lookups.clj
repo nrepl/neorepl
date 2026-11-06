@@ -89,7 +89,7 @@
     :find (fn [client ctx syms]
             (if (seq syms)
               {:results (features/profile client syms ctx true)}
-              (some->> (features/profile-summary client {}) render/profile-summary-text (hash-map :summary))))
+              (some->> (features/profile-summary client {}) (hash-map :summary))))
     :text render/profiling-text
     :none (fn [_ _] "No profiled function has been called yet")
     :failed? untraceable?}
