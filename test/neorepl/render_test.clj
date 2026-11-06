@@ -248,3 +248,9 @@
       59999 " 59.9s"
       60000 " 1m0s"
       125400 " 2m5s")))
+
+(deftest profile-summary-text-test
+  (testing "nothing, for a table with no rows, as cider-nrepl could show one"
+    (is (nil? (render/profile-summary-text [[{:text "--- Contents:" :heading? true}]
+                                            [{:text "| "} {:text "#" :index 1} {:text " | "} {:text ":name" :index 2} {:text " | "}]
+                                            [{:text "|---+---|"}]])))))

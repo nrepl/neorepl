@@ -343,13 +343,19 @@
 
 (defn profile-summary-text
   "The table in the inspector's view of what profiling measured, as
-  features/profile-summary has it: its Contents section, without the rest."
+  features/profile-summary has it, its Contents section, in columns,
+  without the row numbers and the samples, which are for the inspector,
+  and with n for :n and names without #', or nil when it has no rows."
   [lines]
   (let [heading? #(:heading? (first %))
-        table (->> lines (drop-while (complement heading?)) rest (take-while (complement heading?)))]
-    (-> (inspector-text table false)
-        (str/replace #"(?m)^  " "")
-        str/trim)))
+        contents (->> lines (drop-while (complement heading?)) rest (take-while (complement heading?)))
+        ;; Each cell is a value to inspect, the bars around them aren't.
+        [header & rows :as table] (keep #(not-empty (keep (fn [{:keys [text index]}] (when index text)) %)) contents)]
+    (when rows
+      (str/join "\n" (cli/columns (for [row table]
+                                    (for [[column cell] (map vector header row)
+                                          :when (not (#{"#" ":samples"} column))]
+                                      (str/replace cell #"^(:|#')" ""))))))))
 
 (defn profiling-text
   "What profile and unprofile did: the :results of profiling or stopping, a

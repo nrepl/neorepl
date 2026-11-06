@@ -709,8 +709,10 @@
     (testing "what's measured"
       (is (= {:status 1 :out "" :err "neorepl: No profiled function has been called yet\n"} (run-command "profile")))
       (run "-s" "profiling" "(profiled.cli/f 1)")
-      (is (= {:status 0 :out "0. {:name \"profiled.cli/f\", :n 1}\n" :err ""} (run-command "profile")))
-      (is (= {:summary "0. {:name \"profiled.cli/f\", :n 1}"} (edn/read-string (:out (run-command "profile" "--format" "edn"))))))
+      (let [summary (str "name            n  mean  std    sum   min   max   med\n"
+                         "profiled.cli/f  1  1 us  \u00b10 ns  1 us  1 us  1 us  1 us")]
+        (is (= {:status 0 :out (str summary "\n") :err ""} (run-command "profile")))
+        (is (= {:summary summary} (edn/read-string (:out (run-command "profile" "--format" "edn")))))))
     (testing "forgetting it"
       (is (= {:status 0 :out "Forgot what profiling measured\n" :err ""} (run-command "profile" "--clear")))
       (is (= 1 (:status (run-command "profile"))))

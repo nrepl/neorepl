@@ -1061,7 +1061,7 @@
           (type "(profiled-in-repl 1)\r")
           (is (screen #"(?m)^2\nuser=> $"))
           (type ",profile\r")
-          (is (screen #"0\. \{:name \"user/profiled-in-repl\", :n 1\}\nuser=> $"))
+          (is (screen #"\nname +n +mean +std +sum +min +max +med\nuser/profiled-in-repl +1 +1 us +\u00b10 ns( +1 us){4}\nuser=> $"))
           (type ",profile-clear\r")
           (is (screen #"Forgot what profiling measured\nuser=> $"))
           (type ",unprofile\r")

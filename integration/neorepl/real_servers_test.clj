@@ -150,11 +150,10 @@
         (is (= {:status 1 :out "" :err "neorepl: No profiled function has been called yet\n"}
                (run :clojure "profile"))))
       (run :clojure "eval" "(demo.core/greet \"p\")")
-      (let [[header separator row :as lines] (str/split-lines (:out (run :clojure "profile")))]
-        (is (= 3 (count lines)))
-        (is (re-find #"^\| # \| +:name \| :n \| :mean \|" header))
-        (is (str/starts-with? separator "|---+"))
-        (is (re-find #"^\| 0 \| #'demo\.core/greet \|  1 \| " row)))
+      (let [[header row :as lines] (str/split-lines (:out (run :clojure "profile")))]
+        (is (= 2 (count lines)))
+        (is (re-find #"^name +n +mean +std +sum +min +max +med$" header))
+        (is (re-find #"^demo\.core/greet +1 +\d+([.,]\d)? [num]?s +\u00b1" row)))
       (is (= "Stopped profiling demo.core/greet\n" (:out (run :clojure "unprofile" "demo.core/greet"))))
       (finally
         (run :clojure "unprofile" "demo.core/greet")
