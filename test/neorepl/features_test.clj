@@ -198,7 +198,10 @@
                       (transport/respond-to msg :status "error" :error-ns "broken.ns")
                       (transport/respond-to msg :status "done"))
                   :else
-                  (do (transport/respond-to msg :reloading ["changed.ns"])
+                  ;; Made anew, as tools.namespace does.
+                  (do (remove-ns 'changed.ns)
+                      (intern (create-ns 'changed.ns) 'kept true)
+                      (transport/respond-to msg :reloading ["changed.ns"])
                       (transport/respond-to msg :err "Reflection warning, changed/ns.clj:3:1\n")
                       (transport/respond-to msg :status ["ok" "done"])))
       "inspect-last-exception" (do (swap! test-requests conj (select-keys msg [:op :index :ex-data :page-size]))
@@ -571,6 +574,23 @@
               noting (doto (Thread. #(do (Thread/sleep 300) (deliver noted true))) .start)]
           (features/reload-changed (assoc client :noting-changes noting) session {})
           (is (realized? noted))))
+      (testing "with the aliases and refers of a namespace it left alone on the one it made anew"
+        (let [before @test-server/reloads]
+          (values (str "(ns neorepl.reloading) (alias 'r 'neorepl.reloaded)"
+                       " (refer 'neorepl.reloaded :only '[kept reloaded-" before "] :rename '{kept k})"
+                       " (def imported 1) (alter-meta! #'imported assoc :ns (the-ns 'neorepl.reloaded) :name 'kept)"))
+          (reload)
+          (is (= ["true"] (values (str "r/reloaded-" @test-server/reloads))))
+          ;; babashka has no reload that makes namespaces anew, so nothing
+          ;; relinks the refers there.
+          (when-not (System/getProperty "babashka.version")
+            (is (= ["true"] (values "(identical? #'neorepl.reloaded/kept (resolve 'k))")))
+            (testing "but not a refer with nothing new to point at, nor a var whose metadata says it's another's, as potemkin's import-vars makes them"
+              (is (= ["[true 1]"] (values (str "[(some? (resolve 'reloaded-" before ")) @(resolve 'imported)]")))))
+            (testing "nor a var with no namespace, from Var/create"
+              (values "(.refer *ns* 'anonymous (clojure.lang.Var/create :anonymous))")
+              (is (not-any? :ex (nrepl/request client {:op "eval" :code @#'features/relink-code})))
+              (is (= [":anonymous"] (values "@(resolve 'anonymous)")))))))
       (testing "with the session back in its namespace, made anew, and *1, *2 and *3 as they were"
         (values "(in-ns 'neorepl.reloaded)")
         (values "1 2 3")
@@ -767,6 +787,14 @@
             (is (str/starts-with? (features/source client "mapv" user) "(defn mapv")))
           (is (= {:reloaded ["changed.ns"] :output "Reflection warning, changed/ns.clj:3:1\n"}
                  (features/reload client [])))
+          (testing "with the aliases and refers of a namespace it left alone on the one it made anew"
+            (nrepl/request client {:op "eval" :code "(ns neorepl.refreshing) (alias 'c 'changed.ns) (refer 'changed.ns :only '[kept])"})
+            (features/reload client [])
+            (let [values #(keep :value (nrepl/request client {:op "eval" :ns "neorepl.refreshing" :code %}))]
+              (is (= ["true"] (values "(identical? (find-ns 'changed.ns) (get (ns-aliases *ns*) 'c))")))
+              ;; As in reload-changed-test.
+              (when-not (System/getProperty "babashka.version")
+                (is (= ["true"] (values "(identical? #'changed.ns/kept (resolve 'kept))"))))))
           (testing "after forgetting a namespace whose file is gone, which cider-nrepl keeps after"
             (reset! refresh-lost? :gone)
             (is (= {:reloaded ["changed.ns"] :output "Reflection warning, changed/ns.clj:3:1\n"}

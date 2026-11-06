@@ -2,6 +2,10 @@
 
 ## main (unreleased)
 
+### Bug fixes
+
+- [#83](https://github.com/nrepl/neorepl/pull/83): After a reload, the aliases and refers of the namespaces it didn't reload, like the REPL's, point at the reloaded ones, so a function added since resolves through an alias, and requiring with the same alias again works.
+
 ## 0.5.1 (2026-11-05)
 
 Spec examples with cider-nrepl.
