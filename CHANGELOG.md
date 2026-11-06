@@ -5,6 +5,7 @@
 ### Changes
 
 - [#84](https://github.com/nrepl/neorepl/pull/84): Locations in text, as `where`, `refs`, `deps` and `check` print them, are relative to the directory neorepl runs in, when they're in it.
+- [#85](https://github.com/nrepl/neorepl/pull/85): The profile summary fits in a terminal, without the columns only CIDER's inspector needs.
 
 ### Bug fixes
 

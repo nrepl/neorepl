@@ -356,14 +356,30 @@
                               (apply f args))))
         "profiled")))
 
+(defn- table-view
+  "How cider-nrepl's inspector shows rows, maps with the same keys in the
+  same order, in its table view, as cider/profile-summary has it: a line
+  of the keys, a divider and a line of each row's values, each line with
+  the row's number first, every cell a value to inspect, between bars."
+  [rows]
+  (let [index (atom -1)
+        value #(list :value % (swap! index inc))
+        line #(concat ["  " "| "] (interpose " | " (map value %)) [" | " '(:newline)])]
+    (pr-str (concat ["Class: " (value "clojure.lang.ArraySeq") '(:newline)
+                     "Count: " (str (count rows)) '(:newline) '(:newline) "--- Contents:" '(:newline) '(:newline)]
+                    (line (cons "#" (map pr-str (keys (first rows)))))
+                    ["  " "|---+---|" '(:newline)]
+                    (mapcat #(line (cons (str %1) (vals %2))) (range) rows)
+                    ['(:newline) "--- View mode:" '(:newline) "  " "normal ●table object pretty sort-maps"]))))
+
 (def ^:private profile-ops
   #{"cider/profile-toggle-var" "cider/profile-toggle-ns" "cider/profile-summary" "cider/profile-clear"})
 
 (defn wrap-fake-profiler
   "Profiles functions the way cider-nrepl does, roughly, with its profile
-  ops, counting calls rather than timing them. Its summary is a list of
-  maps on show in the session's inspector, which fails when it's empty, as
-  cider-nrepl 0.64.0's does."
+  ops, counting calls rather than timing them. Its summary is the table
+  cider-nrepl 0.64.0's inspector shows, with the columns it has and made
+  up times, and fails when it's empty, as that one does."
   [handler]
   (fn [{:keys [op ns sym] :as msg}]
     (case op
@@ -389,9 +405,12 @@
                               :status ["done" "cider/profile-toggle-ns-error"]))
       "cider/profile-summary"
       (if-let [calls (seq @profiled-calls)]
-        (do (swap! inspected assoc (:session msg) [(vec (for [[v n] (sort-by (comp str key) calls)]
-                                                          {:name (str (symbol v)) :n n}))])
-            (show msg))
+        (let [rows (for [[v n] (sort-by (comp str key) calls)]
+                     (array-map :name (str "#'" (symbol v)) :n (str n) :mean "1 us" :std "±0 ns"
+                                :sum (str n " us") :min "1 us" :max "1 us" :med "1 us" :samples "[1000 ...]"))]
+          ;; In the session's inspector, as cider-nrepl's is.
+          (swap! inspected assoc (:session msg) [(vec rows)])
+          (transport/respond-to msg :status "done" :value (table-view rows)))
         (transport/respond-to msg :ex "class clojure.lang.ExceptionInfo"
                               :err "clojure.lang.ExceptionInfo: Precondition failed: (view-mode-supported? inspector mode)\n"
                               :status ["done" "cider/profile-summary-error"]))
