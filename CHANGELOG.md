@@ -2,6 +2,10 @@
 
 ## main (unreleased)
 
+### Changes
+
+- [#84](https://github.com/nrepl/neorepl/pull/84): Locations in text, as `where`, `refs`, `deps` and `check` print them, are relative to the directory neorepl runs in, when they're in it.
+
 ### Bug fixes
 
 - [#83](https://github.com/nrepl/neorepl/pull/83): After a reload, the aliases and refers of the namespaces it didn't reload, like the REPL's, point at the reloaded ones, so a function added since resolves through an alias, and requiring with the same alias again works.

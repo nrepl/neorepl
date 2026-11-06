@@ -178,11 +178,27 @@
   [causes]
   (str/join "\n" (causes-lines causes "    at " 0)))
 
+(defn- relative
+  "path relative to dir, when it's in there and isn't dir itself, or else
+  as it is, as with a root for dir, which everything is in."
+  [path dir]
+  (try
+    (let [p (.normalize (.toPath (java.io.File. ^String path)))
+          d (.normalize (.toPath (java.io.File. ^String dir)))]
+      (if (and (.getParent d) (.startsWith p d) (not= p d))
+        (str (.relativize d p))
+        path))
+    ;; Windows' InvalidPathException, which babashka doesn't have by name,
+    ;; for what isn't a path there, like a jar:file: URL or <stdin>.
+    (catch IllegalArgumentException _ path)))
+
 (defn location-text
   "Where something is, its :file, :line and :column, the way compilers and
-  editors write it: file:line:column."
-  [{:keys [file line column]}]
-  (str/join ":" (remove nil? [file line column])))
+  editors write it: file:line:column, with a file in dir, by default the
+  directory neorepl runs in, relative to it."
+  ([location] (location-text location (System/getProperty "user.dir")))
+  ([{:keys [file line column]} dir]
+   (str/join ":" (remove nil? [(some-> file str (relative dir)) line column]))))
 
 (defn references-text
   "Cross-references, from features/references, a line each: the function's
@@ -216,15 +232,6 @@
   (concat (frame-lines stacktrace "  at ")
           (causes-lines more "  at " 1)))
 
-(defn- relative
-  "path relative to dir, when it's in there, or else as it is."
-  [path dir]
-  (let [p (.toPath (java.io.File. ^String path))
-        d (.toPath (java.io.File. ^String dir))]
-    (if (.startsWith p d)
-      (str (.relativize d p))
-      path)))
-
 (defn failure-heading
   "The first line of a test that didn't pass, from a run-tests report, as
   clojure.test prints it: what it is and where, relative to the directory
@@ -234,7 +241,7 @@
    (str (str/upper-case type)
         ;; Not in a test, when a fixture fails.
         (some->> (not-empty (str/join "/" (remove nil? [ns var]))) (str " in "))
-        (when file (str " (" (location-text {:file (relative file dir) :line line}) ")")))))
+        (when file (str " (" (location-text {:file file :line line} dir) ")")))))
 
 (defn failure-text
   "A test that didn't pass, from a run-tests report, as clojure.test prints it."
