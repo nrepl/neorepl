@@ -201,9 +201,12 @@
   (let [file (io/file (project-dir :clojure) "src" "demo" "core.clj")]
     (run :clojure "reload")
     (try
+      (run :clojure "eval" "-s" "refreshing" "(require '[demo.core :as c])")
       (spit file "\n(defn added [] :added)\n" :append true)
       (is (= {:status 0 :out "Reloaded demo.core, demo.core-test\n" :err ""} (run :clojure "reload")))
       (is (= ":added\n" (:out (run :clojure "eval" "(demo.core/added)"))))
+      (testing "with the aliases of a namespace it left alone on the one it made anew"
+        (is (= {:status 0 :out ":added\n" :err ""} (run :clojure "eval" "-s" "refreshing" "(c/added)"))))
       (finally
         (spit file servers/core)
         (run :clojure "reload")))))
@@ -236,6 +239,12 @@
             (is (str/ends-with? err "Reloading what changed failed\n")))
           (write! ":fixed")
           (is (= {:status 0 :out "[:fixed 1]\n" :err ""} (run-reloading "[(demo.reloaded/f) @demo.reloaded/state]"))))
+        (testing "with the REPL's aliases and refers on the namespace it made anew"
+          (run-reloading "(require '[demo.reloaded :as r :refer [f]])")
+          (save! "\n(defn more [] :more)\n" :append)
+          (is (= {:status 0 :out "[:more true]\n" :err ""}
+                 (run-reloading "[(r/more) (identical? #'demo.reloaded/f (resolve 'f))]")))
+          (is (= {:status 0 :out "nil\n" :err ""} (run-reloading "(require '[demo.reloaded :as r])"))))
         (testing "with the session back in the namespace it's in, which a reload makes anew"
           (run-reloading "(in-ns 'demo.reloaded)")
           (save! "\n(defn added [] :added)\n" :append)

@@ -652,11 +652,47 @@
     normalize-causes
     not-empty)))
 
+(def ^:private relink-code
+  "Has the aliases and refers in every namespace that are on a namespace a
+  reload made anew point at the new one, and its var by the same name.
+  cider-nrepl's refresh and clj-reload make the namespaces they reload anew
+  with remove-ns and leave the others' on the old ones, as clj-reload's
+  README says, where a function added since isn't there, and the alias
+  can't be made again. What has nothing new to point at stays as it was,
+  the way an :as-alias keeps working for keywords. It goes by the var's
+  own namespace and name, rather than its metadata, which potemkin's
+  import-vars copies from another var, and a var from Var/create has no
+  namespace at all. Only Clojure has those reloads, so it does nothing on
+  babashka. cider-nrepl does the same after its reloads since
+  cider-nrepl#1077, so this can go once that's in the oldest one supported."
+  "#?(:bb nil
+      :clj (clojure.core/let [now #(clojure.core/some-> % clojure.core/ns-name clojure.core/find-ns)]
+             (clojure.core/doseq [^clojure.lang.Namespace n (clojure.core/all-ns)]
+               (clojure.core/reduce-kv
+                (clojure.core/fn [_ a target]
+                  (clojure.core/let [current (now target)]
+                    (clojure.core/when (clojure.core/and current (clojure.core/not (clojure.core/identical? target current)))
+                      (.removeAlias n a)
+                      (.addAlias n a current))))
+                nil (.getAliases n))
+               (clojure.core/reduce-kv
+                (clojure.core/fn [_ s v]
+                  (clojure.core/when (clojure.core/instance? clojure.lang.Var v)
+                    (clojure.core/let [target (.-ns ^clojure.lang.Var v)
+                                       ^clojure.lang.Namespace current (now target)
+                                       ^clojure.lang.Var new (clojure.core/when (clojure.core/and current (clojure.core/not (clojure.core/identical? target current)))
+                                             (.findInternedVar current (.-sym ^clojure.lang.Var v)))]
+                      (clojure.core/when (clojure.core/and new (.isPublic new))
+                        (.unmap n s)
+                        (.refer n s new)))))
+                nil (.getMappings n)))))")
+
 (defn reload
   "Reloads code and returns {:reloaded [the namespaces]}, and the :output
   loading them printed, like reflection warnings, if any. With nses, a seq
   of namespace names, those namespaces get reloaded. Without, the ones that
-  changed since the last reload, which takes cider-nrepl's refresh. A big
+  changed since the last reload, which takes cider-nrepl's refresh, and the
+  aliases and refers on them then get relinked, as relink-code says. A big
   project takes a while, so it waits as long as that takes unless opts have
   a :timeout-ms."
   ([client nses] (reload client nses {}))
@@ -686,8 +722,11 @@
                                    (do (ask client {:op "refresh-clear"} opts)
                                        (refresh))
                                    (throw e))
-                                 (throw e))))]
-             [(vec (some :reloading responses)) responses])
+                                 (throw e))))
+                 reloaded (vec (some :reloading responses))]
+             (when (seq reloaded)
+               (nrepl/request client {:op "eval" :code relink-code}))
+             [reloaded responses])
 
            :else
            (throw (ex-info "Reloading what changed takes cider-nrepl on the server; name the namespaces to reload"
@@ -1722,12 +1761,13 @@
   "Reloads the namespaces whose files changed since the last time, the ones
   that depend on them after them, with cider-nrepl's clj-reload, which
   keeps what defonce defined and leaves alone namespaces nothing loaded,
-  and puts session back in its namespace. It runs in session, the way
-  evaluation/evaluate does, whose opts it takes. Returns nil once it's
-  done, or else what evaluate does, saying why not, with :clojurescript?
-  in a ClojureScript session, where there's nothing for it to reload.
-  The reload note-changes started, client's :noting-changes, goes first,
-  rather than racing it."
+  then puts session back in its namespace and relinks the aliases and
+  refers on the namespaces it made anew, as relink-code says. It runs in
+  session, the way evaluation/evaluate does, whose opts it takes. Returns
+  nil once it's done, or else what evaluate does, saying why not, with
+  :clojurescript? in a ClojureScript session, where there's nothing for it
+  to reload. The reload note-changes started, client's :noting-changes,
+  goes first, rather than racing it."
   [client session opts]
   (when-not (supports? client "cider.clj-reload/reload")
     (throw (ex-info "Reloading what changed takes cider-nrepl on the server" {:type ::failed})))
@@ -1754,6 +1794,7 @@
       :else (do (nrepl/request client {:op "eval" :session session :code reenter-code
                                        ;; *1 could be anything, even endless.
                                        :nrepl.middleware.print/quota 1})
+                (nrepl/request client {:op "eval" :code relink-code})
                 nil))))
 
 (defn note-changes

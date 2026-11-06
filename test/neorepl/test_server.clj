@@ -425,12 +425,13 @@
 (defn- remake-reloaded!
   "Makes the namespace neorepl.reloaded anew, as clj-reload does the ones it
   reloads, with a var it didn't have before, named after what reloads
-  holds, as reloaded-1."
+  holds, as reloaded-1, and one it always has, kept."
   []
   (remove-ns 'neorepl.reloaded)
   (let [n (create-ns 'neorepl.reloaded)]
     (binding [*ns* n]
       (refer 'clojure.core))
+    (intern n 'kept true)
     (intern n (symbol (str "reloaded-" @reloads)) true)))
 
 (defn wrap-fake-reload
