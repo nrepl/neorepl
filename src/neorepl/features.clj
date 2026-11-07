@@ -1772,7 +1772,9 @@
   "Puts the session back in its namespace, by its name, which a reload can
   make anew, leaving the session in the old one. The REPL then sets *3 to
   *2, *2 to *1 and *1 to the value, so the code sets them a step back and
-  comes to *1, which leaves all three as they were."
+  comes to *1, which leaves all three as they were. cider-nrepl puts the
+  session that asked for the reload back itself since cider-nrepl#1078, so
+  this can go once that's in the oldest one supported."
   "(clojure.core/let [v1 clojure.core/*1 v2 clojure.core/*2 v3 clojure.core/*3]
      (clojure.core/in-ns (clojure.core/ns-name clojure.core/*ns*))
      (set! clojure.core/*2 v3)
