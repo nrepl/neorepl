@@ -3,6 +3,7 @@
             [clojure.string :as str]
             [clojure.test :refer [are deftest is testing use-fixtures]]
             [neorepl.features :as features]
+            [neorepl.lookups :as lookups]
             [neorepl.nrepl :as nrepl]
             [neorepl.render :as render]
             [neorepl.test-server :as test-server :refer [*port* with-client]]
@@ -15,6 +16,10 @@
 
 (def ^:private refresh-fails? (atom false))
 
+(def ^:private clojurescript-session
+  "The session wrap-fake-cider's refresh takes for a ClojureScript one."
+  (atom nil))
+
 (def ^:private refresh-lost?
   "What wrap-fake-cider's refresh can't find, of gone.ns, until refresh-clear:
   :gone, its own file, or :dependency, one it requires, or nothing."
@@ -25,7 +30,8 @@
   (atom nil))
 
 (def ^:private test-requests
-  "The test ops wrap-fake-cider got, and their var-queries."
+  "The test ops wrap-fake-cider got, and their var-queries, the inspector's
+  and refresh, with its session."
   (atom []))
 
 (defn- wrap-fake-cider
@@ -183,27 +189,32 @@
           (transport/respond-to msg :status "done"))
       "refresh-clear" (do (reset! refresh-lost? nil)
                           (transport/respond-to msg :status "done"))
-      "refresh" (cond
-                  @refresh-lost?
-                  (do (transport/respond-to msg :err (str "Could not locate "
-                                                          (if (= :gone @refresh-lost?) "gone/ns" "nope/core")
-                                                          "__init.class on classpath.\n"))
-                      (transport/respond-to msg :status "error" :error-ns "gone.ns")
-                      (transport/respond-to msg :status "done"))
+      "refresh" (do (swap! test-requests conj (select-keys msg [:op :session]))
+                    (cond
+                      (some-> (:session msg) (= @clojurescript-session))
+                      (transport/respond-to msg :status ["done" "clojure-only"]
+                                            :err "The \"refresh\" op is Clojure-only and isn't available in a ClojureScript REPL.\n")
 
-                  @refresh-fails?
-                  ;; cider-nrepl prints the error, as the REPL would.
-                  (do (transport/respond-to msg :reloading ["broken.ns"])
-                      (transport/respond-to msg :err "Syntax error compiling at (broken/ns.clj:1:1).\n")
-                      (transport/respond-to msg :status "error" :error-ns "broken.ns")
-                      (transport/respond-to msg :status "done"))
-                  :else
-                  ;; Made anew, as tools.namespace does.
-                  (do (remove-ns 'changed.ns)
-                      (intern (create-ns 'changed.ns) 'kept true)
-                      (transport/respond-to msg :reloading ["changed.ns"])
-                      (transport/respond-to msg :err "Reflection warning, changed/ns.clj:3:1\n")
-                      (transport/respond-to msg :status ["ok" "done"])))
+                      @refresh-lost?
+                      (do (transport/respond-to msg :err (str "Could not locate "
+                                                              (if (= :gone @refresh-lost?) "gone/ns" "nope/core")
+                                                              "__init.class on classpath.\n"))
+                          (transport/respond-to msg :status "error" :error-ns "gone.ns")
+                          (transport/respond-to msg :status "done"))
+
+                      @refresh-fails?
+                      ;; cider-nrepl prints the error, as the REPL would.
+                      (do (transport/respond-to msg :reloading ["broken.ns"])
+                          (transport/respond-to msg :err "Syntax error compiling at (broken/ns.clj:1:1).\n")
+                          (transport/respond-to msg :status "error" :error-ns "broken.ns")
+                          (transport/respond-to msg :status "done"))
+                      :else
+                      ;; Made anew, as tools.namespace does.
+                      (do (remove-ns 'changed.ns)
+                          (create-ns 'changed.ns)
+                          (transport/respond-to msg :reloading ["changed.ns"])
+                          (transport/respond-to msg :err "Reflection warning, changed/ns.clj:3:1\n")
+                          (transport/respond-to msg :status ["ok" "done"]))))
       "inspect-last-exception" (do (swap! test-requests conj (select-keys msg [:op :index :ex-data :page-size]))
                                    (transport/respond-to msg :status "done"
                                                          :value (pr-str ["Class: " '(:value "clojure.lang.ExceptionInfo" 0)])))
@@ -574,28 +585,15 @@
               noting (doto (Thread. #(do (Thread/sleep 300) (deliver noted true))) .start)]
           (features/reload-changed (assoc client :noting-changes noting) session {})
           (is (realized? noted))))
-      (testing "with the aliases and refers of a namespace it left alone on the one it made anew"
-        (let [before @test-server/reloads]
-          (values (str "(ns neorepl.reloading) (alias 'r 'neorepl.reloaded)"
-                       " (refer 'neorepl.reloaded :only '[kept reloaded-" before "] :rename '{kept k})"
-                       " (def imported 1) (alter-meta! #'imported assoc :ns (the-ns 'neorepl.reloaded) :name 'kept)"))
-          (reload)
-          (is (= ["true"] (values (str "r/reloaded-" @test-server/reloads))))
-          ;; babashka has no reload that makes namespaces anew, so nothing
-          ;; relinks the refers there.
-          (when-not (System/getProperty "babashka.version")
-            (is (= ["true"] (values "(identical? #'neorepl.reloaded/kept (resolve 'k))")))
-            (testing "but not a refer with nothing new to point at, nor a var whose metadata says it's another's, as potemkin's import-vars makes them"
-              (is (= ["[true 1]"] (values (str "[(some? (resolve 'reloaded-" before ")) @(resolve 'imported)]")))))
-            (testing "nor a var with no namespace, from Var/create"
-              (values "(.refer *ns* 'anonymous (clojure.lang.Var/create :anonymous))")
-              (is (not-any? :ex (nrepl/request client {:op "eval" :code @#'features/relink-code})))
-              (is (= [":anonymous"] (values "@(resolve 'anonymous)")))))))
       (testing "with the session back in its namespace, made anew, and *1, *2 and *3 as they were"
         (values "(in-ns 'neorepl.reloaded)")
         (values "1 2 3")
         (reload)
-        (is (= ["[true 3 2 1]"] (values (str "[reloaded-" @test-server/reloads " *1 *2 *3]")))))
+        (is (= ["[true 3 2 1]"] (values (str "[reloaded-" @test-server/reloads " *1 *2 *3]"))))
+        (testing "but leaving that to cider-nrepl 0.64.1 and after, which the fake isn't"
+          (features/reload-changed (assoc client :cider-version "0.64.1") session {})
+          (is (= ["false"] (values "(identical? *ns* (find-ns 'neorepl.reloaded))")))
+          (values "(clojure.core/in-ns 'user)")))
       (testing "the server's error, when a file doesn't compile"
         (let [{:keys [status err message]} (test-server/answering-reloads :error reload)]
           (is (= "error" status))
@@ -787,14 +785,36 @@
             (is (str/starts-with? (features/source client "mapv" user) "(defn mapv")))
           (is (= {:reloaded ["changed.ns"] :output "Reflection warning, changed/ns.clj:3:1\n"}
                  (features/reload client [])))
-          (testing "with the aliases and refers of a namespace it left alone on the one it made anew"
-            (nrepl/request client {:op "eval" :code "(ns neorepl.refreshing) (alias 'c 'changed.ns) (refer 'changed.ns :only '[kept])"})
+          (testing "in no session, unless it's given one, which cider-nrepl then puts back in its namespace"
+            (reset! test-requests [])
             (features/reload client [])
-            (let [values #(keep :value (nrepl/request client {:op "eval" :ns "neorepl.refreshing" :code %}))]
-              (is (= ["true"] (values "(identical? (find-ns 'changed.ns) (get (ns-aliases *ns*) 'c))")))
-              ;; As in reload-changed-test.
-              (when-not (System/getProperty "babashka.version")
-                (is (= ["true"] (values "(identical? #'changed.ns/kept (resolve 'kept))"))))))
+            (let [session (nrepl/clone-session client)]
+              (features/reload client [] {:session session} {})
+              (is (= [{:op "refresh"} {:op "refresh" :session session}] @test-requests))
+              (testing "such as the REPL's, through the lookup"
+                (reset! test-requests [])
+                (lookups/run "reload" client {:session session} nil)
+                (is (= [{:op "refresh" :session session}] @test-requests)))
+              (testing "which neorepl puts back itself before cider-nrepl 0.64.1"
+                (let [values #(keep :value (nrepl/request client {:op "eval" :session session :code %}))
+                      ;; A namespace made with create-ns refers nothing.
+                      back? "(clojure.core/identical? clojure.core/*ns* (clojure.core/find-ns 'changed.ns))"]
+                  (values "(in-ns 'changed.ns)")
+                  (features/reload client [] {:session session} {})
+                  (is (= ["true"] (values back?)))
+                  (testing "but not after, when cider-nrepl does, which the fake doesn't"
+                    (features/reload (assoc client :cider-version "0.64.1") [] {:session session} {})
+                    (is (= ["false"] (values back?))))
+                  (values "(clojure.core/in-ns 'user)")))
+              (testing "but not a ClojureScript one, which cider-nrepl won't refresh in"
+                (reset! clojurescript-session session)
+                (reset! test-requests [])
+                (try
+                  (is (= {:reloaded ["changed.ns"] :output "Reflection warning, changed/ns.clj:3:1\n"}
+                         (features/reload client [] {:session session} {})))
+                  (is (= [{:op "refresh" :session session} {:op "refresh"}] @test-requests))
+                  (finally
+                    (reset! clojurescript-session nil))))))
           (testing "after forgetting a namespace whose file is gone, which cider-nrepl keeps after"
             (reset! refresh-lost? :gone)
             (is (= {:reloaded ["changed.ns"] :output "Reflection warning, changed/ns.clj:3:1\n"}

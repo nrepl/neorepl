@@ -22,16 +22,23 @@
 (defn- supports? [client op]
   (contains? (:ops client) op))
 
+(defn- cider-release
+  "The server's cider-nrepl version, by describe's :cider-version, as
+  [[major minor patch] prerelease], with a prerelease like alpha3 or nil,
+  or nil when there's no version."
+  [{:keys [cider-version]}]
+  (when-let [[_ major minor patch prerelease] (some->> cider-version (re-find #"^(\d+)\.(\d+)\.(\d+)(?:-(\w+))?"))]
+    [(mapv #(Long/parseLong %) [major minor patch]) prerelease]))
+
 (defn- orchard-spaces?
   "Whether the server's cider-nrepl puts a space either side of each entity
   in a Javadoc's HTML, as those before 0.64.0-alpha3 do, the first with
   orchard#438."
-  [{:keys [cider-version]}]
-  (let [[_ major minor patch prerelease] (some->> cider-version (re-find #"^(\d+)\.(\d+)\.(\d+)(?:-(\w+))?"))]
-    (or (nil? major)
-        (let [release (mapv #(Long/parseLong %) [major minor patch])]
-          (or (neg? (compare release [0 64 0]))
-              (and (= [0 64 0] release) (contains? #{"alpha1" "alpha2"} prerelease)))))))
+  [client]
+  (let [[release prerelease] (cider-release client)]
+    (or (nil? release)
+        (neg? (compare release [0 64 0]))
+        (and (= [0 64 0] release) (contains? #{"alpha1" "alpha2"} prerelease)))))
 
 (defn- no-namespace
   "The exception saying there's no namespace called ns."
@@ -652,51 +659,41 @@
     normalize-causes
     not-empty)))
 
-(def ^:private relink-code
-  "Has the aliases and refers in every namespace that are on a namespace a
-  reload made anew point at the new one, and its var by the same name.
-  cider-nrepl's refresh and clj-reload make the namespaces they reload anew
-  with remove-ns and leave the others' on the old ones, as clj-reload's
-  README says, where a function added since isn't there, and the alias
-  can't be made again. What has nothing new to point at stays as it was,
-  the way an :as-alias keeps working for keywords. It goes by the var's
-  own namespace and name, rather than its metadata, which potemkin's
-  import-vars copies from another var, and a var from Var/create has no
-  namespace at all. Only Clojure has those reloads, so it does nothing on
-  babashka. cider-nrepl does the same after its reloads since
-  cider-nrepl#1077, so this can go once that's in the oldest one supported."
-  "#?(:bb nil
-      :clj (clojure.core/let [now #(clojure.core/some-> % clojure.core/ns-name clojure.core/find-ns)]
-             (clojure.core/doseq [^clojure.lang.Namespace n (clojure.core/all-ns)]
-               (clojure.core/reduce-kv
-                (clojure.core/fn [_ a target]
-                  (clojure.core/let [current (now target)]
-                    (clojure.core/when (clojure.core/and current (clojure.core/not (clojure.core/identical? target current)))
-                      (.removeAlias n a)
-                      (.addAlias n a current))))
-                nil (.getAliases n))
-               (clojure.core/reduce-kv
-                (clojure.core/fn [_ s v]
-                  (clojure.core/when (clojure.core/instance? clojure.lang.Var v)
-                    (clojure.core/let [target (.-ns ^clojure.lang.Var v)
-                                       ^clojure.lang.Namespace current (now target)
-                                       ^clojure.lang.Var new (clojure.core/when (clojure.core/and current (clojure.core/not (clojure.core/identical? target current)))
-                                             (.findInternedVar current (.-sym ^clojure.lang.Var v)))]
-                      (clojure.core/when (clojure.core/and new (.isPublic new))
-                        (.unmap n s)
-                        (.refer n s new)))))
-                nil (.getMappings n)))))")
+(def ^:private reenter-code
+  "Puts the session back in its namespace, by its name, which a reload can
+  make anew, leaving the session in the old one. The REPL then sets *3 to
+  *2, *2 to *1 and *1 to the value, so the code sets them a step back and
+  comes to *1, which leaves all three as they were."
+  "(clojure.core/let [v1 clojure.core/*1 v2 clojure.core/*2 v3 clojure.core/*3]
+     (clojure.core/in-ns (clojure.core/ns-name clojure.core/*ns*))
+     (set! clojure.core/*2 v3)
+     (set! clojure.core/*1 v2)
+     v1)")
+
+(defn- reenter
+  "Puts session back in its namespace after a reload that made namespaces
+  anew, as reenter-code does, when the server's cider-nrepl doesn't: before
+  0.64.1, the first with cider-nrepl#1078, so this can go once that's the
+  oldest one supported."
+  [client session]
+  (let [[release] (cider-release client)]
+    (when (or (nil? release) (neg? (compare release [0 64 1])))
+      (nrepl/request client {:op "eval" :session session :code reenter-code
+                             ;; *1 could be anything, even endless.
+                             :nrepl.middleware.print/quota 1}))))
 
 (defn reload
   "Reloads code and returns {:reloaded [the namespaces]}, and the :output
   loading them printed, like reflection warnings, if any. With nses, a seq
   of namespace names, those namespaces get reloaded. Without, the ones that
-  changed since the last reload, which takes cider-nrepl's refresh, and the
-  aliases and refers on them then get relinked, as relink-code says. A big
-  project takes a while, so it waits as long as that takes unless opts have
-  a :timeout-ms."
-  ([client nses] (reload client nses {}))
-  ([client nses opts]
+  changed since the last reload, which takes cider-nrepl's refresh, in
+  ctx's :session, if it has one. That makes the namespaces anew, and
+  cider-nrepl, since 0.64.1, has the aliases and refers on them point at
+  the new ones, and puts the session back in its namespace, as reenter does
+  for an older one. A big project takes a while, so it waits as long as
+  that takes unless opts have a :timeout-ms."
+  ([client nses] (reload client nses {} {}))
+  ([client nses {:keys [session]} opts]
    (let [opts (merge {:timeout-ms nil} opts)
          [reloaded responses]
          (cond
@@ -708,24 +705,30 @@
                  opts)]
 
            (supports? client "refresh")
-           (let [refresh #(ask client {:op "refresh"} opts)
-                 responses (try
-                             (refresh)
-                             (catch clojure.lang.ExceptionInfo e
-                               ;; cider-nrepl keeps trying to reload a namespace
-                               ;; whose file is gone, until it forgets them all,
-                               ;; which reloads the rest too, so only then.
-                               (if-let [ns (some :error-ns (:responses (ex-data e)))]
-                                 (if (str/includes? (ex-message e) (str "Could not locate "
-                                                                        (-> ns (str/replace "-" "_") (str/replace "." "/"))
-                                                                        "__init.class"))
-                                   (do (ask client {:op "refresh-clear"} opts)
-                                       (refresh))
-                                   (throw e))
-                                 (throw e))))
+           (let [refresh #(let [responses (ask client (cond-> {:op "refresh"} session (assoc :session session)) opts)]
+                            ;; cider-nrepl won't in a ClojureScript session, which
+                            ;; has no Clojure namespace to go back to anyway.
+                            (if (some (fn [response] (nrepl/status? response "clojure-only")) responses)
+                              [(ask client {:op "refresh"} opts) nil]
+                              [responses session]))
+                 [responses refreshed-in]
+                 (try
+                   (refresh)
+                   (catch clojure.lang.ExceptionInfo e
+                     ;; cider-nrepl keeps trying to reload a namespace
+                     ;; whose file is gone, until it forgets them all,
+                     ;; which reloads the rest too, so only then.
+                     (if-let [ns (some :error-ns (:responses (ex-data e)))]
+                       (if (str/includes? (ex-message e) (str "Could not locate "
+                                                              (-> ns (str/replace "-" "_") (str/replace "." "/"))
+                                                              "__init.class"))
+                         (do (ask client {:op "refresh-clear"} opts)
+                             (refresh))
+                         (throw e))
+                       (throw e))))
                  reloaded (vec (some :reloading responses))]
-             (when (seq reloaded)
-               (nrepl/request client {:op "eval" :code relink-code}))
+             (when (and refreshed-in (seq reloaded))
+               (reenter client refreshed-in))
              [reloaded responses])
 
            :else
@@ -1768,25 +1771,13 @@
                     opts
                     (fn [_]))))
 
-(def ^:private reenter-code
-  "Puts the session back in its namespace, by its name, which a reload can
-  make anew, leaving the session in the old one. The REPL then sets *3 to
-  *2, *2 to *1 and *1 to the value, so the code sets them a step back and
-  comes to *1, which leaves all three as they were. cider-nrepl puts the
-  session that asked for the reload back itself since cider-nrepl#1078, so
-  this can go once that's in the oldest one supported."
-  "(clojure.core/let [v1 clojure.core/*1 v2 clojure.core/*2 v3 clojure.core/*3]
-     (clojure.core/in-ns (clojure.core/ns-name clojure.core/*ns*))
-     (set! clojure.core/*2 v3)
-     (set! clojure.core/*1 v2)
-     v1)")
-
 (defn reload-changed
   "Reloads the namespaces whose files changed since the last time, the ones
   that depend on them after them, with cider-nrepl's clj-reload, which
-  keeps what defonce defined and leaves alone namespaces nothing loaded,
-  then puts session back in its namespace and relinks the aliases and
-  refers on the namespaces it made anew, as relink-code says. It runs in
+  keeps what defonce defined and leaves alone namespaces nothing loaded.
+  It makes the namespaces it reloads anew, and cider-nrepl, since 0.64.1,
+  puts session back in its namespace, as reenter does for an older one, and
+  has the aliases and refers on them point at the new ones. It runs in
   session, the way evaluation/evaluate does, whose opts it takes. Returns
   nil once it's done, or else what evaluate does, saying why not, with
   :clojurescript? in a ClojureScript session, where there's nothing for it
@@ -1814,12 +1805,7 @@
       (= "error" status) (assoc result :message "Reloading what changed failed")
       (not= "ok" status) result
       ;; Without a count, as from a project's own clj-reload, it may have.
-      (= "0" @reloaded) nil
-      :else (do (nrepl/request client {:op "eval" :session session :code reenter-code
-                                       ;; *1 could be anything, even endless.
-                                       :nrepl.middleware.print/quota 1})
-                (nrepl/request client {:op "eval" :code relink-code})
-                nil))))
+      (not= "0" @reloaded) (do (reenter client session) nil))))
 
 (defn note-changes
   "Has cider-nrepl's clj-reload, if the server at host and port has it,

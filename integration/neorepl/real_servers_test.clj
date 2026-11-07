@@ -212,6 +212,14 @@
       (is (= ":added\n" (:out (run :clojure "eval" "(demo.core/added)"))))
       (testing "with the aliases of a namespace it left alone on the one it made anew"
         (is (= {:status 0 :out ":added\n" :err ""} (run :clojure "eval" "-s" "refreshing" "(c/added)"))))
+      (testing "and the session it reloads in back in its namespace, made anew"
+        (with-client [client {:port (discovery/read-port (io/file (project-dir :clojure) ".nrepl-port"))}]
+          (let [session (nrepl/clone-session client)
+                values #(keep :value (nrepl/request client {:op "eval" :session session :code %}))]
+            (values "(in-ns 'demo.core)")
+            (spit file "\n(defn more [] :more)\n" :append true)
+            (is (= ["demo.core" "demo.core-test"] (:reloaded (features/reload client [] {:session session} {}))))
+            (is (= [":more"] (values "(more)"))))))
       (finally
         (spit file servers/core)
         (run :clojure "reload")))))

@@ -844,13 +844,9 @@
     (testing ",where and ,reload"
       (is (re-find #"^user=> \S*core\.clj:\d+" (repl ",where map\n")))
       (is (= "user=> Reloaded clojure.set\nuser=> \n" (repl ",reload clojure.set\n")))
-      (testing "which leaves the REPL in the namespace it was in, even when that's made anew"
-        (is (= "user=> nil\nrepl.anew=> nil\nrepl.anew=> Reloaded clojure.set\nrepl.anew=> true\nrepl.anew=> \n"
-               ;; in-ns refers nothing to the namespace it makes on the JVM.
-               (repl (str "(do (in-ns 'repl.anew) nil)\n"
-                          "(do (clojure.core/remove-ns 'repl.anew) (clojure.core/create-ns 'repl.anew) nil)\n"
-                          ",reload clojure.set\n"
-                          "(clojure.core/identical? clojure.core/*ns* (clojure.core/find-ns 'repl.anew))\n"))))))
+      (testing "which leaves *1 as it was"
+        (is (= "user=> 3\nuser=> Reloaded clojure.set\nuser=> 3\nuser=> \n"
+               (repl "(+ 1 2)\n,reload clojure.set\n*1\n")))))
     (testing "help, mistakes and quitting"
       (is (str/includes? (repl ",help\n") ",doc SYM"))
       (is (= "user=> Usage: ,doc SYM\nuser=> \n" (repl ",doc\n")))
