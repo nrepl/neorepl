@@ -61,8 +61,8 @@
     :none (fn [_ sym] (str sym " uses no functions"))}
    {:name "reload" :arg "NS..." :args? true :optional? true
     :help "Reload the namespaces NS, or the ones that changed"
-    :find (fn [client {:keys [timeout-ms]} nses]
-            (features/reload client nses {:timeout-ms timeout-ms}))
+    :find (fn [client {:keys [timeout-ms] :as ctx} nses]
+            (features/reload client nses ctx {:timeout-ms timeout-ms}))
     :text (fn [{:keys [reloaded output]}]
             (str (some-> output str/trimr (str "\n"))
                  (if (seq reloaded)

@@ -460,21 +460,10 @@
                                         (nrepl/session-ns client id)
                                         (when (= id (:session own)) "this REPL's")]))))))
 
-(defn- reenter
-  "Puts session back in the namespace called ns, as tools.namespace's refresh
-  does: reloading code can make a namespace anew, and the session would go
-  on in the old one."
-  [client session ns]
-  ;; Qualified, since the namespace it's in might not refer clojure.core.
-  (nrepl/request client {:op "eval" :session session
-                         :code (format "(clojure.core/in-ns (clojure.core/symbol %s))" (pr-str ns))}))
-
 (def ^:private follow-ups
   "What the REPL does after some lookups, by name, given command-output's
   state and what the lookup found."
-  {"reload" (fn [{:keys [client session ns]} _]
-              (reenter client session ns))
-   "trace" (fn [{:keys [show-traces]} {:keys [results]}]
+  {"trace" (fn [{:keys [show-traces]} {:keys [results]}]
              (when (some #(#{"traced" "already-traced"} (:status %)) results)
                (show-traces)))
    "untrace" (fn [{:keys [hide-traces]} {:keys [untraced]}]

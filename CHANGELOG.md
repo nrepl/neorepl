@@ -7,10 +7,11 @@
 - [#84](https://github.com/nrepl/neorepl/pull/84): Locations in text, as `where`, `refs`, `deps` and `check` print them, are relative to the directory neorepl runs in, when they're in it.
 - [#85](https://github.com/nrepl/neorepl/pull/85): The profile summary fits in a terminal, without the columns only CIDER's inspector needs.
 - [#85](https://github.com/nrepl/neorepl/pull/85): `neorepl profile --format edn` and `json` give the summary as a list of maps, one for each function, rather than the text table.
+- [#87](https://github.com/nrepl/neorepl/pull/87): Jack-in brings cider-nrepl 0.64.1, whose reloads point the aliases and refers on the namespaces they make anew at the new ones, and keep the session in its namespace, which neorepl now does itself only for an older cider-nrepl.
 
 ### Bug fixes
 
-- [#83](https://github.com/nrepl/neorepl/pull/83): After a reload, the aliases and refers of the namespaces it didn't reload, like the REPL's, point at the reloaded ones, so a function added since resolves through an alias, and requiring with the same alias again works.
+- [#87](https://github.com/nrepl/neorepl/pull/87): `,reload` leaves `*1` as it was, rather than setting it to the REPL's namespace.
 
 ## 0.5.1 (2026-11-05)
 

@@ -444,18 +444,18 @@
 (defn- remake-reloaded!
   "Makes the namespace neorepl.reloaded anew, as clj-reload does the ones it
   reloads, with a var it didn't have before, named after what reloads
-  holds, as reloaded-1, and one it always has, kept."
+  holds, as reloaded-1."
   []
   (remove-ns 'neorepl.reloaded)
   (let [n (create-ns 'neorepl.reloaded)]
     (binding [*ns* n]
       (refer 'clojure.core))
-    (intern n 'kept true)
     (intern n (symbol (str "reloaded-" @reloads)) true)))
 
 (defn wrap-fake-reload
   "cider-nrepl's cider.clj-reload/reload, answering as reload-answer says,
-  with what cider-nrepl 0.64.0 sends. It reloads neorepl.reloaded."
+  with what cider-nrepl 0.64.0 sends, which doesn't put the session back.
+  It reloads neorepl.reloaded."
   [handler]
   (fn [{:keys [op] :as msg}]
     (if (= "cider.clj-reload/reload" op)
