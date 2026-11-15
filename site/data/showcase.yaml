@@ -1,0 +1,102 @@
+# The feature sections. Each one plays a recording next to it: cast names
+# static/casts/NAME.cast, which casts/record-all.sh makes from
+# casts/NAME.tape, and poster is the second of it shown before it plays, or
+# end for its last frame.
+- title: Docs without leaving the prompt
+  cast: docs
+  poster: end
+  caption: >-
+    `,doc` and `,source` by name, `,where` for the file and line it's on,
+    C-x C-d on the function the cursor's in, and `,apropos` searching the
+    names.
+  blurb: >-
+    `,doc`, `,source` and `,apropos` do what their `clojure.repl` namesakes
+    do, Java's members included with cider-nrepl. C-x C-d shows the
+    documentation of what's at the cursor and brings back what you'd typed,
+    `,where` says where something's defined and `,refs` which functions use
+    it.
+  docs: https://github.com/nrepl/neorepl#usage
+
+- title: Look inside your data
+  cast: inspector
+  poster: 14
+  caption: >-
+    `,inspect` on today's orders: into Rich's order, its items and one of
+    them, back out a level at a time, and `q` to the REPL.
+  blurb: >-
+    `,inspect` opens a value, or the last one, in cider-nrepl's inspector,
+    full-screen. The arrow keys move between the values in it, Enter digs into
+    one and Backspace comes back out, and big collections come a screenful at
+    a time. `d` defines what you're looking at as a var, and `q` takes you
+    back to the REPL.
+  docs: https://github.com/nrepl/neorepl#usage
+
+- title: Run the tests
+  cast: tests
+  poster: end
+  caption: >-
+    A test that fails, with what it expected next to what it got, the fix
+    made in an editor, then `,reload` and `,retest`.
+  blurb: >-
+    `,test` runs a namespace's tests, the ones you name or the whole
+    project's, and shows what didn't pass and where, with what was expected
+    next to what came back. `,retest` reruns the ones that didn't, and an
+    error's stack trace goes down to the test that hit it.
+  docs: https://github.com/nrepl/neorepl#usage
+
+- title: Make sense of errors
+  cast: errors
+  poster: 12
+  caption: >-
+    An ex-info from an order that isn't there, `,pst` with the frames that
+    matter, and `,stacktrace` with all of them, `a` for the JVM's too, and
+    `d` for the ex-data.
+  blurb: >-
+    `,pst` prints the last error's stack trace without the frames of the
+    REPL's own machinery, and `,stacktrace` browses it full-screen. Enter on
+    a frame opens its source in your `$EDITOR`, `a` brings back what was left
+    out, and with cider-nrepl `i` inspects the cause and `d` its ex-data.
+  docs: https://github.com/nrepl/neorepl#usage
+
+- title: Reload as you edit
+  cast: reload
+  poster: end
+  caption: >-
+    With `,autoreload` on, a price changed in the file and a function added
+    to it are there for the next evaluation, with nothing reloaded by hand.
+  blurb: >-
+    `,autoreload` reloads the namespaces whose files changed, and the ones
+    that use them, before each evaluation, keeping what `defonce` defined.
+    Code edited anywhere, in an editor or by a coding agent, is the code the
+    next evaluation runs. `,reload` does it when you ask.
+  docs: https://github.com/nrepl/neorepl#usage
+
+- title: Trace and profile
+  cast: trace
+  poster: 8
+  caption: >-
+    `,trace` on the namespace shows each call with its arguments and what it
+    returned, nested in the calls it's in. `,profile` then times a thousand
+    of them.
+  blurb: >-
+    `,trace` traces a function, or every function in a namespace, so each
+    call shows its arguments and what it returned, nested in the calls it's
+    in, calls from other threads included. `,profile` times every call
+    instead, and on its own shows how many calls each function had and how
+    long they took.
+  docs: https://github.com/nrepl/neorepl#usage
+
+- title: Scripts and coding agents
+  cast: cli
+  poster: end
+  caption: >-
+    The REPL's server from the shell: an evaluation, docs, a value as JSON,
+    completions, and the project's tests, whose failure shows in the exit
+    status.
+  blurb: >-
+    Most of what the REPL does is a command too, `neorepl eval`, `doc`,
+    `test`, `inspect`, `trace` and the rest, each with `--format json`, and
+    named sessions keep `*ns*`, `*1` and `*e` from one call to the next.
+    `neorepl check --fix` repairs the parens an edit left unbalanced, a skill
+    teaches agents the workflow, and `neorepl mcp` serves it all over MCP.
+  docs: https://github.com/nrepl/neorepl#coding-agents

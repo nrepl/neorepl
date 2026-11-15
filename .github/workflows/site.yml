@@ -1,0 +1,73 @@
+name: Site
+
+on:
+  push:
+    branches: [main]
+    paths: ["site/**", ".github/workflows/site.yml"]
+  pull_request:
+    paths: ["site/**", ".github/workflows/site.yml"]
+  workflow_dispatch:
+  # The latest version, the star count and the news come from GitHub and Meta
+  # Redux at build time, so rebuild for a release, and weekly to keep them
+  # current.
+  release:
+    types: [published]
+  schedule:
+    - cron: "41 5 * * 1"
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Pull requests get a group of their own, so a PR build can't push a pending
+# deploy out of the queue, and a new push to one replaces its build.
+concurrency:
+  group: pages-${{ github.event_name == 'pull_request' && github.ref || 'deploy' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  # Bump deliberately: Hugo deprecates and removes things fairly often.
+  HUGO_VERSION: 0.168.0
+
+defaults:
+  run:
+    working-directory: site
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install Hugo
+        run: |
+          curl -fsSLo hugo.deb "https://github.com/gohugoio/hugo/releases/download/v${HUGO_VERSION}/hugo_${HUGO_VERSION}_linux-amd64.deb"
+          sudo dpkg -i hugo.deb
+      - id: pages
+        if: github.event_name != 'pull_request'
+        uses: actions/configure-pages@v6
+      - name: Build
+        # --panicOnWarning turns deprecations into failures, so we hear
+        # about them before the next Hugo bump removes something. The base
+        # URL comes from the Pages settings, so a custom domain needs no
+        # change here.
+        run: |
+          hugo --minify --gc --panicOnWarning \
+            ${{ steps.pages.outputs.base_url && format('--baseURL {0}/', steps.pages.outputs.base_url) || '' }}
+        env:
+          HUGO_GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - uses: actions/upload-pages-artifact@v5
+        if: github.event_name != 'pull_request'
+        with:
+          path: site/public
+
+  deploy:
+    if: github.event_name != 'pull_request'
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v5

@@ -1,0 +1,33 @@
+baseURL = "https://nrepl.github.io/neorepl/"
+locale = "en-US"
+title = "neorepl - a terminal REPL for Clojure, and friends"
+disableKinds = ["taxonomy", "term", "section", "RSS", "sitemap"]
+
+# A GitHub API or feed hiccup shouldn't fail the deploy (CI builds with
+# --panicOnWarning); the fallback version and data/news.yaml cover it.
+ignoreLogs = ["github-fetch", "news-feed"]
+
+[params]
+  description = "neorepl is a terminal REPL for Clojure built on nREPL: a line editor that knows Clojure, CIDER's tooling in the terminal, and a command line for scripts and coding agents."
+  readme = "https://github.com/nrepl/neorepl#readme"
+  changelog = "https://github.com/nrepl/neorepl/blob/main/CHANGELOG.md"
+  github = "https://github.com/nrepl/neorepl"
+  repo = "nrepl/neorepl"
+  sourceRepo = "https://github.com/nrepl/neorepl/tree/main/site"
+  nrepl = "https://nrepl.org"
+  since = 2026
+  copyright = "Bozhidar Batsov and neorepl contributors."
+  socialImage = "img/social.png"
+  # Used only when GitHub can't be reached at build time.
+  fallbackVersion = "0.5.1"
+  # News: posts with this tag in the feed, merged with data/news.yaml.
+  newsFeed = "https://metaredux.com/feed.xml"
+  newsTag = "neorepl"
+  newsCount = 8
+  # The asciinema-player release the recordings play in (see
+  # layouts/_partials/player.html).
+  playerVersion = "3.17.0"
+
+[caches.getresource]
+  # the release and star count are fetched from GitHub; don't keep them forever
+  maxAge = "1h"

@@ -1,0 +1,18 @@
+{{- /* The bar at the top: (partial "topbar.html" (dict "stars" 42 "home" true)). */ -}}
+{{- $p := site.Params }}
+<header class="topbar">
+  <a class="brand" href="{{ if .home }}#top{{ else }}{{ site.Home.RelPermalink }}{{ end }}">
+    <img src="{{ "icon.svg" | relURL }}" alt="" width="26" height="26"><span>neorepl</span>
+  </a>
+  <nav class="topnav" aria-label="Site">
+    <a href="{{ $p.readme }}">Docs</a>
+    <a href="{{ $p.changelog }}" class="changelog-link">Changelog</a>
+    {{- if .home }}
+    <a href="#news" class="news-link">News</a>
+    {{- end }}
+    <a href="{{ $p.github }}">GitHub{{ with .stars }} <span class="stars">{{ if ge . 1000 }}{{ printf "%.1fk" (div (float .) 1000) }}{{ else }}{{ . }}{{ end }}&#9733;</span>{{ end }}</a>
+    <button type="button" class="theme-toggle" aria-label="Switch between light and dark theme" title="Switch between light and dark theme">
+      <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 3a9 9 0 0 1 0 18z" fill="currentColor"/></svg>
+    </button>
+  </nav>
+</header>

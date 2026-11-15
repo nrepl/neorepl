@@ -1,0 +1,109 @@
+{{ define "main" }}
+{{- $gh := partialCached "github.html" . }}
+{{- $p := site.Params }}
+{{- $servers := hugo.Data.servers }}
+<a class="skip" href="#main">Skip to the content</a>
+{{ partial "topbar.html" (dict "stars" $gh.stars "home" true) }}
+
+<div class="layout" id="top">
+  <main id="main" class="text">
+    <section class="hero" data-pane>
+      <h1 class="wordmark"><img src="{{ "icon.svg" | relURL }}" alt="" width="56" height="56"><span>neorepl</span></h1>
+      <p class="tagline">{{ .Params.tagline }}</p>
+      <p class="intro">{{ .Params.intro | markdownify }}</p>
+      <p class="command-label">{{ .Params.installLabel | markdownify }}:</p>
+      <div class="command">
+        <span class="prompt" aria-hidden="true">$</span>
+        <code>{{ .Params.install }}</code>
+        <button type="button" class="copy" data-copy="{{ .Params.install }}">copy</button>
+      </div>
+      <p class="version">Latest release: <a href="{{ $gh.releaseURL }}">{{ $gh.version }}</a>,
+        and <a href="{{ $p.changelog }}">what's changed</a>.</p>
+      {{ partial "cast.html" .Params.hero }}
+    </section>
+
+    <section class="block" id="features">
+      <h2>What it does</h2>
+      {{- range hugo.Data.showcase }}
+      <section class="feature" id="{{ .title | anchorize }}" data-pane>
+        <h3>{{ .title }}</h3>
+        <p>{{ .blurb | markdownify }}</p>
+        <p class="more"><a href="{{ .docs }}">More in the README</a></p>
+        {{ partial "cast.html" . }}
+      </section>
+      {{- end }}
+
+      {{- with hugo.Data.features }}
+      <section class="feature">
+        <h3 id="the-rest">And the rest</h3>
+        <ul class="links">
+          {{- range . }}
+          <li>{{ if .docs }}<a href="{{ .docs }}">{{ .name | markdownify }}</a>{{ else }}{{ .name | markdownify }}{{ end }}</li>
+          {{- end }}
+        </ul>
+      </section>
+      {{- end }}
+    </section>
+
+    <section class="block" id="servers">
+      <h2>Who it talks to</h2>
+      <p>{{ $servers.intro | markdownify }}</p>
+      <ul class="clients">
+        {{- range $servers.items }}
+        <li><a href="{{ .url }}">{{ .name }}</a> <span>{{ .what | markdownify }}</span></li>
+        {{- end }}
+      </ul>
+      <p>{{ $servers.outro | markdownify }}</p>
+    </section>
+
+    <section class="block" id="news">
+      <h2>News</h2>
+      <ul class="news">
+        <li><span class="when">latest</span> <a href="{{ $gh.releaseURL }}">neorepl {{ $gh.version }} is the current release</a></li>
+        {{- range partialCached "news.html" . }}
+        <li><time datetime="{{ .date.Format "2006-01-02" }}">{{ .date.Format "2006-01-02" }}</time> <a href="{{ .url }}">{{ .title }}</a></li>
+        {{- end }}
+      </ul>
+    </section>
+
+    <section class="block" id="get-started">
+      <h2>Getting started</h2>
+      <ol class="steps">
+        {{- range .Params.steps }}
+        <li>{{ . | markdownify }}</li>
+        {{- end }}
+      </ol>
+      {{ with .Params.stepsNote }}<p>{{ . | markdownify }}</p>{{ end }}
+    </section>
+
+    {{- with hugo.Data.faq }}
+    <section class="block" id="faq">
+      <h2>Questions</h2>
+      <dl class="faq">
+        {{- range . }}
+        <dt>{{ .q }}</dt>
+        <dd>{{ .a | markdownify }}</dd>
+        {{- end }}
+      </dl>
+    </section>
+    {{- end }}
+
+    {{ with .Params.outro }}<p class="signoff">{{ . }}</p>{{ end }}
+    <footer class="colophon">
+      <p>&copy; {{ $p.since }}{{ if gt now.Year $p.since }}-{{ now.Year }}{{ end }} {{ $p.copyright }}
+        neorepl is built on <a href="{{ $p.nrepl }}">nREPL</a>.
+        <a href="{{ $p.sourceRepo }}">Source</a>.</p>
+    </footer>
+  </main>
+
+  {{- /* The second window: on wide screens, site.js fills it with a copy of
+         the recording of every section marked data-pane, and plays the one
+         for the section being read. */}}
+  <aside class="wire" aria-label="A recording of what the section you're reading is about"></aside>
+</div>
+{{ end }}
+
+{{ define "scripts" }}
+{{- $player := partialCached "player.html" "js" "js" | fingerprint }}
+<script src="{{ $player.RelPermalink }}" integrity="{{ $player.Data.Integrity }}" defer></script>
+{{- end }}

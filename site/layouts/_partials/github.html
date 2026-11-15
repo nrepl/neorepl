@@ -1,0 +1,26 @@
+{{- /* The latest release and star count, fetched from GitHub at build time.
+       Falls back to site.Params.fallbackVersion (and no star count) when the
+       API can't be reached, so an offline build still works. */ -}}
+{{- $repo := site.Params.repo }}
+{{- $opts := dict "headers" (dict "Accept" "application/vnd.github+json") }}
+{{- with os.Getenv "HUGO_GITHUB_TOKEN" }}
+  {{- $opts = dict "headers" (dict "Accept" "application/vnd.github+json" "Authorization" (printf "Bearer %s" .)) }}
+{{- end }}
+{{- $version := site.Params.fallbackVersion }}
+{{- $releaseURL := printf "https://github.com/%s/releases" $repo }}
+{{- $stars := 0 }}
+{{- with try (resources.GetRemote (printf "https://api.github.com/repos/%s/releases/latest" $repo) $opts) }}
+  {{- with .Err }}{{ warnidf "github-fetch" "github: couldn't fetch the latest release: %s" . }}
+  {{- else with .Value }}
+    {{- $release := . | transform.Unmarshal }}
+    {{- $version = strings.TrimPrefix "v" $release.tag_name }}
+    {{- $releaseURL = $release.html_url }}
+  {{- end }}
+{{- end }}
+{{- with try (resources.GetRemote (printf "https://api.github.com/repos/%s" $repo) $opts) }}
+  {{- with .Err }}{{ warnidf "github-fetch" "github: couldn't fetch the repository: %s" . }}
+  {{- else with .Value }}
+    {{- $stars = (. | transform.Unmarshal).stargazers_count }}
+  {{- end }}
+{{- end }}
+{{- return (dict "version" $version "releaseURL" $releaseURL "stars" $stars) }}
