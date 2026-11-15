@@ -4,6 +4,7 @@ A terminal REPL for Clojure (and friends) built on nREPL. It's meant as a
 spiritual successor to [REPLy](https://github.com/trptcolin/reply), with a
 proper line editor, the core of CIDER's tooling and a CLI that works just as
 well for scripts and coding agents as it does for people.
+[Its site](https://nrepl.github.io/neorepl/) shows it in action.
 
 It's early days: there's a REPL, jack-in and a handful of command line
 tools. [PLAN.md](PLAN.md) has the details on where this is going.

@@ -1,0 +1,12 @@
+# The news archive. Posts tagged neorepl on Meta Redux show up on their own
+# when the site is built (newsFeed and newsTag in hugo.toml); add a post here
+# to keep it listed after it drops out of the feed.
+- date: 2026-11-05
+  title: "neorepl 0.5: CIDER in a Terminal"
+  url: https://metaredux.com/posts/2026/11/05/neorepl-0-5.html
+- date: 2026-10-30
+  title: "neorepl 0.4: Tests, Inspector, Tracing and Agents"
+  url: https://metaredux.com/posts/2026/10/30/neorepl-0-4.html
+- date: 2026-10-10
+  title: "neorepl: A Terminal REPL for Clojure (and Friends)"
+  url: https://metaredux.com/posts/2026/10/10/neorepl-a-terminal-repl-for-clojure-and-friends.html

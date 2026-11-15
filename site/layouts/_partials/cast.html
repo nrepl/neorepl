@@ -1,0 +1,25 @@
+{{- /* A recording, which site.js plays: (partial "cast.html" (dict "cast"
+       "tests" "poster" 12.5 "caption" "...")), the cast being
+       static/casts/tests.cast, which casts/record-all.sh makes, and the
+       poster the second of it shown before it plays, or end for its last
+       frame, which the player shows for any second past it. Until it
+       plays, the window keeps the room it'll take, from the size in the
+       cast's first line: the player's cells are half as wide as they're
+       high, and its lines 1.3 times their height. */ -}}
+{{- $file := printf "static/casts/%s.cast" .cast }}
+{{- if not (fileExists $file) }}
+  {{- errorf "There's no %s: casts/record-all.sh %s records it" $file .cast }}
+{{- end }}
+{{- $size := index (split (readFile $file) "\n") 0 | transform.Unmarshal }}
+{{- $src := printf "casts/%s.cast" .cast | relURL }}
+<figure class="wire-figure">
+  <div class="wire-bar">
+    <span class="wire-title">~/demo</span>
+  </div>
+  <div class="cast" data-cast="{{ $src }}"{{ with .poster }} data-poster="{{ cond (eq . "end") 9999 . }}"{{ end }} style="--cast-ratio: {{ $size.width }} / {{ printf "%.1f" (mul $size.height 2.6) }}">
+    <p class="cast-note">The recording plays with JavaScript on. <a href="{{ $src }}">The cast file</a> plays in <a href="https://asciinema.org">asciinema</a> too.</p>
+  </div>
+  {{- with .caption }}
+  <figcaption>{{ . | markdownify }}</figcaption>
+  {{- end }}
+</figure>

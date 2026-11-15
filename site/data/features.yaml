@@ -1,0 +1,23 @@
+# The "and the rest" list, under the feature sections.
+- name: ClojureScript REPLs, through shadow-cljs, piggieback and figwheel-main
+  docs: https://github.com/nrepl/neorepl#usage
+- name: Starting a server for Leiningen, deps.edn, bb and shadow-cljs projects
+  docs: https://github.com/nrepl/neorepl#usage
+- name: Browsing namespaces with `,ns`, and specs with `,spec`
+  docs: https://github.com/nrepl/neorepl#usage
+- name: Cross-references with `,refs` and `,deps`
+  docs: https://github.com/nrepl/neorepl#usage
+- name: Taps, and what the server's threads print, above the prompt
+  docs: https://github.com/nrepl/neorepl#usage
+- name: Evaluating the form at the cursor
+  docs: https://github.com/nrepl/neorepl#usage
+- name: Editing the input, or a definition, in your `$EDITOR`
+  docs: https://github.com/nrepl/neorepl#usage
+- name: Stepping into another session, like an agent's
+  docs: https://github.com/nrepl/neorepl#usage
+- name: vi keys, and the rest of your `~/.inputrc`
+  docs: https://github.com/nrepl/neorepl#usage
+- name: Evaluating from Neovim, Emacs and Helix without a plugin
+  docs: https://github.com/nrepl/neorepl/blob/main/doc/editors.md
+- name: An MCP server for coding agents
+  docs: https://github.com/nrepl/neorepl/blob/main/doc/agents.md

@@ -1,0 +1,16 @@
+{{- /* The player for the recordings, from asciinema-player's release in
+       playerVersion (hugo.toml), fetched when the site is built: its
+       script, or with "css", its stylesheet. Without it the build fails,
+       since the recordings wouldn't play, so call this with
+       partialCached. GitHub sends release assets as plain bytes, so it's
+       made anew under its name, which gives it its type. */ -}}
+{{- $name := cond (eq . "css") "asciinema-player.css" "asciinema-player.min.js" }}
+{{- $url := printf "https://github.com/asciinema/asciinema-player/releases/download/v%s/%s" site.Params.playerVersion $name }}
+{{- $player := "" }}
+{{- with try (resources.GetRemote $url) }}
+  {{- with .Err }}{{ errorf "player: couldn't fetch %s: %s" $url . }}
+  {{- else with .Value }}{{ $player = resources.FromString (printf "player/%s" $name) .Content }}
+  {{- else }}{{ errorf "player: there's no %s" $url }}
+  {{- end }}
+{{- end }}
+{{- return $player }}

@@ -1,0 +1,32 @@
+- q: How is it different from clojure-cli.repl or bb repl --connect?
+  a: >-
+    They're nREPL clients too, after different things. neorepl's goals are a
+    CIDER-like REPL in the terminal, a command line that serves coding agents
+    as well as people, and working with any nREPL server out there. The
+    README has
+    [a side by side comparison](https://github.com/nrepl/neorepl#how-does-it-compare).
+
+- q: Do I need cider-nrepl?
+  a: >-
+    No, but most of the features come from it: the inspector, tracing,
+    profiling, reloading and the like. When neorepl starts a server it adds
+    cider-nrepl itself. Without it you get evaluation, completion and docs
+    through nREPL's own ops, and babashka has CIDER's essentials built in.
+
+- q: Does it need babashka?
+  a: >-
+    bbin installs it as a babashka script, which starts in a blink. The same
+    source runs on the JVM too, with Java 17 or newer and Clojure 1.10 or
+    newer.
+
+- q: Can I use it next to my editor?
+  a: >-
+    Sure. `neorepl server` starts a server for both to share, and
+    `neorepl eval` evaluates from Neovim, Emacs and Helix without a plugin,
+    which
+    [doc/editors.md](https://github.com/nrepl/neorepl/blob/main/doc/editors.md)
+    sets up.
+
+- q: Does it work on Windows?
+  a: >-
+    It's tested on Linux, macOS and Windows, on babashka and on the JVM.

@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="{{ site.Language.Locale }}">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  {{- $title := site.Title }}
+  {{- if not .IsHome }}{{ $title = printf "%s - neorepl" .Title }}{{ end }}
+  <title>{{ block "title" $title }}{{ . }}{{ end }}</title>
+  {{- $description := .Description | default site.Params.description }}
+  <meta name="description" content="{{ $description }}">
+  <meta name="color-scheme" content="light dark">
+  <script>
+    document.documentElement.classList.add("js");
+    // Apply the theme picked earlier before the first paint.
+    try {
+      var theme = localStorage.getItem("theme");
+      if (theme) document.documentElement.dataset.theme = theme;
+    } catch (e) {}
+  </script>
+  <link rel="icon" href="{{ "icon.svg" | relURL }}" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="{{ "favicon-152.png" | relURL }}">
+  <link rel="preload" href="{{ "fonts/iosevka-400.woff2" | relURL }}" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="{{ "fonts/iosevka-700.woff2" | relURL }}" as="font" type="font/woff2" crossorigin>
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="{{ $title }}">
+  <meta property="og:description" content="{{ $description }}">
+  <meta property="og:url" content="{{ .Permalink }}">
+  {{- with site.Params.socialImage }}
+  <meta property="og:image" content="{{ . | absURL }}">
+  <meta name="twitter:card" content="summary_large_image">
+  {{- end }}
+  {{- /* The player's stylesheet first, so the site's can restyle it. */}}
+  {{- $css := slice (partialCached "player.html" "css" "css") (resources.Get "css/main.css") | resources.Concat "css/site.css" | minify | fingerprint }}
+  <link rel="stylesheet" href="{{ $css.RelPermalink }}" integrity="{{ $css.Data.Integrity }}">
+</head>
+<body>
+  {{ block "main" . }}{{ end }}
+  {{- /* The site's own script first, so its buttons work while the player
+         loads. */}}
+  {{- $js := resources.Get "js/site.js" | minify | fingerprint }}
+  <script src="{{ $js.RelPermalink }}" integrity="{{ $js.Data.Integrity }}" defer></script>
+  {{- block "scripts" . }}{{ end }}
+</body>
+</html>

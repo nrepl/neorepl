@@ -1,0 +1,36 @@
+{{- /* The news list: posts tagged params.newsTag in the params.newsFeed Atom
+       feed, merged with data/news.yaml. A blog feed only carries its newest
+       posts, so the data file is the archive that keeps the list full when
+       other topics push these out of the feed, and the fallback when the
+       feed can't be fetched. Returns the newest params.newsCount items. */ -}}
+{{- $items := slice }}
+{{- range hugo.Data.news }}
+  {{- $items = $items | append (dict "date" (time.AsTime .date) "title" .title "url" .url) }}
+{{- end }}
+{{- with site.Params.newsFeed }}
+  {{- with try (resources.GetRemote .) }}
+    {{- with .Err }}{{ warnidf "news-feed" "news: couldn't fetch the feed: %s" . }}
+    {{- else with .Value }}
+      {{- $feed := . | transform.Unmarshal }}
+      {{- range $feed.entry }}
+        {{- $cats := .category }}
+        {{- if not (reflect.IsSlice $cats) }}{{ $cats = slice $cats }}{{ end }}
+        {{- $terms := slice }}
+        {{- range $cats }}{{ $terms = $terms | append (index . "-term") }}{{ end }}
+        {{- if in $terms site.Params.newsTag }}
+          {{- $title := index .title "#text" | htmlUnescape | plainify }}
+          {{- $items = $items | append (dict "date" (time.AsTime .published) "title" $title "url" (index .link "-href")) }}
+        {{- end }}
+      {{- end }}
+    {{- end }}
+  {{- end }}
+{{- end }}
+{{- $seen := dict }}
+{{- $news := slice }}
+{{- range sort $items "date" "desc" }}
+  {{- if not (index $seen .url) }}
+    {{- $seen = merge $seen (dict .url true) }}
+    {{- $news = $news | append (merge . (dict "title" (replace .title "'" "’"))) }}
+  {{- end }}
+{{- end }}
+{{- return first (site.Params.newsCount | default 8) $news }}

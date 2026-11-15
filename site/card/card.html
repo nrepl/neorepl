@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<!-- The link preview picture, static/img/social.png, and the touch icon,
+     static/favicon-152.png. To redraw them, from this directory:
+       chrome="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+       "$chrome" --headless=new --hide-scrollbars --window-size=1200,630 \
+         --screenshot=../static/img/social.png card.html
+       "$chrome" --headless=new --hide-scrollbars --window-size=600,600 \
+         --screenshot=icon.png icon.html
+       sips -Z 152 icon.png --out ../static/favicon-152.png && rm icon.png -->
+<html lang="en">
+<meta charset="utf-8">
+<style>
+  @font-face { font-family: "Iosevka"; src: url("../static/fonts/iosevka-400.woff2"); font-weight: 400; }
+  @font-face { font-family: "Iosevka"; src: url("../static/fonts/iosevka-700.woff2"); font-weight: 700; }
+  html, body { margin: 0; width: 1200px; height: 630px; overflow: hidden; }
+  body {
+    display: grid;
+    grid-template-columns: 500px 1fr;
+    gap: 56px;
+    align-items: center;
+    padding: 0 72px;
+    box-sizing: border-box;
+    background:
+      radial-gradient(700px 360px at 10% -60px, rgba(7, 164, 253, 0.16), transparent 70%),
+      radial-gradient(700px 360px at 90% -60px, rgba(150, 253, 154, 0.2), transparent 70%),
+      #f6f8fa;
+    color: #17202b;
+    font-family: ui-sans-serif, system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif;
+  }
+  body::before {
+    content: "";
+    position: absolute;
+    inset: 0 0 auto 0;
+    height: 8px;
+    background: linear-gradient(90deg, #07a4fd, #3fd0c9 55%, #96fd9a);
+  }
+  h1 { display: flex; align-items: center; gap: 24px; margin: 0 0 36px; font: 700 84px/1 "Iosevka", monospace; letter-spacing: -0.02em; }
+  h1 img { width: 96px; height: 96px; }
+  p { margin: 0; font-size: 46px; font-weight: 800; line-height: 1.15; letter-spacing: -0.025em; }
+  pre {
+    margin: 0;
+    background: #0b1016;
+    border-radius: 16px;
+    padding: 26px 28px;
+    font: 21px/1.6 "Iosevka", ui-monospace, Menlo, monospace;
+    color: #d8dfe7;
+    box-shadow: 0 30px 70px -30px rgba(3, 22, 44, 0.6);
+    white-space: pre;
+    /* user=> is a prompt, not an arrow */
+    font-variant-ligatures: none;
+  }
+  .sh { color: #6be6a6; } .s { color: #6be6a6; } .k { color: #84c9ff; } .n { color: #f2a66b; }
+  .sp { color: #3cb2ff; font-weight: 700; } .dim { opacity: 0.55; }
+</style>
+<div>
+  <h1><img src="../static/icon.svg" alt="">neorepl</h1>
+  <p>A terminal REPL for Clojure, and friends</p>
+</div>
+<pre><span class="sh">$</span> neorepl
+user=> (<span class="sp">defn</span> greet [who]
+  #_=>   (str <span class="s">"Hello, "</span> who <span class="s">"!"</span>))
+#'user/greet
+user=> (greet <span class="s">"Clojure"</span>)
+<span class="s">"Hello, Clojure!"</span>
+user=> {<span class="k">:answer</span> <span class="n">42</span>}
+{<span class="k">:answer</span> <span class="n">42</span>}
+user=> ,test
+<span class="dim">Testing demo.core-test</span>
+Ran 3 tests containing 7 assertions.</pre>
+</html>

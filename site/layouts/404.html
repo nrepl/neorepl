@@ -1,0 +1,27 @@
+{{ define "title" }}Not found - neorepl{{ end }}
+{{ define "main" }}
+{{ partial "topbar.html" dict }}
+
+<main class="not-found">
+  <figure class="wire-figure">
+    <div class="wire-bar"><span class="wire-title">neorepl</span></div>
+    <pre class="term-body"><code><span class="prompt">user=&gt;</span> (slurp <span data-path>"/"</span>)
+Execution error (FileNotFoundException) at java.io.FileInputStream/open0.
+<span data-path-plain>/</span> (No such file or directory)</code></pre>
+  </figure>
+  <h1>There's nothing here</h1>
+  <p>The page you asked for doesn't exist. Everything about neorepl is on the
+    front page, and in the <a href="{{ site.Params.readme }}">README</a>.</p>
+  <ul class="plain">
+    <li><a href="{{ site.Home.RelPermalink }}">Go to the front page</a></li>
+    <li><a href="{{ site.Params.readme }}">Read the README</a></li>
+    <li><a href="{{ site.Params.github }}/issues">Report a broken link</a></li>
+  </ul>
+</main>
+
+<script>
+  // Show the path that was asked for, as the file the REPL couldn't read.
+  document.querySelector("[data-path]").textContent = JSON.stringify(location.pathname);
+  document.querySelector("[data-path-plain]").textContent = location.pathname;
+</script>
+{{ end }}

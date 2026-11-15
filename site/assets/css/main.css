@@ -1,0 +1,382 @@
+/* neorepl's site, built like nrepl.org's: the same colors, from nREPL's logo,
+   and the same windows, here with recordings of a terminal in them. */
+
+@font-face {
+  font-family: "Iosevka";
+  src: url("../fonts/iosevka-400.woff2") format("woff2");
+  font-weight: 400;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Iosevka";
+  src: url("../fonts/iosevka-700.woff2") format("woff2");
+  font-weight: 700;
+  font-display: swap;
+}
+
+:root {
+  /* light-dark() follows the color scheme: the system's, or the one picked
+     with the toggle. */
+  color-scheme: light dark;
+
+  --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --mono: "Iosevka", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+
+  --blue: #07a4fd;
+  --grad: linear-gradient(90deg, #07a4fd, #3fd0c9 55%, #96fd9a);
+
+  --bg: light-dark(#f6f8fa, #0c1117);
+  --surface: light-dark(#ffffff, #121921);
+  --text: light-dark(#17202b, #e3e8ee);
+  --muted: light-dark(#566271, #9aa6b3);
+  --rule: light-dark(#dde4eb, #222c37);
+  --link: light-dark(#0670b8, #5cc5ff);
+  --link-hover: light-dark(#0a7d5a, #96fd9a);
+  --glow-blue: light-dark(rgba(7, 164, 253, 0.13), rgba(7, 164, 253, 0.14));
+  --glow-green: light-dark(rgba(150, 253, 154, 0.16), rgba(150, 253, 154, 0.07));
+  --topbar: light-dark(rgba(246, 248, 250, 0.82), rgba(12, 17, 23, 0.82));
+
+  /* The windows are dark in both themes, like a terminal. */
+  --w-bg: #0b1016;
+  --w-bar: #111922;
+  --w-line: #1e2934;
+  --w-text: #d8dfe7;
+  --w-dim: #74828f;
+  --w-client: #3cb2ff;
+  --w-server: #6be6a6;
+}
+:root[data-theme="light"] { color-scheme: light; }
+:root[data-theme="dark"] { color-scheme: dark; }
+
+*, *::before, *::after { box-sizing: border-box; }
+
+html { scroll-padding-top: 76px; }
+@media (prefers-reduced-motion: no-preference) {
+  html { scroll-behavior: smooth; }
+}
+
+body {
+  margin: 0;
+  color: var(--text);
+  background:
+    radial-gradient(900px 420px at 15% -120px, var(--glow-blue), transparent 70%),
+    radial-gradient(800px 420px at 85% -120px, var(--glow-green), transparent 70%),
+    var(--bg);
+  background-repeat: no-repeat;
+  font: 17px/1.65 var(--sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+a { color: var(--link); text-decoration-thickness: 1px; text-underline-offset: 3px; }
+a:hover { color: var(--link-hover); }
+:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; border-radius: 4px; }
+
+/* Code shows the characters it's made of: -> isn't an arrow. */
+code, pre { font-family: var(--mono); font-variant-ligatures: none; }
+:not(pre) > code {
+  font-size: 0.88em;
+  padding: 0.1em 0.35em;
+  border-radius: 5px;
+  background: var(--surface);
+  border: 1px solid var(--rule);
+}
+
+.skip { position: absolute; left: -999px; }
+.skip:focus { left: 16px; top: 12px; z-index: 10; background: var(--surface); padding: 0.4rem 0.8rem; }
+
+/* The bar at the top */
+
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  height: 58px;
+  padding: 0 max(16px, calc((100vw - 1280px) / 2 + 24px));
+  background: var(--topbar);
+  backdrop-filter: saturate(160%) blur(10px);
+  -webkit-backdrop-filter: saturate(160%) blur(10px);
+  border-bottom: 1px solid var(--rule);
+}
+.topbar::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 3px;
+  background: var(--grad);
+}
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  color: var(--text);
+  font: 700 1.1rem var(--mono);
+  text-decoration: none;
+}
+.brand:hover { color: var(--text); }
+.topnav { display: flex; align-items: center; gap: 1.2rem; font-size: 0.95rem; }
+.topnav a { color: var(--muted); text-decoration: none; }
+.topnav a:hover { color: var(--text); }
+.stars { font-family: var(--mono); font-size: 0.85em; }
+.theme-toggle {
+  display: none;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  color: var(--muted);
+  background: none;
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  cursor: pointer;
+}
+.theme-toggle:hover { color: var(--text); }
+.js .theme-toggle { display: grid; }
+/* On phones the bar drops what it can do without: the star count, the links
+   to the changelog and the news further down, and then the name next to the
+   logo, which screen readers still get. */
+@media (max-width: 560px) {
+  .topnav { gap: 0.8rem; font-size: 0.9rem; }
+  .topnav .stars, .topnav .news-link, .topnav .changelog-link { display: none; }
+}
+@media (max-width: 420px) {
+  .brand span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+}
+
+/* The two windows */
+
+.layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 0 16px;
+}
+.text { max-width: 660px; }
+.wire { display: none; }
+
+/* site.js's wide says the same. */
+@media (min-width: 1100px) {
+  .layout { padding: 0 24px; }
+  .js .layout { grid-template-columns: minmax(0, 560px) minmax(0, 1fr); gap: 56px; }
+  .js .wire {
+    display: block;
+    position: sticky;
+    top: 82px;
+    align-self: start;
+  }
+  .js .text .wire-figure { display: none; }
+}
+
+.wire .pane { display: none; }
+.wire .pane.active { display: block; }
+.wire .wire-figure { margin: 0; }
+
+/* The opening */
+
+.hero { padding: 64px 0 8px; }
+.wordmark {
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+  margin: 0 0 1.25rem;
+  font: 700 clamp(2.4rem, 7vw, 3.2rem)/1 var(--mono);
+  letter-spacing: -0.02em;
+}
+.wordmark img { width: 1.1em; height: 1.1em; }
+.tagline {
+  margin: 0 0 1rem;
+  font-size: clamp(1.65rem, 4vw, 2.3rem);
+  font-weight: 800;
+  line-height: 1.2;
+  letter-spacing: -0.025em;
+}
+.intro { margin: 0 0 1.75rem; font-size: 1.1rem; color: var(--muted); }
+.command-label { margin: 0 0 0.45rem; font-size: 0.92rem; color: var(--muted); }
+.command {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.8rem 0.8rem 0.8rem 1rem;
+  color: var(--w-text);
+  background:
+    linear-gradient(var(--w-bg), var(--w-bg)) padding-box,
+    var(--grad) border-box;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  font-family: var(--mono);
+  font-size: 0.86rem;
+}
+.command .prompt { color: var(--w-server); user-select: none; align-self: flex-start; }
+.command code { flex: 1; padding: 0; border: 0; background: none; font-size: 1em; overflow-wrap: anywhere; }
+.copy {
+  display: none;
+  flex: none;
+  padding: 0.25rem 0.65rem;
+  color: var(--w-text);
+  background: #1b2633;
+  border: 1px solid #2b3846;
+  border-radius: 6px;
+  font: 0.78rem var(--mono);
+  cursor: pointer;
+}
+.copy:hover { background: #233243; }
+.js .copy { display: block; }
+.version { margin: 0.9rem 0 0; font-size: 0.95rem; color: var(--muted); }
+
+/* Sections */
+
+.block { padding-top: 72px; }
+h2 {
+  margin: 0 0 1rem;
+  font-size: 1.8rem;
+  font-weight: 800;
+  line-height: 1.2;
+  letter-spacing: -0.02em;
+}
+h2::before {
+  content: "";
+  display: block;
+  width: 44px;
+  height: 4px;
+  margin-bottom: 14px;
+  border-radius: 2px;
+  background: var(--grad);
+}
+h3 { margin: 1.25rem 0 0.5rem; font-size: 1.2rem; line-height: 1.3; letter-spacing: -0.01em; }
+
+.feature { padding: 0.5rem 0 1.75rem; border-bottom: 1px solid var(--rule); }
+.feature:last-child { border-bottom: 0; }
+.feature p { margin: 0 0 0.75rem; }
+.more { font-size: 0.92rem; }
+.more a::after { content: " \2192"; }
+
+ul.plain, ul.links, ul.clients, ul.news { padding: 0; list-style: none; }
+ul.plain li { margin-bottom: 0.45rem; }
+
+ul.links { margin: 0.5rem 0 0; }
+ul.links li { padding: 0.15rem 0; }
+ul.links a { text-decoration: none; }
+ul.links a::before { content: "\2192\00a0"; color: var(--muted); }
+ul.links a:hover { text-decoration: underline; }
+
+ul.clients { margin: 0; }
+ul.clients li { padding: 0.25rem 0; }
+ul.clients a { font-weight: 600; text-decoration: none; }
+ul.clients a:hover { text-decoration: underline; }
+ul.clients span { color: var(--muted); font-size: 0.92rem; }
+ul.clients span::before { content: "- "; }
+
+ul.news li {
+  display: grid;
+  grid-template-columns: 6.6rem 1fr;
+  gap: 1rem;
+  padding: 0.45rem 0;
+  border-bottom: 1px dashed var(--rule);
+}
+ul.news time, ul.news .when { font-family: var(--mono); font-size: 0.88rem; color: var(--muted); padding-top: 0.12rem; }
+
+ol.steps { counter-reset: step; padding: 0; list-style: none; }
+ol.steps li { counter-increment: step; position: relative; padding-left: 2.6rem; margin-bottom: 1rem; }
+ol.steps li::before {
+  content: counter(step);
+  position: absolute;
+  left: 0;
+  top: 0.1rem;
+  display: grid;
+  place-items: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  border-radius: 50%;
+  background: var(--grad);
+  color: #04263a;
+  font: 700 0.9rem var(--sans);
+}
+
+dl.faq dt { font-weight: 700; margin-top: 1.25rem; }
+dl.faq dd { margin: 0.3rem 0 0; }
+
+.signoff { margin: 3rem 0 0; font-weight: 700; }
+.colophon { margin: 1.5rem 0 4rem; padding-top: 1.25rem; border-top: 1px solid var(--rule); font-size: 0.88rem; color: var(--muted); }
+.colophon p { margin: 0; }
+
+/* The windows: a recording, or a terminal's text */
+
+.wire-figure {
+  margin: 1.5rem 0 0;
+  overflow: hidden;
+  color: var(--w-text);
+  background: var(--w-bg);
+  border: 1px solid var(--w-line);
+  border-radius: 12px;
+  box-shadow: 0 24px 60px -28px rgba(3, 22, 44, 0.55);
+  font: 13px/1.55 var(--mono);
+  /* user=> is a prompt, and -> isn't an arrow */
+  font-variant-ligatures: none;
+}
+.wire-bar {
+  padding: 0.5rem 0.85rem;
+  background: var(--w-bar);
+  border-bottom: 1px solid var(--w-line);
+}
+.wire-title { display: flex; align-items: center; gap: 0.5rem; color: var(--w-dim); }
+.wire-title::before {
+  content: "";
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--grad);
+  box-shadow: 0 0 8px rgba(63, 208, 201, 0.7);
+}
+
+.wire-figure figcaption {
+  padding: 0.7rem 0.9rem 0.8rem;
+  color: #9aa7b4;
+  border-top: 1px solid var(--w-line);
+  font: 13.5px/1.5 var(--sans);
+}
+.wire-figure figcaption code { color: var(--w-text); background: #16202a; border-color: #243140; }
+
+.term-body { margin: 0; padding: 0.95rem 0.9rem; white-space: pre-wrap; overflow-wrap: anywhere; }
+.term-body .prompt { color: var(--w-server); }
+
+/* The recordings. Without JavaScript there's only a note saying so, and
+   until a player's up, the room it'll take, which cast.html works out. */
+
+.cast-note { margin: 0; padding: 0.95rem 0.9rem; color: var(--w-dim); font: 13.5px/1.5 var(--sans); }
+.cast-note a { color: var(--w-client); }
+.js .cast-note { display: none; }
+.js .cast:not(.loaded) { aspect-ratio: var(--cast-ratio); }
+.cast .ap-wrapper { display: block; }
+
+/* The terminal's colors, from the windows': neorepl highlights strings in
+   green, keywords in cyan, numbers in magenta, which these make the orange
+   of nrepl.org's numbers, and its own forms in bold blue. */
+.asciinema-player-theme-neorepl {
+  --term-color-foreground: #d8dfe7;
+  --term-color-background: #0b1016;
+  --term-color-0: #1e2934;
+  --term-color-1: #ff8f8f;
+  --term-color-2: #6be6a6;
+  --term-color-3: #e9c47f;
+  --term-color-4: #3cb2ff;
+  --term-color-5: #f2a66b;
+  --term-color-6: #84c9ff;
+  --term-color-7: #d8dfe7;
+  --term-color-8: #74828f;
+  --term-color-9: #ffb3b3;
+  --term-color-10: #96fd9a;
+  --term-color-11: #f5d9a3;
+  --term-color-12: #6cc6ff;
+  --term-color-13: #f7bf8f;
+  --term-color-14: #b3dcff;
+  --term-color-15: #eef2f6;
+}
+
+/* The 404 page */
+
+.not-found { max-width: 620px; margin: 0 auto; padding: 12vh 16px 4rem; }
+.not-found h1 { margin: 2rem 0 0.75rem; font-size: 2rem; letter-spacing: -0.02em; }

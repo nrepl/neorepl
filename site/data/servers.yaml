@@ -1,0 +1,31 @@
+# The servers neorepl gets tested against. Keep it in sync with the README
+# and integration/, which has a test for each.
+intro: >-
+  neorepl sends the ops CIDER sends, so it gets the most out of a server
+  with cider-nrepl, and falls back to nREPL's own ops and plain evaluation
+  without one. It doesn't add middleware of its own. It's tested against
+  all of these:
+
+items:
+  - name: nREPL
+    url: https://nrepl.org
+    what: the reference server, with cider-nrepl for everything on this page, which jack-in adds to Leiningen and deps.edn projects
+  - name: babashka
+    url: https://babashka.org
+    what: "`bb nrepl-server`, with CIDER's essentials built in"
+  - name: shadow-cljs
+    url: https://github.com/thheller/shadow-cljs
+    what: ClojureScript in the browser or on Node
+  - name: piggieback
+    url: https://github.com/nrepl/piggieback
+    what: ClojureScript REPLs, figwheel-main's included
+  - name: nbb
+    url: https://github.com/babashka/nbb
+    what: ClojureScript on Node, no JVM needed
+  - name: Basilisp
+    url: https://github.com/basilisp-lang/basilisp
+    what: Clojure on Python
+
+outro: >-
+  Any other nREPL server works too, for evaluation and whatever ops it
+  has.
