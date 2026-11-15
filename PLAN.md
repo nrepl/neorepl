@@ -59,7 +59,7 @@ Runtime deps: `org.clojure/clojure`, `nrepl/nrepl`, `org.jline/jline` 4.x. That'
 ### Versions
 
 - Servers: anything that speaks nREPL. For Clojure, 1.10+ (nREPL 1.8's floor), on whatever Java the project uses.
-- Client on the JVM: Java 17+, Clojure 1.10+. JLine 4 itself only needs 11, but JDK 22+ warns about JLine's native access unless the JVM gets `--enable-native-access=ALL-UNNAMED`, and that flag only exists since 17. With a 17 floor every launcher (aliases, `-T` tool, uberjar) can pass it unconditionally. Client code sticks to 1.10 APIs (no `parse-long`, `update-vals`, ...) because in-process mode runs it inside the project's JVM, which therefore also needs Java 17+.
+- Client on the JVM: Java 17+, Clojure 1.10+. JLine 4 itself only needs 11, but JDK 22+ warns about JLine's native access unless the JVM gets `--enable-native-access=ALL-UNNAMED`, and that flag only exists since 17. With a 17 floor aliases and an uberjar can pass it unconditionally, while a tool installed with `-Ttools install` can't pass JVM options at all. Client code sticks to 1.10 APIs (no `parse-long`, `update-vals`, ...) because in-process mode runs it inside the project's JVM, which therefore also needs Java 17+.
 - Client on bb: 1.13.227+, from 2026-11-03, 1.13.225+ before.
 
 ### What we verified (bb 1.13.225, 2026-10-07)
@@ -344,7 +344,7 @@ Upstream, alongside 0.4. The 0.1 announcement promised the first three.
 
 0.6, distribution and Windows
 - Left over from 0.2, through 0.5: the frames of ClojureScript errors, from the JS stack.
-- Clojars, as `org.nrepl/neorepl`, which in-process mode and installing it as a Clojure tool need. An uberjar with `Enable-Native-Access: ALL-UNNAMED` in its manifest, and Homebrew. Native-image only if bb turns out not to be enough.
+- Clojars, as `org.nrepl/neorepl`, for Leiningen projects, in-process mode included, since Leiningen can't take a git dependency. The Clojure CLI takes neorepl from git, as a dependency or as a tool: `clojure -Ttools install io.github.nrepl/neorepl '{:git/tag "vX.Y.Z"}' :as neorepl`. An uberjar with `Enable-Native-Access: ALL-UNNAMED` in its manifest, and Homebrew. Native-image only if bb turns out not to be enough.
 - Windows: CIDER's quoting lessons in jack-in, and keeping Ctrl-C away from a server neorepl starts, which `sh -c 'trap "" INT; exec "$@"'` does elsewhere.
 - The docs site.
 
