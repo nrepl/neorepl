@@ -1567,15 +1567,26 @@
                (ex-info "The server doesn't keep that value anymore, only the last 100 tapped" {:type ::failed})
                e)))))
 
+(def ^:private project-source-code
+  "A function telling whether the URL of a source file, a string, is a
+  file's under the directory the server runs in, as the project's sources
+  are, rather than in a jar or in a dependency's checkout elsewhere, the
+  way orchard's project-namespaces tells them for CIDER."
+  "(let [dir (.toPath (.getCanonicalFile (clojure.java.io/file (System/getProperty \"user.dir\"))))]
+     (fn [url]
+       (and (clojure.string/starts-with? url \"file:\")
+            (.startsWith (.toPath (.getCanonicalFile (java.io.File. (java.net.URI. url)))) dir))))")
+
 (def ^:private project-namespaces-code
-  "Keeps the namespaces whose names %s has whose source is a file on the
-  classpath, not one in a jar, as a project's are."
-  "(filterv (fn [n]
-              (let [path (-> n (clojure.string/replace \"-\" \"_\") (clojure.string/replace \".\" \"/\"))]
-                (some-> (some (fn [ext] (clojure.java.io/resource (str path ext))) [\".clj\" \".cljc\" \".cljs\" \".bb\"])
-                        str
-                        (clojure.string/starts-with? \"file:\"))))
-            %s)")
+  "Keeps the namespaces whose names %s has whose source project-source-code
+  takes for the project's."
+  (str "(let [project-source? " project-source-code "]
+          (filterv (fn [n]
+                     (let [path (-> n (clojure.string/replace \"-\" \"_\") (clojure.string/replace \".\" \"/\"))]
+                       (some-> (some (fn [ext] (clojure.java.io/resource (str path ext))) [\".clj\" \".cljc\" \".cljs\" \".bb\"])
+                               str
+                               project-source?)))
+                   %s))"))
 
 (defn- ns-list
   "The names of the loaded namespaces, from ns-list, in the language of
@@ -1589,9 +1600,9 @@
 
 (defn namespaces
   "The names of the project's loaded namespaces, sorted: those whose source
-  is in a directory on the classpath, rather than a jar. They're in the
-  language of ctx's :session with cider-nrepl or babashka on the server,
-  Clojure's without."
+  is under the directory the server runs in, as project-source-code tells
+  them. They're in the language of ctx's :session with cider-nrepl or
+  babashka on the server, Clojure's without."
   ([client ctx] (namespaces client ctx {}))
   ([client {:keys [session]} opts]
    (sort (if (supports? client "ns-list")

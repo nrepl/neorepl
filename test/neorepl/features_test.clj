@@ -434,6 +434,14 @@
         (is (some #{"neorepl.features"} names))
         (is (not-any? #{"clojure.core" "nrepl.server"} names)))
       (is (= names (sort names))))
+    (testing "the project's sources, under the directory the server runs in"
+      (let [project-source? (load-string @#'features/project-source-code)
+            url #(str (.toURI (io/file %)))]
+        (is (project-source? (url "src/neorepl/features.clj")))
+        (is (not (project-source? "jar:file:/home/me/.m2/repository/a/a/1.0/a-1.0.jar!/a/core.clj")))
+        (testing "not a git dependency's checkout or a local one elsewhere"
+          (is (not (project-source? (url (str (System/getProperty "user.home") "/.gitlibs/libs/a/a/5598984/src/a/core.clj")))))
+          (is (not (project-source? (url "../elsewhere/src/a/core.clj")))))))
     (testing "all of them, but nREPL's own"
       (let [names (features/loaded-namespaces client user {})]
         (is (every? (set names) ["clojure.core" "neorepl.features"]))
