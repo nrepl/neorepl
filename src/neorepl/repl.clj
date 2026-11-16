@@ -802,8 +802,9 @@
   read-code gets it. Lookups for eldoc and docs get cached until then, since
   evaluating code can change what names mean. Eldoc's go on in the
   background, so typing never waits on the server. settings, the REPL's,
-  say whether C-x C-a keeps the REPL tooling's vars."
-  [client settings]
+  say whether C-x C-a keeps the REPL tooling's vars, and width how many
+  columns it has, or nil."
+  [client settings width]
   (let [ctx (atom nil)
         ;; What lookups found where the REPL is. Failures don't get cached,
         ;; so a slow first lookup gets another go.
@@ -855,7 +856,7 @@
      :apropos #(when-let [sym (symbol-at %1 %2)]
                  (some-> (features/apropos client (Pattern/quote sym) (assoc asked :tooling? (:tooling @settings)))
                          not-empty
-                         render/apropos-text))
+                         (render/apropos-text (width))))
      :in-ns (fn [place]
               (reset! ctx place)
               (reset! found {}))}))
@@ -912,10 +913,11 @@
     :settings     what the REPL's settings start as, where they're not
                   settings/defaults"
   [client session {:keys [terminal history-dir dir editor-command] :as opts}]
-  (let [{:keys [autoreload] :as start} (merge settings/defaults (:settings opts))
+  (let [opened (atom nil)
+        {:keys [autoreload] :as start} (merge settings/defaults (:settings opts))
         ;; Autoreload's off till run-loop turns it on, which can fail.
         settings (atom (assoc start :autoreload false))
-        {:keys [in-ns] :as lookups} (lookups client settings)
+        {:keys [in-ns] :as lookups} (lookups client settings #(some-> @opened editor/width))
         opts (assoc opts :settings settings :autoreload? autoreload)]
     (if-let [editor (some-> terminal
                             (merge (select-keys lookups [:complete :eldoc :doc :source :apropos])
@@ -928,6 +930,7 @@
                                     :history-file (history-file history-dir (or (:project-dir client) dir))})
                             editor/open)]
       (try
+        (reset! opened editor)
         (interactive client session editor in-ns opts)
         (finally
           (editor/close editor)))

@@ -15,6 +15,7 @@
 - [#87](https://github.com/nrepl/neorepl/pull/87): Jack-in brings cider-nrepl 0.64.1, whose reloads point the aliases and refers on the namespaces they make anew at the new ones, and keep the session in its namespace, which neorepl now does itself only for an older cider-nrepl.
 - [#90](https://github.com/nrepl/neorepl/pull/90): `,ns` takes the namespaces whose sources are under the directory the server runs in for the project's, as CIDER does, where it took any whose source wasn't in a jar, git and `:local/root` dependencies' too.
 - [#90](https://github.com/nrepl/neorepl/pull/90): `,apropos`, `neorepl apropos` and the namespace browser's list of every namespace leave out the REPL tooling's: nREPL's, cider-nrepl's and those of the libraries cider-nrepl uses, like compliment and orchard, unless their sources are the project's, as they are when one of them is the project.
+- [#91](https://github.com/nrepl/neorepl/pull/91): `,apropos` and C-x C-a fit what they list to the terminal: a name longer than a third of its width gets its doc on the next line, and the docs are cut to fit.
 
 ### Bug fixes
 

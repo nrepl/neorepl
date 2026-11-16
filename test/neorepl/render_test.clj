@@ -86,7 +86,16 @@
 (deftest apropos-text-test
   (is (= "clojure.core/map     Returns a lazy sequence\nclojure.core/mapcat"
          (render/apropos-text [{:name "clojure.core/map" :doc "Returns a lazy sequence\nmore"}
-                               {:name "clojure.core/mapcat"}]))))
+                               {:name "clojure.core/mapcat"}])))
+  (testing "in width columns, with the names in a third of them and the docs cut to fit"
+    (is (= (str "clojure.core/map  Returns a lazy sequen…\n"
+                "clojure.string/split-lines\n"
+                "                  Splits s on newlines.\n"
+                "x/y")
+           (render/apropos-text [{:name "clojure.core/map" :doc "Returns a lazy sequence consisting\nmore"}
+                                 {:name "clojure.string/split-lines" :doc "Splits s on newlines."}
+                                 {:name "x/y"}]
+                                40)))))
 
 (deftest location-text-test
   (are [location text] (= text (render/location-text location))

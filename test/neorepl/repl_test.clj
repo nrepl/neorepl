@@ -679,7 +679,7 @@
 
 (deftest eldoc-lookups-test
   (with-client [client {:port *port*}]
-    (let [{:keys [eldoc in-ns]} (#'repl/lookups client (atom {}))
+    (let [{:keys [eldoc in-ns]} (#'repl/lookups client (atom {}) (constantly nil))
           text #(some->> % (map first) (apply str))
           refreshed (promise)]
       (in-ns {:ns "user"})
