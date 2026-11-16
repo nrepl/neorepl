@@ -458,6 +458,49 @@
              (form-at file line column))
            (eval-in client (:ns ctx) ['clojure.repl] "(clojure.repl/source-fn (symbol %s))" [sym] opts))))))
 
+(def ^:private project-source-code
+  "A function telling whether the URL of a source file, a string, is a
+  file's under the directory the server runs in, as the project's sources
+  are, rather than in a jar or in a dependency's checkout elsewhere, the
+  way orchard's project-namespaces tells them for CIDER."
+  "(let [dir (.toPath (.getCanonicalFile (clojure.java.io/file (System/getProperty \"user.dir\"))))]
+     (fn [url]
+       (and (clojure.string/starts-with? url \"file:\")
+            (.startsWith (.toPath (.getCanonicalFile (java.io.File. (java.net.URI. url)))) dir))))")
+
+(def ^:private project-namespaces-code
+  "Keeps the namespaces whose names %s has whose source project-source-code
+  takes for the project's."
+  (str "(let [project-source? " project-source-code "]
+          (filterv (fn [n]
+                     (let [path (-> n (clojure.string/replace \"-\" \"_\") (clojure.string/replace \".\" \"/\"))]
+                       (some-> (some (fn [ext] (clojure.java.io/resource (str path ext))) [\".clj\" \".cljc\" \".cljs\" \".bb\"])
+                               str
+                               project-source?)))
+                   %s))"))
+
+(def ^:private tooling-ns-regex
+  "The names of nREPL's, refactor-nrepl's and cider-nrepl's namespaces, and
+  of those of the libraries cider-nrepl uses, as orchard's
+  tooling-namespace? has them."
+  #"^(cider|nrepl|refactor-nrepl|orchard|compliment|suitable|logjam)(\.|$)")
+
+(defn- tooling-namespaces
+  "The set of the names among names of the REPL tooling's namespaces: those
+  with one of its names whose source isn't the project's, as it is when the
+  tooling is the project. orchard's tooling-namespace? tells them apart
+  the same way, which cider-nrepl's apropos and ns-list don't take yet
+  (orchard#447). A server that can't say where a source is, as nbb and
+  Basilisp can't, has none."
+  [client names opts]
+  (let [named (into #{} (filter #(re-find tooling-ns-regex %)) names)]
+    (if (empty? named)
+      #{}
+      (try
+        (into #{} (remove (set (eval-data client {} project-namespaces-code [named] opts))) named)
+        (catch clojure.lang.ExceptionInfo e
+          (if (= ::failed (:type (ex-data e))) #{} (throw e)))))))
+
 (defn apropos
   "The vars whose names match the regex, as maps with the :name and, when
   the server says, the :type and :doc."
@@ -469,20 +512,23 @@
      (catch java.util.regex.PatternSyntaxException e
        (throw (ex-info (str "Not a regex: " (.getDescription e) ", at index " (.getIndex e) " of " regex)
                        {:type ::failed}))))
-   (if (supports? client "apropos")
-     (->> (ask client {:op "apropos" :query regex} opts)
-          (some :apropos-matches)
-          (mapv #(select-keys % [:name :type :doc])))
-     ;; clojure.repl/apropos, which Basilisp doesn't have, with clojure.repl
-     ;; loaded, as it would be for that.
-     (->> (eval-data client {:ns "user"} "(do #?(:clj (require 'clojure.repl))
-                                              (let [regex (re-pattern %s)]
-                                                (map str (sort (for [n (all-ns)
-                                                                     s (keys (ns-publics n))
-                                                                     :when (re-find regex (str s))]
-                                                                 (symbol (str (ns-name n)) (str s)))))))"
-                     [regex] opts)
-          (mapv #(hash-map :name %))))))
+   (let [matches (if (supports? client "apropos")
+                   (->> (ask client {:op "apropos" :query regex} opts)
+                        (some :apropos-matches)
+                        (mapv #(select-keys % [:name :type :doc])))
+                   ;; clojure.repl/apropos, which Basilisp doesn't have, with
+                   ;; clojure.repl loaded, as it would be for that.
+                   (->> (eval-data client {:ns "user"} "(do #?(:clj (require 'clojure.repl))
+                                                            (let [regex (re-pattern %s)]
+                                                              (map str (sort (for [n (all-ns)
+                                                                                   s (keys (ns-publics n))
+                                                                                   :when (re-find regex (str s))]
+                                                                               (symbol (str (ns-name n)) (str s)))))))"
+                                   [regex] opts)
+                        (mapv #(hash-map :name %))))
+         ns-of #(namespace (symbol (:name %)))
+         tooling (tooling-namespaces client (keep ns-of matches) opts)]
+     (into [] (remove (comp tooling ns-of)) matches))))
 
 (defn- one-form
   "Throws unless text is a single form the reader can take without
@@ -1567,27 +1613,6 @@
                (ex-info "The server doesn't keep that value anymore, only the last 100 tapped" {:type ::failed})
                e)))))
 
-(def ^:private project-source-code
-  "A function telling whether the URL of a source file, a string, is a
-  file's under the directory the server runs in, as the project's sources
-  are, rather than in a jar or in a dependency's checkout elsewhere, the
-  way orchard's project-namespaces tells them for CIDER."
-  "(let [dir (.toPath (.getCanonicalFile (clojure.java.io/file (System/getProperty \"user.dir\"))))]
-     (fn [url]
-       (and (clojure.string/starts-with? url \"file:\")
-            (.startsWith (.toPath (.getCanonicalFile (java.io.File. (java.net.URI. url)))) dir))))")
-
-(def ^:private project-namespaces-code
-  "Keeps the namespaces whose names %s has whose source project-source-code
-  takes for the project's."
-  (str "(let [project-source? " project-source-code "]
-          (filterv (fn [n]
-                     (let [path (-> n (clojure.string/replace \"-\" \"_\") (clojure.string/replace \".\" \"/\"))]
-                       (some-> (some (fn [ext] (clojure.java.io/resource (str path ext))) [\".clj\" \".cljc\" \".cljs\" \".bb\"])
-                               str
-                               project-source?)))
-                   %s))"))
-
 (defn- ns-list
   "The names of the loaded namespaces, from ns-list, in the language of
   session, if there's one."
@@ -1611,13 +1636,12 @@
 
 (defn loaded-namespaces
   "The names of the loaded namespaces, sorted, as namespaces has the
-  project's, but for the nREPL tooling's own, which CIDER leaves out too."
+  project's, but for the REPL tooling's, as tooling-namespaces tells them."
   [client {:keys [session]} opts]
-  (->> (if (supports? client "ns-list")
-         (ns-list client session opts)
-         (eval-data client {} all-ns-code [] opts))
-       (remove #(re-find #"^(cider\.nrepl|refactor-nrepl|nrepl)(\.|$)" %))
-       sort))
+  (let [names (if (supports? client "ns-list")
+                (ns-list client session opts)
+                (eval-data client {} all-ns-code [] opts))]
+    (sort (remove (tooling-namespaces client names opts) names))))
 
 (def ^:private ns-vars-code
   "The public vars of the namespace %s names, each as its name, its

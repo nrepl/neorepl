@@ -138,8 +138,12 @@
                                             (assoc :fn-deps [{:name "demo.core/greet" :file "NO_SOURCE_PATH"
                                                               :line 3 :column 1}])))
       "apropos" (transport/respond-to msg :status "done"
-                                      :apropos-matches [{:name "clojure.core/map" :type "function"
-                                                         :doc "Cider's map.\nMore."}])
+                                      :apropos-matches (if (= "tooling" (:query msg))
+                                                         [{:name "nrepl.core/message" :type "function"}
+                                                          {:name "clojure.core/map" :type "function"}
+                                                          {:name "orchard.namespace/project-namespaces" :type "function"}]
+                                                         [{:name "clojure.core/map" :type "function"
+                                                           :doc "Cider's map.\nMore."}]))
       "cider-version" (transport/respond-to msg :status "done" :cider-version {:version-string "0.63.1"})
       "macroexpand" (transport/respond-to msg :status "done"
                                           :expansion (str "Cider's " (:expander msg) (some->> (:session msg) (str " in "))))
@@ -336,7 +340,12 @@
   (with-client [client {:port *port*}]
     (is (some #{{:name "clojure.core/mapcat"}} (features/apropos client "^mapc")))
     (testing "clojure.repl's own, which a server needn't have loaded"
-      (is (= [{:name "clojure.repl/find-doc"}] (features/apropos client "^find-doc$"))))))
+      (is (= [{:name "clojure.repl/find-doc"}] (features/apropos client "^find-doc$"))))
+    (testing "but for the REPL tooling's, like nREPL's, from a jar"
+      (is (= [{:name "clojure.core.server/start-server"}] (features/apropos client "^start-server$")))
+      (testing "unless it's the project, as orchard's stand-in in test is"
+        (is (= [{:name "orchard.namespace/project-namespaces"}]
+               (features/apropos client "^project-namespaces$")))))))
 
 (deftest expand-test
   (with-client [client {:port *port*}]
@@ -442,11 +451,16 @@
         (testing "not a git dependency's checkout or a local one elsewhere"
           (is (not (project-source? (url (str (System/getProperty "user.home") "/.gitlibs/libs/a/a/5598984/src/a/core.clj")))))
           (is (not (project-source? (url "../elsewhere/src/a/core.clj")))))))
-    (testing "all of them, but nREPL's own"
+    (testing "all of them, but the REPL tooling's, like nREPL's"
       (let [names (features/loaded-namespaces client user {})]
         (is (every? (set names) ["clojure.core" "neorepl.features"]))
         (is (not-any? #(re-find #"^nrepl" %) names))
+        (testing "unless it's the project, as orchard's stand-in in test is"
+          (is (some #{"orchard.namespace"} names)))
         (is (= names (sort names)))))
+    (testing "none of them the tooling's on a server that can't say where their sources are"
+      (with-redefs [features/eval-data (fn [& _] (throw (ex-info "No such var" {:type ::features/failed})))]
+        (is (= #{} (#'features/tooling-namespaces client ["nrepl.core" "clojure.core"] {})))))
     (testing "a namespace's public vars, sorted, without cider-nrepl"
       (let [vars (features/ns-vars client "clojure.string" user {})
             {:keys [arglists doc]} (some #(when (= "join" (:name %)) %) vars)]
@@ -727,6 +741,9 @@
                                   (features/spec-example client ":demo/age" 80 {}))))
           (is (= [{:name "clojure.core/map" :type "function" :doc "Cider's map.\nMore."}]
                  (features/apropos client "map")))
+          (testing "but for the REPL tooling's vars"
+            (is (= ["clojure.core/map" "orchard.namespace/project-namespaces"]
+                   (map :name (features/apropos client "tooling")))))
           (is (= "Cider's macroexpand-all" (features/expand client "(when x y)" user true)))
           (testing "in a copy of the session, whose *1 it would change otherwise"
             (let [session (nrepl/clone-session client)
