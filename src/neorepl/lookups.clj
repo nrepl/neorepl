@@ -18,8 +18,9 @@
   that's code, :args? that it's several, as a seq, and :optional? that it can
   be left out. Its :find takes the client, a context with the :ns to look in,
   the :session and the session's :session-name, if it has one, as
-  neorepl.features has it, and how long to wait for a reload, its
-  :timeout-ms, and the argument. :text turns what it finds into
+  neorepl.features has it, how long to wait for a reload, its :timeout-ms,
+  and :tooling? true for apropos to keep the REPL tooling's vars, and the
+  argument. :text turns what it finds into
   text, code when :code? says so, and :none says what finding nothing means.
   :failed? says whether what it found means it failed after all."
   [{:name "doc" :arg "SYM" :help "Show the documentation of SYM"
@@ -33,7 +34,7 @@
     :code? true
     :none (fn [{:keys [ns]} sym] (str "No source for " sym " in " ns))}
    {:name "apropos" :arg "REGEX" :help "List the vars whose names match REGEX"
-    :find (fn [client _ regex] (not-empty (features/apropos client regex)))
+    :find (fn [client ctx regex] (not-empty (features/apropos client regex (select-keys ctx [:tooling?]))))
     :text render/apropos-text
     :none (fn [_ regex] (str "Nothing matches " regex))}
    {:name "macroexpand" :arg "FORM" :code-arg? true :help "Expand the macro FORM calls"

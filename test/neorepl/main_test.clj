@@ -636,6 +636,9 @@
 
 (deftest apropos-test
   (is (re-find #"(?m)^clojure\.core/mapcat$" (:out (run-command "apropos" "^mapc"))))
+  (testing "the REPL tooling's vars, with --tooling"
+    (is (= "clojure.core.server/start-server\n" (:out (run-command "apropos" "^start-server$"))))
+    (is (re-find #"(?m)^nrepl\.server/start-server$" (:out (run-command "apropos" "--tooling" "^start-server$")))))
   (testing "nothing matching"
     (is (= {:status 1 :out "" :err "neorepl: Nothing matches ^nope-nope$\n"}
            (run-command "apropos" "^nope-nope$"))))
@@ -841,6 +844,8 @@
                           "user=> 3\nuser=> \n")))
     (testing "an argument that isn't code ends with its line"
       (is (= "user=> clojure.core/mapcat\nuser=> 3\nuser=> \n" (repl ",apropos ^mapcat$\n(+ 1 2)\n"))))
+    (testing ",apropos keeps the REPL tooling's vars with the tooling setting on"
+      (is (re-find #"nrepl\.server/start-server" (repl ",set tooling on\n,apropos ^start-server$\n"))))
     (testing ",where and ,reload"
       (is (re-find #"^user=> \S*core\.clj:\d+" (repl ",where map\n")))
       (is (= "user=> Reloaded clojure.set\nuser=> \n" (repl ",reload clojure.set\n")))

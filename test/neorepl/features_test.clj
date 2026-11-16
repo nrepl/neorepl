@@ -458,6 +458,8 @@
         (testing "unless it's the project, as orchard's stand-in in test is"
           (is (some #{"orchard.namespace"} names)))
         (is (= names (sort names)))))
+    (testing "all of them, the tooling's too, when asked"
+      (is (some #{"nrepl.server"} (features/loaded-namespaces client user {:tooling? true}))))
     (testing "none of them the tooling's on a server that can't say where their sources are"
       (with-redefs [features/eval-data (fn [& _] (throw (ex-info "No such var" {:type ::features/failed})))]
         (is (= #{} (#'features/tooling-namespaces client ["nrepl.core" "clojure.core"] {})))))
@@ -743,7 +745,10 @@
                  (features/apropos client "map")))
           (testing "but for the REPL tooling's vars"
             (is (= ["clojure.core/map" "orchard.namespace/project-namespaces"]
-                   (map :name (features/apropos client "tooling")))))
+                   (map :name (features/apropos client "tooling"))))
+            (testing "unless asked to keep them"
+              (is (= ["nrepl.core/message" "clojure.core/map" "orchard.namespace/project-namespaces"]
+                     (map :name (features/apropos client "tooling" {:tooling? true}))))))
           (is (= "Cider's macroexpand-all" (features/expand client "(when x y)" user true)))
           (testing "in a copy of the session, whose *1 it would change otherwise"
             (let [session (nrepl/clone-session client)

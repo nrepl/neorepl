@@ -386,7 +386,7 @@
   does. Returns what to print, as command-output does."
   [{:keys [client ns browse] :as state} names]
   (let [ask {:namespaces #(if %
-                            (features/loaded-namespaces client state {})
+                            (features/loaded-namespaces client state {:tooling? (some-> (:settings state) deref :tooling)})
                             (features/namespaces client state))
              :vars #(features/ns-vars client % state {})
              :doc #(some-> (features/info client % state) render/doc-text)}]
@@ -499,7 +499,8 @@
       :else (try
               (if-let [run (:run command)]
                 (run state arg)
-                (let [{:keys [found text none]} (quietly #(lookups/run name client state (if args? (some-> arg (str/split #"\s+")) arg)))]
+                (let [ctx (assoc state :tooling? (some-> (:settings state) deref :tooling))
+                      {:keys [found text none]} (quietly #(lookups/run name client ctx (if args? (some-> arg (str/split #"\s+")) arg)))]
                   (some-> (follow-ups name) (apply [state found]))
                   (cond
                     none (out none)
@@ -800,8 +801,9 @@
   up where the REPL is, plus :in-ns, to say where that is, as run-loop's
   read-code gets it. Lookups for eldoc and docs get cached until then, since
   evaluating code can change what names mean. Eldoc's go on in the
-  background, so typing never waits on the server."
-  [client]
+  background, so typing never waits on the server. settings, the REPL's,
+  say whether C-x C-a keeps the REPL tooling's vars."
+  [client settings]
   (let [ctx (atom nil)
         ;; What lookups found where the REPL is. Failures don't get cached,
         ;; so a slow first lookup gets another go.
@@ -851,7 +853,9 @@
      :source #(when-let [sym (subject %1 %2)]
                 (features/source client sym @ctx asked))
      :apropos #(when-let [sym (symbol-at %1 %2)]
-                 (some-> (features/apropos client (Pattern/quote sym) asked) not-empty render/apropos-text))
+                 (some-> (features/apropos client (Pattern/quote sym) (assoc asked :tooling? (:tooling @settings)))
+                         not-empty
+                         render/apropos-text))
      :in-ns (fn [place]
               (reset! ctx place)
               (reset! found {}))}))
@@ -908,10 +912,10 @@
     :settings     what the REPL's settings start as, where they're not
                   settings/defaults"
   [client session {:keys [terminal history-dir dir editor-command] :as opts}]
-  (let [{:keys [in-ns] :as lookups} (lookups client)
-        {:keys [autoreload] :as start} (merge settings/defaults (:settings opts))
+  (let [{:keys [autoreload] :as start} (merge settings/defaults (:settings opts))
         ;; Autoreload's off till run-loop turns it on, which can fail.
         settings (atom (assoc start :autoreload false))
+        {:keys [in-ns] :as lookups} (lookups client settings)
         opts (assoc opts :settings settings :autoreload? autoreload)]
     (if-let [editor (some-> terminal
                             (merge (select-keys lookups [:complete :eldoc :doc :source :apropos])
