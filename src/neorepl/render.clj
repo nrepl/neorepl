@@ -119,10 +119,26 @@
                      [[")"]]))))))
 
 (defn apropos-text
-  "apropos matches, a line each: the name and the first line of the doc."
-  [matches]
-  (str/join "\n" (cli/columns (for [{:keys [name doc]} matches]
-                                [name (str (some-> doc str/split-lines first))]))))
+  "apropos matches, a line each: the name and the first line of the doc.
+  In width columns, the names take at most a third of them, a longer one
+  having its doc on the next line, and the docs are cut to fit, with an
+  ellipsis."
+  ([matches] (apropos-text matches nil))
+  ([matches width]
+   (let [rows (for [{:keys [name doc]} matches]
+                [name (str (some-> doc str/split-lines first))])]
+     (if-not width
+       (str/join "\n" (cli/columns rows))
+       (let [cap (max 20 (quot width 3))
+             column (transduce (comp (map (comp count first)) (filter #(<= % cap))) max 0 rows)
+             room (- width column 2)
+             fit #(if (and (> (count %) room) (pos? room)) (str (subs % 0 (dec room)) "…") %)
+             pad #(str % (str/join (repeat (- column (count %)) " ")) "  ")]
+         (str/join "\n" (for [[name doc] rows]
+                          (cond
+                            (or (str/blank? doc) (not (pos? room))) name
+                            (<= (count name) column) (str (pad name) (fit doc))
+                            :else (str name "\n" (pad "") (fit doc))))))))))
 
 (defn frame-text
   "A frame of a stack trace, from last-error, as Java prints it, after at."
