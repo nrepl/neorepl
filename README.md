@@ -21,6 +21,45 @@ bbin install io.github.nrepl/neorepl
 
 From a checkout, `bbin install .` installs that instead.
 
+From 0.6.0 on, it installs on the JVM as a Clojure CLI tool too, from git:
+
+```shell
+clojure -Ttools install-latest :lib io.github.nrepl/neorepl :as neorepl
+```
+
+`clojure -Tneorepl repl` starts the REPL, and each of the other commands is
+a function of the tool too, taking its long options as keys and its
+arguments under `:args`, one or a vector of them. So these are `neorepl
+eval --session agent '(+ 1 2)'` and `neorepl doc map`:
+
+```shell
+clojure -Tneorepl eval :session agent :args '["(+ 1 2)"]'
+clojure -Tneorepl doc :args map
+```
+
+Java 22 and newer warn about the native code JLine calls unless the JVM
+gets `--enable-native-access=ALL-UNNAMED`, which an installed tool can't
+pass, so the tool's REPL takes the terminal JLine drives with `stty`
+instead, except on Windows, which keeps the warning.
+`clojure -J--enable-native-access=ALL-UNNAMED -Tneorepl repl` passes it.
+An alias in `~/.clojure/deps.edn` runs the command line as it is, the JVM
+option included, with the latest release's tag and commit:
+
+```clojure
+{:aliases
+ {:neorepl {:replace-deps {io.github.nrepl/neorepl {:git/tag "v0.5.1" :git/sha "155a066"}}
+            :jvm-opts ["--enable-native-access=ALL-UNNAMED"]
+            :main-opts ["-m" "neorepl.main"]}}}
+```
+
+```shell
+clojure -M:neorepl eval '(+ 1 2)'
+```
+
+Either way it takes about a second to start on the JVM, against a fraction
+of that on babashka, which a coding agent running one command after another
+notices.
+
 `neorepl` connects to the nREPL server whose `.nrepl-port` file is in the
 current directory or one of its parents (`neorepl ports` lists the ones it
 can see) and starts a REPL. Enter evaluates the input once its forms are

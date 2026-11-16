@@ -2,6 +2,8 @@
  :deps {org.clojure/clojure {:mvn/version "1.12.5"}
         nrepl/nrepl {:mvn/version "1.8.0"}
         org.jline/jline {:mvn/version "4.4.7"}}
+ ;; Installed as a Clojure CLI tool, -T calls neorepl.tool's functions.
+ :tools/usage {:ns-default neorepl.tool}
  :aliases
  {:test {:extra-paths ["test"]
          ;; JLine loads native code, which Java 22+ warns about without this.

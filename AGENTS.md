@@ -34,6 +34,8 @@ issues filed upstream.
   `shutdown.clj`, `cli.clj`, `json.clj`, `xdg.clj`: starting servers,
   finding them, named sessions, the REPL's settings and its config file,
   cleaning up on exit, and the small parts done without libraries.
+- `tool.cljc`: neorepl as a Clojure CLI tool, a function for each command,
+  which `clojure -T` calls with a map.
 
 ## Running things
 
@@ -148,3 +150,4 @@ time, grouped by theme, not a batch.
   bumps it and adds the CHANGELOG section in a "Release X.Y.Z" commit, gets
   tagged `vX.Y.Z` with a GitHub release titled "neorepl X.Y.Z" that carries
   that section, and bumps the version to the next snapshot straight after.
+  Once the tag's there, the README's `-M` alias gets its tag and commit.

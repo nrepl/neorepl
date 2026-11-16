@@ -17,7 +17,8 @@
   a: >-
     bbin installs it as a babashka script, which starts in a blink. The same
     source runs on the JVM too, with Java 17 or newer and Clojure 1.10 or
-    newer.
+    newer, and from 0.6.0 on it installs as a Clojure CLI tool, with
+    `clojure -Ttools install-latest :lib io.github.nrepl/neorepl :as neorepl`.
 
 - q: Can I use it next to my editor?
   a: >-
