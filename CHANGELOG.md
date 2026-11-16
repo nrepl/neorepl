@@ -2,6 +2,10 @@
 
 ## main (unreleased)
 
+### Features
+
+- [#89](https://github.com/nrepl/neorepl/pull/89): neorepl installs as a Clojure CLI tool, from git, with `clojure -Ttools install-latest :lib io.github.nrepl/neorepl :as neorepl`, and each command is a function of the tool, as in `clojure -Tneorepl repl`.
+
 ### Changes
 
 - [#84](https://github.com/nrepl/neorepl/pull/84): Locations in text, as `where`, `refs`, `deps` and `check` print them, are relative to the directory neorepl runs in, when they're in it.
