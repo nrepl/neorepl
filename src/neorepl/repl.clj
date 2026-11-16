@@ -849,13 +849,16 @@
      :eldoc (fn [text cursor refresh]
               (when-let [{:keys [op] :as call} (lexer/call-at (lexer/lex text) cursor)]
                 (some-> (info-later op refresh) (render/eldoc-line call))))
-     :doc #(some-> (subject %1 %2) info render/doc-text)
-     :source #(when-let [sym (subject %1 %2)]
-                (features/source client sym @ctx asked))
-     :apropos #(when-let [sym (symbol-at %1 %2)]
-                 (some-> (features/apropos client (Pattern/quote sym) (assoc asked :tooling? (:tooling @settings)))
-                         not-empty
-                         render/apropos-text))
+     :doc (fn [text cursor _]
+            (some-> (subject text cursor) info render/doc-text))
+     :source (fn [text cursor _]
+               (when-let [sym (subject text cursor)]
+                 (features/source client sym @ctx asked)))
+     :apropos (fn [text cursor width]
+                (when-let [sym (symbol-at text cursor)]
+                  (some-> (features/apropos client (Pattern/quote sym) (assoc asked :tooling? (:tooling @settings)))
+                          not-empty
+                          (render/apropos-text width))))
      :in-ns (fn [place]
               (reset! ctx place)
               (reset! found {}))}))
@@ -880,6 +883,8 @@
                                      (do (interrupt) :interrupted)
                                      line))
                      :width #(editor/width editor)
+                     ;; What lists get fitted to, which the plain REPL keeps whole.
+                     :columns #(editor/width editor)
                      :height #(editor/height editor)
                      :print-response (printer editor)
                      :print-message #(do (editor/fresh-line editor)

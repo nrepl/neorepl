@@ -749,6 +749,10 @@
             (testing "unless asked to keep them"
               (is (= ["nrepl.core/message" "clojure.core/map" "orchard.namespace/project-namespaces"]
                      (map :name (features/apropos client "tooling" {:tooling? true}))))))
+          (testing "as text, as wide as the terminal is"
+            (is (= "clojure.core/map  Cider'…" (:text (lookups/run "apropos" client (assoc user :columns (constantly 25)) "map"))))
+            (testing "and whole without one, whatever the width values get printed in"
+              (is (= "clojure.core/map  Cider's map." (:text (lookups/run "apropos" client (assoc user :width (constantly 25)) "map"))))))
           (is (= "Cider's macroexpand-all" (features/expand client "(when x y)" user true)))
           (testing "in a copy of the session, whose *1 it would change otherwise"
             (let [session (nrepl/clone-session client)

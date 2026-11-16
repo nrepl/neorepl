@@ -386,6 +386,18 @@
         (.dumb true)
         (.build))))
 
+(defn width
+  "The terminal's width in columns."
+  [{:keys [^Terminal terminal]}]
+  (let [width (.getWidth terminal)]
+    (if (pos? width) width 80)))
+
+(defn height
+  "The terminal's height in lines."
+  [{:keys [^Terminal terminal]}]
+  (let [height (.getHeight terminal)]
+    (if (pos? height) height 24)))
+
 (defn- maybe-terminal?
   "False when there's clearly no terminal to edit on, which is quicker to tell
   than having JLine find out. Since Java 22 there's always a console, so it's
@@ -415,9 +427,10 @@
                    the input while typing, like the arglists of the
                    function being called, as render/eldoc-line's pieces,
                    calling (refresh) when that changes, from any thread
-    :doc           (doc text cursor) for the documentation C-x C-d shows
-    :source        (source text cursor) for the code C-x C-s shows
-    :apropos       (apropos text cursor) for what C-x C-a shows
+    :doc           (doc text cursor width) for the documentation C-x C-d
+                   shows, width being the terminal's
+    :source        (source text cursor width) for the code C-x C-s shows
+    :apropos       (apropos text cursor width) for what C-x C-a shows
     :commands      the names of the REPL's commands, a set, to highlight
     :edit          (edit text) for what C-x C-e leaves in place of the input,
                    as {:text text}, or {:message message} saying why it
@@ -534,7 +547,7 @@
                     :when f]
               (bind-widget reader (str "neorepl-" (name k)) (str (KeyMap/ctrl \X) (KeyMap/ctrl key))
                            #(let [buffer (.getBuffer reader)]
-                              (when-let [text (f (str buffer) (.cursor buffer))]
+                              (when-let [text (f (str buffer) (.cursor buffer) (width editor))]
                                 ;; Straight to JLine: widgets run with its lock held,
                                 ;; and print-text would take the editor's on top.
                                 (.printAbove reader ^AttributedString (if code?
@@ -571,18 +584,6 @@
       (f)
       (finally
         (.setAttributes terminal attributes)))))
-
-(defn width
-  "The terminal's width in columns."
-  [{:keys [^Terminal terminal]}]
-  (let [width (.getWidth terminal)]
-    (if (pos? width) width 80)))
-
-(defn height
-  "The terminal's height in lines."
-  [{:keys [^Terminal terminal]}]
-  (let [height (.getHeight terminal)]
-    (if (pos? height) height 24)))
 
 (defn- print-above
   "Prints what's waiting to go above the prompt, ending its line, if it's

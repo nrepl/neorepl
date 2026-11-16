@@ -20,8 +20,10 @@
   the :session and the session's :session-name, if it has one, as
   neorepl.features has it, how long to wait for a reload, its :timeout-ms,
   and :tooling? true for apropos to keep the REPL tooling's vars, and the
-  argument. :text turns what it finds into
-  text, code when :code? says so, and :none says what finding nothing means.
+  argument. :text turns what it finds into text, code when :code? says so,
+  fitted to as many columns as the context's :columns function says, the
+  terminal's, when :width? says it takes them and there's a terminal, and
+  :none says what finding nothing means.
   :failed? says whether what it found means it failed after all."
   [{:name "doc" :arg "SYM" :help "Show the documentation of SYM"
     :find (fn [client ctx sym] (features/info client sym ctx))
@@ -36,6 +38,7 @@
    {:name "apropos" :arg "REGEX" :help "List the vars whose names match REGEX"
     :find (fn [client ctx regex] (not-empty (features/apropos client regex (select-keys ctx [:tooling?]))))
     :text render/apropos-text
+    :width? true
     :none (fn [_ regex] (str "Nothing matches " regex))}
    {:name "macroexpand" :arg "FORM" :code-arg? true :help "Expand the macro FORM calls"
     :find (fn [client ctx form] {:expansion (features/expand client form ctx false)})
@@ -126,8 +129,8 @@
   :failed? true when what it found means it failed, or {:none
   what-that-means} when it finds nothing."
   [name client ctx arg]
-  (let [{:keys [find text none failed?]} (lookup name)]
+  (let [{:keys [find text none failed? width?]} (lookup name)]
     (if-let [found (find client ctx arg)]
-      (cond-> {:found found :text (text found)}
+      (cond-> {:found found :text (if width? (text found (some-> (:columns ctx) (apply []))) (text found))}
         (and failed? (failed? found)) (assoc :failed? true))
       {:none (none ctx arg)})))
