@@ -274,9 +274,15 @@
   (on-each-server
    (fn [server]
      (with-client [client {:port (discovery/read-port (io/file (project-dir server) ".nrepl-port"))}]
+       ;; Completion loads compliment, with cider-nrepl.
+       (features/complete client "gre" {:ns "demo.core"})
        (let [names (features/loaded-namespaces client {} {})]
          (is (every? (set names) ["clojure.core" "demo.core"]))
-         (is (not-any? #(re-find #"^(cider\.nrepl|nrepl)\." %) names)))
+         (is (not-any? #(re-find #"^(cider\.nrepl|nrepl|compliment|orchard)\." %) names)))
+       ;; cider-nrepl's apropos matches qualified names, the fallback's
+       ;; unqualified ones, so the regex leaves out ^.
+       (testing "apropos, without compliment's and nREPL's split-by-leading-literals"
+         (is (= [] (features/apropos client "split-by-leading-literals$"))))
        (is (= [{:name "boom" :arglists "([x])"}
                {:name "greet" :arglists "([who])" :doc "Says hi."}
                {:name "welcome" :arglists "([who])"}]
