@@ -113,7 +113,9 @@ arglists under the input, `color`, `pretty`, for values pretty printed as
 wide as the terminal, `server-output`, what the server's System/out and
 System/err get, and `taps`, for what shows up above the prompt, `quiet`,
 which leaves all of that out for a while, `outcome`, for how the last
-evaluation went at the right of the prompt, and `autoreload`. `print-length`
+evaluation went at the right of the prompt, `tooling`, for the namespaces
+of nREPL, cider-nrepl and its libraries in `,apropos` and `,ns`, which are
+left out unless they're the project's, and `autoreload`. `print-length`
 and `print-level` take a number, how many items of a collection a value
 shows and how deep it goes, or `off`, which leaves that to the session's
 `*print-length*` and `*print-level*`. Pretty printing counts a map's
@@ -216,7 +218,9 @@ their `clojure.repl` namesakes do, `neorepl macroexpand` expands macros,
 `neorepl complete` lists completions, `neorepl where` says where something's
 defined, `neorepl refs` which functions use it, or with `--deps`, which it
 uses, and `neorepl reload` reloads code, all using cider-nrepl when the
-server has it, which `refs` takes. In the REPL, `refs` and `refs --deps`
+server has it, which `refs` takes. `neorepl apropos` leaves out the vars of
+nREPL, cider-nrepl and its libraries, unless they're the project's or
+`--tooling` keeps them. In the REPL, `refs` and `refs --deps`
 are `,refs` and `,deps`. `--session NAME` looks things up as that session
 sees them: in its language, ClojureScript included, and in its namespace,
 the Clojure one in ClojureScript, which `--ns` can name otherwise:

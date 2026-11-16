@@ -5,6 +5,7 @@
 ### Features
 
 - [#89](https://github.com/nrepl/neorepl/pull/89): neorepl installs as a Clojure CLI tool, from git, with `clojure -Ttools install-latest :lib io.github.nrepl/neorepl :as neorepl`, and each command is a function of the tool, as in `clojure -Tneorepl repl`.
+- [#90](https://github.com/nrepl/neorepl/pull/90): `neorepl apropos --tooling` and the REPL's `tooling` setting keep the namespaces of nREPL, cider-nrepl and its libraries in apropos, and, for the setting, in the namespace browser's list of every namespace.
 
 ### Changes
 

@@ -29,7 +29,9 @@
    {:name :server-output :default true
     :help "What the server's System/out and System/err get"}
    {:name :taps :default true
-    :help "The values sent to tap>"}])
+    :help "The values sent to tap>"}
+   {:name :tooling :default false
+    :help "nREPL's and cider-nrepl's namespaces in apropos and ,ns"}])
 
 (def defaults
   (into {} (map (juxt :name :default)) all))

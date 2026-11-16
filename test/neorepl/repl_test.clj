@@ -679,7 +679,7 @@
 
 (deftest eldoc-lookups-test
   (with-client [client {:port *port*}]
-    (let [{:keys [eldoc in-ns]} (#'repl/lookups client)
+    (let [{:keys [eldoc in-ns]} (#'repl/lookups client (atom {}))
           text #(some->> % (map first) (apply str))
           refreshed (promise)]
       (in-ns {:ns "user"})
@@ -801,7 +801,7 @@
   (call-with-repl {}
     (fn [type screen]
       (type ",set\r")
-      (is (screen #"\nautoreload +off +Reload what changed before each evaluation\n(?s).*\ntaps +on +The values sent to tap>\nuser=> $"))
+      (is (screen #"\nautoreload +off +Reload what changed before each evaluation\n(?s).*\ntaps +on +The values sent to tap>\ntooling +off +nREPL's and cider-nrepl's namespaces in apropos and ,ns\nuser=> $"))
       (is (screen #"(?m)^eldoc +off +The called function's arglists, under the input \(C-x C-h\)$"))
       (testing "turning one on, off, or the other way"
         (type ",set eldoc on\r")

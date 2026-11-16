@@ -708,7 +708,7 @@ when there's no server to talk to."
                  (and args? (or optional? (seq args))) args
                  :else (the-arg args (str/replace arg-name "..." "")))]
        (with-lookup-context options ctx
-         #(report-lookup format name %1 %2 arg))))))
+         #(report-lookup format name %1 (cond-> %2 (:tooling options) (assoc :tooling? true)) arg))))))
 
 (def ^:private source-help
   (help-text
@@ -749,12 +749,17 @@ errors and 3 when there's no server to talk to."
                       1)))))))
 
 (def ^:private apropos-options
-  (concat connection-options common-options))
+  (concat connection-options
+          [{:long "--tooling"
+            :doc "Keep the vars of the REPL tooling's namespaces"}]
+          common-options))
 
 (def ^:private apropos-help
   (help-text
    "Usage: neorepl apropos [options] REGEX"
-   "Lists the vars, in every loaded namespace, whose names match REGEX."
+   "Lists the vars, in every loaded namespace, whose names match REGEX. The REPL
+tooling's, nREPL's, cider-nrepl's and its libraries', are left out, unless
+they're the project's or --tooling says to keep them."
    apropos-options
    discovery-note
    "Exit status: 0 when something matches, 1 when nothing does, 2 on usage

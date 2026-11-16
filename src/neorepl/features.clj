@@ -503,7 +503,8 @@
 
 (defn apropos
   "The vars whose names match the regex, as maps with the :name and, when
-  the server says, the :type and :doc."
+  the server says, the :type and :doc, but for the REPL tooling's, as
+  tooling-namespaces tells them, unless opts say :tooling? true."
   ([client regex] (apropos client regex {}))
   ([client regex opts]
    ;; Rather than the server's stack trace for one that doesn't parse.
@@ -527,7 +528,7 @@
                                    [regex] opts)
                         (mapv #(hash-map :name %))))
          ns-of #(namespace (symbol (:name %)))
-         tooling (tooling-namespaces client (keep ns-of matches) opts)]
+         tooling (if (:tooling? opts) #{} (tooling-namespaces client (keep ns-of matches) opts))]
      (into [] (remove (comp tooling ns-of)) matches))))
 
 (defn- one-form
@@ -1636,12 +1637,14 @@
 
 (defn loaded-namespaces
   "The names of the loaded namespaces, sorted, as namespaces has the
-  project's, but for the REPL tooling's, as tooling-namespaces tells them."
+  project's, but for the REPL tooling's, as tooling-namespaces tells them,
+  unless opts say :tooling? true."
   [client {:keys [session]} opts]
   (let [names (if (supports? client "ns-list")
                 (ns-list client session opts)
                 (eval-data client {} all-ns-code [] opts))]
-    (sort (remove (tooling-namespaces client names opts) names))))
+    (sort (cond->> names
+            (not (:tooling? opts)) (remove (tooling-namespaces client names opts))))))
 
 (def ^:private ns-vars-code
   "The public vars of the namespace %s names, each as its name, its

@@ -230,7 +230,8 @@
               "print-level    off  How deep into collections a value shows, or all the way\n"
               "quiet          off  Leave out server output, taps and trace events (C-x C-q)\n"
               "server-output  on   What the server's System/out and System/err get\n"
-              "taps           on   The values sent to tap>")
+              "taps           on   The values sent to tap>\n"
+              "tooling        off  nREPL's and cider-nrepl's namespaces in apropos and ,ns")
          (render/settings-text settings/defaults)))
   (is (re-find #"(?m)^print-length   100  The items"
                (render/settings-text (assoc settings/defaults :print-length 100))))
