@@ -12,6 +12,7 @@
 - [#85](https://github.com/nrepl/neorepl/pull/85): The profile summary fits in a terminal, without the columns only CIDER's inspector needs.
 - [#85](https://github.com/nrepl/neorepl/pull/85): `neorepl profile --format edn` and `json` give the summary as a list of maps, one for each function, rather than the text table.
 - [#87](https://github.com/nrepl/neorepl/pull/87): Jack-in brings cider-nrepl 0.64.1, whose reloads point the aliases and refers on the namespaces they make anew at the new ones, and keep the session in its namespace, which neorepl now does itself only for an older cider-nrepl.
+- [#90](https://github.com/nrepl/neorepl/pull/90): `,ns` takes the namespaces whose sources are under the directory the server runs in for the project's, as CIDER does, where it took any whose source wasn't in a jar, git and `:local/root` dependencies' too.
 
 ### Bug fixes
 
