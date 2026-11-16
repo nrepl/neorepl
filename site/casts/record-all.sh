@@ -51,8 +51,9 @@ done
 
 # cider-nrepl loads the clojure.test extensions that report what an =
 # expected and got with its test middleware, on the first test op, so a test
-# namespace loaded before that reports the forms instead. One test run goes
-# first, so the namespaces the tapes reload report the values.
+# namespace loaded before that reports the forms instead (cider-nrepl#1079).
+# One test run goes first, so the namespaces the tapes reload report the
+# values.
 neorepl test demo.core-test > /dev/null || true
 
 tapes=("$@")
