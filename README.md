@@ -135,8 +135,8 @@ it says:
 ```
 
 nbb and Basilisp print values their own way, not pretty and without the
-limits. babashka takes the limits only when it pretty prints, and ignores
-the session's own `*print-length*` and `*print-level*`.
+limits. babashka before 1.13.230 takes the limits only when it pretty
+prints, and ignores the session's own `*print-length*` and `*print-level*`.
 
 With no server to connect to, `neorepl` starts one for the project, the way
 CIDER's jack-in does, and stops it when the REPL ends. The project's build

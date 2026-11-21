@@ -28,6 +28,18 @@
   "Calls (f server) for each server, testing it under its name."
   (partial servers/on-each-server servers))
 
+(def ^:private bb-version
+  "The bb server's version, as [major minor patch]."
+  (delay (mapv #(Long/parseLong %) (re-seq #"\d+" (:out (run :bb "eval" "(System/getProperty \"babashka.version\")"))))))
+
+(defn- old-bb?
+  "Whether server is bb's, before 1.13.230, which runs cider-nrepl's
+  middleware (babashka#1851), sends what tests print with their results
+  (babashka#2265) and prints values only as far as the limits say
+  (babashka#2274)."
+  [server]
+  (and (= :bb server) (neg? (compare @bb-version [1 13 230]))))
+
 (use-fixtures :once
   (fn [f]
     (servers/call-with-servers servers #(run % "eval" "(require 'demo.core-test)") f)))
@@ -89,10 +101,10 @@
        (is (str/includes? out (str "ERROR in demo.core-test/error-test (" file ":" (if (= :bb server) 12 13) ")\n")))
        (is (str/includes? out "error: clojure.lang.ExceptionInfo: boom {:x 1}"))
        (is (str/ends-with? out "Ran 3 tests containing 3 assertions.\n1 failure, 1 error.\n"))
-       ;; bb sends what tests print under the session's previous message,
-       ;; to a connection that's gone, unless the session's new
-       ;; (babashka#2265).
-       (when-not (= :bb server)
+       ;; bb before 1.13.230 sends what tests print under the session's
+       ;; previous message, to a connection that's gone, unless the
+       ;; session's new (babashka#2265).
+       (when-not (old-bb? server)
          (is (str/includes? out "printed by failing-test\n"))))
      (testing "rerunning what didn't pass"
        (let [{:keys [status out]} (run server "retest")]
@@ -126,47 +138,51 @@
      (is (= "0\n" (:out (run server "eval" "picked")))))))
 
 (deftest trace-test
-  (testing "cider-nrepl"
-    (is (= "Tracing demo.core/greet\n" (:out (run :clojure "trace" "demo.core/greet"))))
-    (is (str/includes? (:out (run :clojure "eval" "(demo.core/greet \"t\")")) "└─→ \"hi t\"\n"))
-    (is (= "Stopped tracing demo.core/greet\n" (:out (run :clojure "untrace" "demo.core/greet"))))
-    (testing "a call that throws"
-      (run :clojure "trace" "demo.core/boom")
-      (is (str/includes? (:out (run :clojure "eval" "(demo.core/boom 3)")) "└─✗ clojure.lang.ExceptionInfo: boom\n"))
-      (run :clojure "untrace" "demo.core/boom"))
-    (testing "leaving alone what the server's own tools call, which untracing would trace first"
-      (is (= "Wasn't tracing clojure.core/apply\n" (:out (run :clojure "untrace" "apply"))))
-      (is (= "3\n" (:out (run :clojure "eval" "(+ 1 2)"))))))
-  (testing "babashka"
-    (is (= {:status 1 :out "" :err "neorepl: Tracing takes cider-nrepl on the server\n"}
-           (run :bb "trace" "demo.core/greet")))))
+  (doseq [server [:clojure :bb]]
+    (testing server
+      (if (old-bb? server)
+        (is (= {:status 1 :out "" :err "neorepl: Tracing takes cider-nrepl on the server\n"}
+               (run :bb "trace" "demo.core/greet")))
+        (do
+          (is (= "Tracing demo.core/greet\n" (:out (run server "trace" "demo.core/greet"))))
+          (is (str/includes? (:out (run server "eval" "(demo.core/greet \"t\")")) "└─→ \"hi t\"\n"))
+          (is (= "Stopped tracing demo.core/greet\n" (:out (run server "untrace" "demo.core/greet"))))
+          (testing "a call that throws"
+            (run server "trace" "demo.core/boom")
+            (is (str/includes? (:out (run server "eval" "(demo.core/boom 3)")) "└─✗ clojure.lang.ExceptionInfo: boom\n"))
+            (run server "untrace" "demo.core/boom"))
+          (testing "leaving alone what the server's own tools call, which untracing would trace first"
+            (is (= "Wasn't tracing clojure.core/apply\n" (:out (run server "untrace" "apply"))))
+            (is (= "3\n" (:out (run server "eval" "(+ 1 2)"))))))))))
 
 (deftest profile-test
-  (testing "cider-nrepl"
-    (run :clojure "profile" "--clear")
-    (try
-      (is (= "Profiling demo.core/greet\n" (:out (run :clojure "profile" "demo.core/greet"))))
-      (testing "with nothing to show until it's called, which cider-nrepl's summary fails on"
-        (is (= {:status 1 :out "" :err "neorepl: No profiled function has been called yet\n"}
-               (run :clojure "profile"))))
-      (run :clojure "eval" "(demo.core/greet \"p\")")
-      (let [[header row :as lines] (str/split-lines (:out (run :clojure "profile")))]
-        (is (= 2 (count lines)))
-        (is (re-find #"^name +n +mean +std +sum +min +max +med$" header))
-        (is (re-find #"^demo\.core/greet +1 +\d+([.,]\d)? [num]?s +\u00b1" row)))
-      (testing "and as data, in JSON"
-        (let [[{:keys [name n mean] :as row} :as rows] (:summary (json/read-str (:out (run :clojure "profile" "--format" "json"))))]
-          (is (= 1 (count rows)))
-          (is (= ["demo.core/greet" 1] [name n]))
-          (is (re-find #"^\d+([.,]\d)? [num]?s$" mean))
-          (is (= #{:name :n :mean :std :sum :min :max :med} (set (keys row))))))
-      (is (= "Stopped profiling demo.core/greet\n" (:out (run :clojure "unprofile" "demo.core/greet"))))
-      (finally
-        (run :clojure "unprofile" "demo.core/greet")
-        (run :clojure "profile" "--clear"))))
-  (testing "babashka"
-    (is (= {:status 1 :out "" :err "neorepl: Profiling takes cider-nrepl on the server\n"}
-           (run :bb "profile" "demo.core/greet")))))
+  (doseq [server [:clojure :bb]]
+    (testing server
+      (if (old-bb? server)
+        (is (= {:status 1 :out "" :err "neorepl: Profiling takes cider-nrepl on the server\n"}
+               (run :bb "profile" "demo.core/greet")))
+        (do
+          (run server "profile" "--clear")
+          (try
+            (is (= "Profiling demo.core/greet\n" (:out (run server "profile" "demo.core/greet"))))
+            (testing "with nothing to show until it's called, which cider-nrepl's summary fails on"
+              (is (= {:status 1 :out "" :err "neorepl: No profiled function has been called yet\n"}
+                     (run server "profile"))))
+            (run server "eval" "(demo.core/greet \"p\")")
+            (let [[header row :as lines] (str/split-lines (:out (run server "profile")))]
+              (is (= 2 (count lines)))
+              (is (re-find #"^name +n +mean +std +sum +min +max +med$" header))
+              (is (re-find #"^demo\.core/greet +1 +\d+([.,]\d)? [num]?s +\u00b1" row)))
+            (testing "and as data, in JSON"
+              (let [[{:keys [name n mean] :as row} :as rows] (:summary (json/read-str (:out (run server "profile" "--format" "json"))))]
+                (is (= 1 (count rows)))
+                (is (= ["demo.core/greet" 1] [name n]))
+                (is (re-find #"^\d+([.,]\d)? [num]?s$" mean))
+                (is (= #{:name :n :mean :std :sum :min :max :med} (set (keys row))))))
+            (is (= "Stopped profiling demo.core/greet\n" (:out (run server "unprofile" "demo.core/greet"))))
+            (finally
+              (run server "unprofile" "demo.core/greet")
+              (run server "profile" "--clear"))))))))
 
 (deftest java-doc-test
   (testing "cider-nrepl, with the Javadoc"
@@ -299,7 +315,10 @@
        (is (= "(s/keys :req [:demo/age])\n" (features/spec-form client ":demo/person" 80 {})))
        (testing "and an example, from cider-nrepl's spec-example, which takes test.check, as only the Leiningen project has"
          (case server
-           :bb (is (re-matches #"#:demo\{:age \d+\}\n" (features/spec-example client ":demo/person" 80 {})))
+           ;; bb before 1.13.230 has no spec-example, and the code neorepl
+           ;; evaluates instead pretty prints the example.
+           :bb (is (re-matches (if (old-bb? server) #"#:demo\{:age \d+\}\n" #"#:demo\{:age \d+\}")
+                               (features/spec-example client ":demo/person" 80 {})))
            :lein (is (re-matches #"\{:demo/age \d+\}" (features/spec-example client ":demo/person" 80 {})))
            :clojure (is (thrown-with-msg? clojure.lang.ExceptionInfo #"^Generating examples takes test.check on the server$"
                                           (features/spec-example client ":demo/person" 80 {})))))))))
@@ -351,15 +370,17 @@
                                           "repl")]
        (is (= 0 status))
        (is (str/includes? out "demo.core=> \"hi r\"\n"))
-       ;; bb's comes as output nobody asked for, which the REPL prints from
-       ;; another thread, where *out* isn't this one.
-       (when-not (= :bb server)
+       ;; bb's before 1.13.230 comes as output nobody asked for, which the
+       ;; REPL prints from another thread, where *out* isn't this one
+       ;; (babashka#2265).
+       (when-not (old-bb? server)
          (is (str/includes? out "printed by failing-test\n")))
        (is (str/includes? out "Ran 1 test containing 1 assertion.\n1 failure, 0 errors.\n"))
        (testing "values printed as far as the limits say, pretty printed or not"
          (is (str/includes? out "demo.core=> [(0 1 2 ...) [#]]\ndemo.core=> pretty off\n"))
-         ;; bb's nrepl.util.print/pr ignores the limits (babashka#2274).
-         (is (str/includes? out (if (= :bb server)
+         ;; bb's nrepl.util.print/pr ignores the limits before 1.13.230
+         ;; (babashka#2274).
+         (is (str/includes? out (if (old-bb? server)
                                   "demo.core=> [(0 1 2 3 4 5 6 7 8 9) [[1]]]\n"
                                   "demo.core=> [(0 1 2 ...) [#]]\ndemo.core=> \n"))))))))
 
