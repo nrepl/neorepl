@@ -42,8 +42,9 @@
 (defn stop-text
   "What a breakpoint, a need-debug-input, shows: what it's in and where,
   the line of the form it stopped at with the form marked, unless that's
-  wider than width, and the form's value."
-  [{:keys [code coor debug-value file line original-ns]} width]
+  wider than width, and the form's value, or what it threw, for one #dbg!
+  or #break! stop at."
+  [{:keys [code coor debug-value file line original-ns caught-msg]} width]
   (let [[start end] (some->> coor seq (lexer/coordinate-span code))
         at (+ (or line 1) -1 (first (lexer/position code (or start 0))))
         ;; A REPL's code has no file, which comes as an empty list.
@@ -53,7 +54,9 @@
                            (when start
                              (render/marked-lines code {:start start :end (min end (or (str/index-of code "\n" start) end))}
                                                   width))
-                           [(str "  => " debug-value)]))))
+                           [(if caught-msg
+                              (str "  ✗ " (some-> (re-find #"^#error\[(\S+)" (str debug-value)) second (str ": ")) caught-msg)
+                              (str "  => " debug-value))]))))
 
 (defn locals-text [locals]
   (if (seq locals)
@@ -65,7 +68,8 @@
   [available?]
   (str (cli/indented-columns (for [[key name help] commands :when (available? name)]
                                [key help]))
-       "\n  Enter repeats the last step, and ( starts an expression to evaluate"))
+       "\n  Enter repeats the last step, and ( starts an expression to evaluate. At a"
+       "\n  form that threw, j returns a value in its place, and c throws it"))
 
 (defn- available?
   "Whether the breakpoint stop takes the command called name: locals when

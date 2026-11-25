@@ -1252,6 +1252,61 @@
              ;; Every one, those of the tests before included.
              (type ",unbreak\r")
              (is (screen #",unbreak\n(?s).*dbg\.repl/g runs without stopping again\n(?s).*user=> $"))))))))
+  (testing ",debug, running the input that failed again, stopping where it throws"
+    (call-with-repl {}
+      (fn [type screen]
+        (type ",debug\r")
+        (is (screen #"No error to debug: ,debug runs the input that failed last again\nuser=> $"))
+        (type "(/ 1 0)\r")
+        (screen #"Divide by zero.*\nuser=> $")
+        (testing "the input with #dbg! in front, when the stack trace has none of the project's functions"
+          (type ",debug\r")
+          (is (screen #"Running it again, stopping where it throws\n(?s).*Divide by zero.*\nuser=> $"))))))
+  (testing "or the first of the project's functions in it, for that evaluation"
+    (call-with-temp-dir
+     (fn [dir]
+       (let [file (test-server/spit-file dir "dbg/err.clj" "(ns dbg.err)\n\n(defn f [x]\n  (/ x 0))\n")]
+         (with-redefs [features/last-error (fn [& _] [{:class "java.lang.ArithmeticException"
+                                                      :stacktrace [{:name "dbg.err$f/invokeStatic" :var "dbg.err/f" :flags ["project" "clj"]
+                                                                    :path (str file) :line 4}]}])]
+           (call-with-repl {}
+             (fn [type screen]
+               (type (str "(load-file " (pr-str (str file)) ")\r"))
+               (screen #"#'dbg\.err/f\nuser=> $")
+               (type "(dbg.err/f 1)\r")
+               (screen #"Divide by zero.*\nuser=> $")
+               (type ",debug\r")
+               (is (screen #"Running it again, stopping where dbg\.err/f throws\n(?s).*Divide by zero.*\nuser=> $"))
+               (testing "which it takes out after"
+                 (type ",breaks\r")
+                 (is (not (re-find #"(?m)^dbg\.err/f$" (screen #",breaks\n(?s).*user=> $")))))
+               (testing "or puts back stopping at each step, for one ,break has stop"
+                 (type ",break dbg.err/f\r")
+                 (screen #"dbg\.err/f stops at each step now\nuser=> $")
+                 (type "(dbg.err/f 1)\r")
+                 (screen #"Divide by zero.*\nuser=> $")
+                 ;; The screen has the ,debug and ,breaks before too.
+                 (type ",debug\r")
+                 (screen #"(?s)stops at each step now\n.*,debug\n.*Running it again.*Divide by zero[^\n]*\nuser=> $")
+                 (type ",breaks\r")
+                 (is (re-find #"(?m)^dbg\.err/f$"
+                              (second (re-find #"(?s)stops at each step now\n.*,breaks\n(.*)user=> $"
+                                               (screen #"(?s)stops at each step now\n.*,breaks\n.*user=> $")))))))))))))
+  (testing "putting back what it instrumented as it exits, rather than what another client did"
+    (call-with-temp-dir
+     (fn [dir]
+       (let [file (test-server/spit-file dir "dbg/exits.clj" "(ns dbg.exits)\n\n(defn mine [])\n\n(defn theirs [])\n")]
+         (with-client [client {:port *port*}]
+           (nrepl/request client {:op "eval" :code (str "(load-file " (pr-str (str file)) ")")} {})
+           (features/instrument client "dbg.exits/theirs" {:ns "user"} "#dbg" {})
+           (call-with-repl {}
+             (fn [type screen]
+               (type ",break dbg.exits/mine\r")
+               (screen #"dbg\.exits/mine stops at each step now\nuser=> $")))
+           (let [left (set (features/instrumented client {}))]
+             (is (not (left "dbg.exits/mine")))
+             (is (left "dbg.exits/theirs")))
+           (features/instrument client "dbg.exits/theirs" {:ns "user"} nil {}))))))
   (testing "or #dbg in the input"
     (call-with-repl {}
       (fn [type screen]

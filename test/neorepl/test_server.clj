@@ -569,8 +569,9 @@
 (defn wrap-fake-debugger
   "cider-nrepl's debugger, roughly: init-debugger takes the breakpoints
   break! has the client stop at, debug-input answers them, and evaluating
-  a defn with #dbg in front instruments it, which evaluating it without
-  undoes, for debug-instrumented-defs."
+  a defn with #dbg or #dbg! in front instruments it, which evaluating it
+  without undoes, for debug-instrumented-defs. Other code with a tag in
+  front gets evaluated without it."
   [handler]
   (fn [{:keys [op code ns key input] :as msg}]
     (case op
@@ -580,13 +581,13 @@
       (transport/respond-to msg :status "done"
                             :list (for [[ns names] (:instrumented @debugger) :when (seq names)]
                                     (cons ns (sort names))))
-      (if-let [[_ tag space name] (when (= "eval" op) (re-find #"^(#dbg(\s+))?\(defn-? (\S+)" (str code)))]
-        (do (swap! debugger update-in [:instrumented (or ns "user")] (fnil (if tag conj disj) #{}) name)
-            (handler (cond-> msg
-                       tag (update :code subs (count tag))
-                       ;; Where the defn is, past the line #dbg takes.
-                       (some-> space (str/includes? "\n")) (update :line #(some-> % inc)))))
-        (handler msg)))))
+      (let [[_ tag space name] (when (= "eval" op) (re-find #"^(#dbg!?(\s+))?(?:\(defn-? (\S+))?" (str code)))]
+        (when name
+          (swap! debugger update-in [:instrumented (or ns "user")] (fnil (if tag conj disj) #{}) name))
+        (handler (cond-> msg
+                   tag (update :code subs (count tag))
+                   ;; Where the code is, past the line the tag takes.
+                   (some-> space (str/includes? "\n")) (update :line #(some-> % inc))))))))
 
 (middleware/set-descriptor! #'wrap-fake-debugger
                             {:requires #{"clone"}

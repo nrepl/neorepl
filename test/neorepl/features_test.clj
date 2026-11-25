@@ -974,6 +974,15 @@
       "nrepl.middleware.interruptible_eval$evaluate/invokeStatic" true
       "clojure.core$map/invoke" false
       "my.app$f/invoke" false))
+  (testing "a frame's path, from cider-nrepl's URL or babashka's file, but not for a REPL's"
+    (let [path (str (.getAbsoluteFile (io/file "app.clj")))]
+      (is (= [path path nil]
+             (map :path (:stacktrace (first (#'features/normalize-causes
+                                             [{:class "java.lang.ArithmeticException"
+                                               :stacktrace [{:name "app$f/invoke" :file "app.clj" :line 1
+                                                             :file-url (str (.toURI (io/file path)))}
+                                                            {:name "app/g" :file path :line 2}
+                                                            {:name "user/fn" :file "NO_SOURCE_PATH" :line 1}]}]))))))))
   (testing "a function's frame, after one of its anonymous fn's, which has its var"
     (is (= [nil nil]
            (map :flags (:stacktrace (first (#'features/normalize-causes
@@ -1248,21 +1257,21 @@
                value #(some :value (nrepl/request client {:op "eval" :session session :code %}))]
            (value (str "(load-file " (pr-str (str file)) ")"))
            (testing "a function, by evaluating its source again with #dbg in front"
-             (is (= "dbg.demo/f" (features/instrument client "f" {:ns "dbg.demo"} true {})))
+             (is (= "dbg.demo/f" (features/instrument client "f" {:ns "dbg.demo"} "#dbg" {})))
              (is (some #{"dbg.demo/f"} (features/instrumented client {})))
              (testing "where it is"
                (is (= "3" (value "(:line (meta #'dbg.demo/f))")))))
            (testing "and without, which takes the instrumenting out"
-             (is (= "dbg.demo/f" (features/instrument client "dbg.demo/f" {:ns "user"} false {})))
+             (is (= "dbg.demo/f" (features/instrument client "dbg.demo/f" {:ns "user"} nil {})))
              (is (not (some #{"dbg.demo/f"} (features/instrumented client {})))))
            (testing "but not a function with no source"
              (value "(defn no-source [])")
              (is (thrown-with-msg? clojure.lang.ExceptionInfo #"^No source for no-source, which takes evaluating it with #dbg"
-                                   (features/instrument client "no-source" {:ns "user"} true {}))))
+                                   (features/instrument client "no-source" {:ns "user"} "#dbg" {}))))
            (testing "nor one whose file's changed since it was loaded"
              (spit file "(ns dbg.demo)\n\n(defn g [])\n\n(defn f [x]\n  (* x 2))\n")
              (is (thrown-with-msg? clojure.lang.ExceptionInfo #"^The file doesn't have dbg\.demo/f where it was loaded from"
-                                   (features/instrument client "dbg.demo/f" {:ns "user"} true {}))))
+                                   (features/instrument client "dbg.demo/f" {:ns "user"} "#dbg" {}))))
            (testing "nor nothing"
              (is (thrown-with-msg? clojure.lang.ExceptionInfo #"^Nothing called nope in user"
-                                   (features/instrument client "nope" {:ns "user"} true {}))))))))))
+                                   (features/instrument client "nope" {:ns "user"} "#dbg" {}))))))))))

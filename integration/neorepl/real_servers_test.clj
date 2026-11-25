@@ -417,6 +417,12 @@
          (do (testing "stopping at each step, with the locals"
                (is (str/includes? out "user=> ● demo.core/greet"))
                (is (str/includes? out "  => \"d\"\ndebug>   who  \"d\"\ndebug> \"hi d\"\n")))
+             (testing ",debug, stopping where the input that failed throws, with what to return in its place"
+               (let [{:keys [out]} (run-with server "(demo.core/boom 1)\n,debug\nj\n:recovered\n,breaks\n" "repl")]
+                 (is (str/includes? out "  ✗ clojure.lang.ExceptionInfo: boom\n"))
+                 (is (str/includes? out "inject> :recovered\n"))
+                 (testing "and taking the instrumenting out after"
+                   (is (str/includes? out "Nothing stops at each step\n")))))
              (testing "until it's taken out"
                (is (str/includes? out "demo.core/greet runs without stopping again\nuser=> \"hi e\"\n")))))))))
 

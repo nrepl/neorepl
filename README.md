@@ -325,12 +325,16 @@ breakpoint, `l` for the locals, `e` or `(` for an expression evaluated with
 them, `j` for one to return in place of the form, `p` to inspect the value,
 `q` to stop, and `?` for the rest. Enter repeats the last step. Without a
 terminal they're lines. `,breaks` lists what stops and `,unbreak` evaluates
-the source again without `#dbg`. A server's debugger has one client, the
-last to start it, so CIDER's stops getting the breakpoints once the REPL
-starts it, and only an evaluation of the REPL's stops: a breakpoint on
-another thread, like an HTTP handler's, goes on. `q` takes JDK 19 or older,
-or `-Djdk.attach.allowAttachSelf`, which the servers `neorepl server`
-starts have, for nREPL to stop the evaluation.
+the source again without `#dbg`. After an error, `,debug` runs the input
+again, stopping where it throws: the first of the project's functions in the
+stack trace gets `#dbg!` for that evaluation, which stops only at the form
+that throws, with its locals, where `j` returns a value in its place. When
+the REPL exits, what it instrumented runs as it is again. A server's
+debugger has one client, the last to start it, so CIDER's stops getting the
+breakpoints once the REPL starts it, and only an evaluation of the REPL's
+stops: a breakpoint on another thread, like an HTTP handler's, goes on. `q`
+takes JDK 19 or older, or `-Djdk.attach.allowAttachSelf`, which the servers
+`neorepl server` starts have, for nREPL to stop the evaluation.
 
 ```
 user=> ,break demo.cart/line-total

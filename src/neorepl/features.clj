@@ -687,11 +687,13 @@
           {:class class
            :message (blank->nil message)
            :data (blank->nil data)
-           :stacktrace (dups (mapv (fn [{:keys [file-url] :as frame}]
+           :stacktrace (dups (mapv (fn [{:keys [file file-url] :as frame}]
                                      (let [var (frame-var frame)
-                                           ;; cider-nrepl's, for the exact file the line's in.
-                                           path (when (and (string? file-url) (str/starts-with? file-url "file:"))
-                                                  (source-file file-url))
+                                           ;; cider-nrepl's, for the exact file the line's in,
+                                           ;; or babashka's, which has it as the file.
+                                           path (cond
+                                                  (and (string? file-url) (str/starts-with? file-url "file:")) (source-file file-url)
+                                                  (and (string? file) (.isAbsolute (io/file file))) file)
                                            flags (frame-flags frame)]
                                        (cond-> (select-keys frame [:name :file :line])
                                          flags (assoc :flags flags)
@@ -1689,28 +1691,32 @@
        vec))
 
 (defn instrument
-  "Evaluates the source of the var sym names where ctx says again, with
-  #dbg in front, for the debugger to stop at each step of it, or without it
-  unless on?, which stops that, in a session of its own, so that the user's
-  *1 stays put. Returns the var's name, qualified. Throws ::failed when there's
-  nothing called sym, or no source, as for a function defined at the REPL,
-  or the source isn't its definition, as when the file's changed since."
-  [client sym ctx on? opts]
+  "Evaluates the source of the var sym names where ctx says again, with tag
+  in front, #dbg for the debugger to stop at each step of it or #dbg! for
+  it to stop where something in it throws, or without one, which stops
+  that, in a session of its own, so that the user's *1 stays put. Returns
+  the var's name, qualified. Throws ::failed when there's nothing called
+  sym, or no source, as for a function defined at the REPL, or the source
+  isn't its definition, as when the file's changed since."
+  [client sym ctx tag opts]
   (let [{:keys [ns name file line column] :as found} (info client sym ctx opts)
         code (when found (source-of client sym ctx opts found))
         named (some->> (when code (lexer/coordinate-span code [1])) (apply subs code))]
     (cond
       (nil? found) (throw (ex-info (str "Nothing called " sym " in " (:ns ctx)) {:type ::failed}))
+      ;; As babashka's frames name anonymous functions after the fn macro.
+      (or (:macro found) (:special-form found))
+      (throw (ex-info (str ns "/" name " is a macro, which the debugger doesn't step through") {:type ::failed}))
       (nil? code) (throw (ex-info (str "No source for " sym ", which takes evaluating it "
-                                       (if on? "with #dbg in front" "again without #dbg") " instead")
+                                       (if tag (str "with " tag " in front") "again without #dbg") " instead")
                                   {:type ::failed}))
       (not (and (definition? code) (= name named)))
       (throw (ex-info (str "The file doesn't have " ns "/" name " where it was loaded from, which reloading it fixes")
                       {:type ::failed})))
-    (ask client (cond-> {:op "eval" :ns ns :code (str (when on? "#dbg\n") code)}
+    (ask client (cond-> {:op "eval" :ns ns :code (str (some-> tag (str "\n")) code)}
                   file (assoc :file file)
-                  ;; Where the code starts, past the line #dbg takes.
-                  line (assoc :line (cond-> line on? dec) :column (or column 1)))
+                  ;; Where the code starts, past the line the tag takes.
+                  line (assoc :line (cond-> line tag dec) :column (or column 1)))
          opts)
     (str ns "/" name)))
 
