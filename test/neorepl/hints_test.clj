@@ -125,8 +125,7 @@
              (is (= [{:frame frame :lines [[2 "(defn f []"] [3 "  (/ 1 0))"]]}]
                     (details [{:class "java.lang.ArithmeticException" :message "Divide by zero"
                                :stacktrace [{:name "clojure.lang.Numbers/divide" :flags ["java"]} frame]}])))
-             (testing "by its file, when babashka's gives the path, rather than the REPL's"
-               (is (= [{:frame (assoc frame :file (str file)) :lines [[2 "(defn f []"] [3 "  (/ 1 0))"]]}]
+             (testing "rather than the REPL's, which has no path"
+               (is (= [{:frame frame :lines [[2 "(defn f []"] [3 "  (/ 1 0))"]]}]
                       (details [{:class "java.lang.ArithmeticException"
-                                 :stacktrace [{:name "user/fn" :file "NO_SOURCE_PATH" :line 1 :flags ["project"]}
-                                              (-> frame (dissoc :path) (assoc :file (str file)))]}])))))))))))
+                                 :stacktrace [{:name "user/fn" :file "NO_SOURCE_PATH" :line 1 :flags ["project"]} frame]}])))))))))))

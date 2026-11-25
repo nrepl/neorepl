@@ -73,7 +73,7 @@
                      thread))}))
 
 (declare edit enter-ns switch-session inspect inspect-tapped run-tests browse-error autoreload change-setting
-         browse-specs fix break breaks unbreak)
+         browse-specs fix break breaks unbreak debug)
 
 (def ^:private commands
   "The REPL's commands, the CIDER way: a comma, which Clojure reads as
@@ -94,11 +94,13 @@
             :run (fn [state _] (browse-error state))}
            {:name "fix" :arg "N" :help "Try fix N of the ones the last error listed"
             :run #(fix %1 %2)}
-           {:name "break" :arg "SYM" :help "Stop at each step of SYM, evaluating its source again with #dbg"
+           {:name "break" :arg "SYM" :help "Stop at each step of SYM, evaluating its source again with #dbg" :debugger? true
             :run #(break %1 %2)}
-           {:name "breaks" :help "List the functions that stop at each step"
+           {:name "debug" :help "Run the input that failed again, stopping where it throws" :debugger? true
+            :run (fn [state _] (debug state))}
+           {:name "breaks" :help "List the functions that stop at each step" :debugger? true
             :run (fn [state _] (breaks state))}
-           {:name "unbreak" :arg "SYM" :optional? true
+           {:name "unbreak" :arg "SYM" :optional? true :debugger? true
             :help "Stop stopping in SYM, or in every function that does, evaluating its source again"
             :run #(unbreak %1 %2)}
            {:name "edit" :arg "SYM" :optional? true
@@ -335,12 +337,12 @@
 
 (defn- instrument-text
   "Has the debugger stop at each step of the function sym names, or stop
-  that, unless on?, as features/instrument does, calling done once it has,
-  and says so, or why not."
+  that, unless on?, as features/instrument does, calling done with its
+  name once it has, and says so, or why not."
   [{:keys [client] :as state} sym on? done]
   (try
-    (let [name (features/instrument client sym state on? {})]
-      (done)
+    (let [name (features/instrument client sym state (when on? "#dbg") {})]
+      (done name)
       (str name (if on? " stops at each step now" " runs without stopping again")))
     (catch clojure.lang.ExceptionInfo e
       (when (= ::nrepl/disconnected (:type (ex-data e)))
@@ -349,21 +351,18 @@
 
 (defn- break
   "Has the debugger stop at each step of the function sym names, starting
-  it, with the REPL's :debugger function, once that's done. Returns what
-  to print, as command-output does."
-  [{:keys [client debugger] :as state} sym]
-  (if (features/debugger? client)
-    (out (instrument-text state sym true debugger))
-    (out no-debugger)))
+  it, with the REPL's :debugger function, once that's done, and keeping
+  the name in :mine, an atom with the ones the REPL instrumented. Returns
+  what to print, as command-output does."
+  [{:keys [debugger mine] :as state} sym]
+  (out (instrument-text state sym true #(do (debugger) (swap! mine conj %)))))
 
 (defn- breaks
   "Lists the functions the debugger stops in, as break has them do. Returns
   what to print, as command-output does."
   [{:keys [client]}]
-  (if (features/debugger? client)
-    (out (or (some->> (features/instrumented client {}) seq (str/join "\n"))
-             nothing-breaks))
-    (out no-debugger)))
+  (out (or (some->> (features/instrumented client {}) seq (str/join "\n"))
+           nothing-breaks)))
 
 (defn- unbreak
   "Has the function sym names run without stopping again, or without sym,
@@ -371,10 +370,60 @@
   command-output does."
   [{:keys [client] :as state} sym]
   (cond
-    (not (features/debugger? client)) (out no-debugger)
-    sym (out (instrument-text state sym false (fn [])))
-    :else (out (or (some->> (features/instrumented client {}) seq (map #(instrument-text state % false (fn []))) (str/join "\n"))
+    sym (out (instrument-text state sym false #(swap! (:mine state) disj %)))
+    :else (out (or (some->> (features/instrumented client {}) seq (map #(instrument-text state % false (fn [name] (swap! (:mine state) disj name)))) (str/join "\n"))
                    nothing-breaks))))
+
+(defn- throwing-vars
+  "The vars of the project's functions in files in the stack trace of the
+  error whose causes features/last-error found, innermost first."
+  [causes]
+  (->> (:stacktrace (last causes))
+       (filter #(and (:path %) (some #{"project"} (:flags %))))
+       (keep :var)
+       (remove #(str/starts-with? % "clojure."))
+       distinct))
+
+(defn- try-instrument
+  "What features/instrument returns for sym, tag and ctx, or nil when it
+  can't, but for a lost connection, which still throws."
+  [client sym ctx tag]
+  (try
+    (features/instrument client sym ctx tag {})
+    (catch clojure.lang.ExceptionInfo e
+      (when (= ::nrepl/disconnected (:type (ex-data e)))
+        (throw e)))))
+
+(defn- debug
+  "Has the REPL evaluate the input that failed last again, its :failed, an
+  atom with its :code and the :ns it ran in, for the debugger to stop where
+  it throws: the first of the project's functions the error's stack trace
+  has that has a source gets #dbg! in front for that evaluation, which the
+  :after-eval atom puts back as it was after it, or else the input does.
+  Returns what to print, as command-output does, with the :input to
+  evaluate."
+  [{:keys [client session ns debugger failed after-eval] :as state}]
+  (let [{:keys [code] failed-ns :ns} @failed]
+    (cond
+      (nil? code) (out "No error to debug: ,debug runs the input that failed last again")
+      (not= ns failed-ns) (out (str "The input that failed ran in " failed-ns ", which ,ns " failed-ns " goes back to"))
+      :else
+      (let [_ (debugger)
+            causes (try
+                     (features/last-error client session)
+                     (catch clojure.lang.ExceptionInfo _ nil))
+            stepped (set (features/instrumented client {}))
+            instrumented (some #(try-instrument client % state "#dbg!") (throwing-vars causes))]
+        ;; The input stays what failed, rather than what runs now, and the
+        ;; function goes back to stopping at each step, if it did.
+        (reset! after-eval #(do (when instrumented
+                                  (try-instrument client instrumented state (when (stepped instrumented) "#dbg")))
+                                (when @failed
+                                  (reset! failed {:code code :ns ns}))))
+        (if instrumented
+          (assoc (out (str "Running it again, stopping where " instrumented " throws")) :input code)
+          ;; The newline ends a comment the input ends with.
+          (assoc (out "Running it again, stopping where it throws") :input (str "#dbg! (do " code "\n)")))))))
 
 (defn- show-inspector
   "Shows the inspector's view, the lines (view page-size) returns, with a
@@ -569,6 +618,7 @@
                                                          [(str "," name (some->> arg (str " "))) help]))))
       (nil? command) (out (str "No command called ," name ", ,help lists them"))
       (and arg-name (nil? arg) (not optional?)) (out (str "Usage: ," name " " arg-name))
+      (and (:debugger? command) (not (features/debugger? client))) (out no-debugger)
       :else (try
               (if-let [run (:run command)]
                 (run state arg)
@@ -700,6 +750,13 @@
         ;; errors got the hint saying where to see more of them.
         fixes (atom nil)
         hinted (atom 0)
+        ;; The input that failed last, for ,debug, and what to do after
+        ;; the next evaluation, as ,debug takes its #dbg! out.
+        failed (atom nil)
+        after-eval (atom nil)
+        ;; The functions the REPL instrumented, which it puts back as they
+        ;; were when it exits.
+        mine (atom #{})
         ;; What has the thread waiting for the evaluation that's running do
         ;; something, as evaluation/evaluate's :on-start gives it, the
         ;; session neorepl's debugger answers in, once it's started, and
@@ -770,7 +827,9 @@
                      (when (= "stopped" status)
                        (reset! interrupted nil))
                      (when (= "eval-error" status)
-                       (reset! test-errors nil))
+                       (reset! test-errors nil)
+                       ;; What ,debug runs again goes with the session's *e.
+                       (reset! failed nil))
                      ;; There's no point in reading more input then.
                      (when (= "disconnected" status)
                        (throw (ex-info message {:type ::nrepl/disconnected})))
@@ -839,6 +898,15 @@
             (try
               (features/unsubscribe-taps client subscription)
               (catch Exception _)))
+          ;; cider-nrepl's breakpoints wait for good once the debugger's
+          ;; client is gone, so what's instrumented runs as it is again.
+          (let [deadline (+ (System/currentTimeMillis) 5000)]
+            (doseq [name @mine
+                    :let [left (- deadline (System/currentTimeMillis))]
+                    :while (pos? left)]
+              (try
+                (features/instrument client name {:ns "user"} nil {:timeout-ms left})
+                (catch Exception _))))
           ;; Leaving the debugger first, so it's not taken for another
           ;; client starting it.
           (doseq [session [(when (realized? forwarding) @forwarding) (first (reset-vals! debug-session-atom nil))]
@@ -863,6 +931,7 @@
                         (as-command command-thread
                                     #(command-output (merge io place {:client client :evaluate (partial evaluate session)
                                                                       :test-errors test-errors :fixes fixes :debugger debugger
+                                                                      :failed failed :after-eval after-eval :mine mine
                                                                       :show-traces show-traces :hide-traces hide-traces
                                                                       :taps taps :tapped tapped :own own :quietly quietly})
                                                      name arg)))]
@@ -870,19 +939,30 @@
              (or (nil? code) (= ":repl/quit" (str/trim code)) (= :quit output)) nil
              (str/blank? code) (recur place nil last-eval)
              output (do (print-response output)
+                        (when (:session output)
+                          (reset! failed nil))
                         (recur (merge place (select-keys output [:session :session-name :ns]))
                                (some->> [(:input output) more] (remove nil?) seq (str/join "\n"))
                                nil))
              :else
-             (let [_ (when (and (nil? @debug-session-atom) (debugging? code))
+             (let [tagged? (debugging? code)
+                   _ (when (and tagged? (nil? @debug-session-atom))
                        (debugger))
+                   stepped (when (and tagged? @debug-session-atom)
+                             (try (set (features/instrumented client {})) (catch Exception _ nil)))
                    started (System/nanoTime)
                    result (evaluate session #(evaluation/evaluate client (eval-msg session code (width) @settings) %))
                    ms (quot (- (System/nanoTime) started) 1000000)
                    place (assoc place :ns (or (:ns result) ns))]
-               (reset! fixes (when (and (= "eval-error" (:status result)) (:hints @settings) (not (:quit @debug-state)))
+               ;; ,debug's run again had the hints already.
+               (reset! fixes (when (and (= "eval-error" (:status result)) (:hints @settings) (not (:quit @debug-state))
+                                        (nil? @after-eval))
                                (hint client place code (:err result)
                                      (assoc io :hinted hinted :command-thread command-thread :quietly quietly))))
+               (when stepped
+                 (swap! mine into (remove stepped (try (features/instrumented client {}) (catch Exception _ nil)))))
+               (reset! failed (when (= "eval-error" (:status result)) {:code code :ns ns}))
+               (some-> (first (reset-vals! after-eval nil)) (apply []))
                (recur place nil {:status (:status result) :ms ms})))))))))
 
 (defn- read-input

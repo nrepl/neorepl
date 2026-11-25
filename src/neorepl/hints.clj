@@ -295,12 +295,8 @@
                    (try
                      (:arglists (features/info client called ctx opts))
                      (catch clojure.lang.ExceptionInfo _ nil)))
-        ;; The full path cider-nrepl has from the frame's URL, or the one
-        ;; babashka's has as its file, unlike the REPL's frames.
-        frame (some #(when-let [path (or (:path %) (when (some-> (:file %) io/file .isAbsolute) (:file %)))]
-                       (when (some #{"project"} (:flags %))
-                         (assoc % :path path)))
-                    (:stacktrace root))
+        ;; A file's, unlike the REPL's frames, which babashka flags project too.
+        frame (some #(when (and (:path %) (some #{"project"} (:flags %))) %) (:stacktrace root))
         lines (some-> frame source-lines)]
     (vec (concat (when-let [text (explanation root)] [{:explanation text}])
                  (for [{:keys [data]} causes
