@@ -48,7 +48,9 @@
   cursor gets in the way of reading the screen, and so is the last
   evaluation's outcome at the right of the prompt unless they say :outcome
   true, and colors unless they say :color true, since showing the
-  delimiter that pairs with the one at the cursor redraws the line."
+  delimiter that pairs with the one at the cursor redraws the line. And the
+  hints after errors unless they say :hints true, since they'd follow an
+  error's message."
   [opts f]
   (call-with-temp-dir
    (fn [dir]
@@ -61,7 +63,7 @@
                                      :history-dir (io/file dir "history")
                                      :editor-command (:editor-command opts)
                                      :settings-file (:settings-file opts)
-                                     :settings (merge {:eldoc false :color false :outcome false}
+                                     :settings (merge {:eldoc false :color false :outcome false :hints false}
                                                       (select-keys opts setting-names))
                                      :terminal (merge {:input in :output out :width 80}
                                                       (apply dissoc opts :sessions-file :editor-command :settings-file
@@ -1169,6 +1171,31 @@
                (testing "which a Java frame hasn't"
                  (is (= "No source to open for clojure.lang.Numbers/divide (Numbers.java:190)"
                         (str/replace (open #(str/starts-with? (:name %) "clojure.lang.Numbers/")) #"\d+\)" "190)"))))))))))))
+
+(deftest hints-test
+  (testing "after an error, the fixes to try"
+    (call-with-repl {:hints true}
+      (fn [type screen]
+        (type "(mapp inc [1])\r")
+        (is (screen #"\n  \(mapp inc \[1\]\)\n   \^\^\^\^\n  ,fix 1  map in place of mapp\n(?s).*user=> $"))
+        (type ",fix 1\r")
+        (is (screen #",fix 1\n\(2\)\nuser=> $"))
+        (testing "which go with the next evaluation"
+          (type ",fix 1\r")
+          (is (screen #",fix 1\nNo fixes to try: the last evaluation's error listed none\nuser=> $")))
+        (testing "or where to see more of an error, the first few times"
+          (dotimes [_ 3]
+            (type "(/ 1 0)\r")
+            (is (screen #"Divide by zero.*\n  ,pst shows its stack trace, ,stacktrace browses it\nuser=> $")))
+          (type "(/ 1 0)\r")
+          (is (= 3 (count (re-seq #",pst shows" (screen #"Divide by zero.*\nuser=> $")))))))))
+  (testing "or neither, with them off"
+    (call-with-repl {:hints true}
+      (fn [type screen]
+        (type ",set hints off\r")
+        (screen #"hints off\nuser=> $")
+        (type "(/ 1 0)\r")
+        (is (screen #"Divide by zero.*\nuser=> $"))))))
 
 (deftest edit-test
   ;; The editor's a shell script.

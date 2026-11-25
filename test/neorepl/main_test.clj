@@ -823,6 +823,10 @@
       (is (str/includes? (repl "(/ 1 0)\n,pst\n") "user=> java.lang.ArithmeticException: Divide by zero\n"))
       (is (str/includes? (repl "(/ 1 0)\n,stacktrace\n") "user=> java.lang.ArithmeticException: Divide by zero\n"))
       (is (= "user=> No error yet\nuser=> \n" (repl ",stacktrace\n")))
+      (testing "the fixes after an error, on stderr"
+        (let [{:keys [out err]} (run-in *dir* "(mapp inc [1])\n,fix 1\n" "repl" "-p" (str *port*))]
+          (is (str/includes? err "  ,fix 1  map in place of mapp\n"))
+          (is (str/includes? out "user=> (2)\n"))))
       (testing "or the last test run's errors, until an evaluation fails"
         (let [out (repl ",test neorepl.sample-suite\n,stacktrace\n(/ 1 0)\n,stacktrace\n")]
           (testing "only the errors, which have a stack trace"

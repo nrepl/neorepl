@@ -508,6 +508,31 @@
                              :expects #{#'nrepl-io/wrap-out}
                              :handles {"forward-system-output" {}}})
 
+(defn wrap-fake-resolve
+  "cider-nrepl's resolve-missing and resolve-alias, roughly: the loaded
+  namespaces with a public var of a symbol's name, and the classes of that
+  name in java.util and java.time, and clojure.string for the alias
+  string, as if the project's files required it so."
+  [handler]
+  (fn [{:keys [op symbol alias] :as msg}]
+    (case op
+      "cider/resolve-missing"
+      (let [name (second (re-matches #"(?:.*/)?(.+?)\.?" symbol))]
+        (transport/respond-to msg :status "done"
+                              :candidates (concat (sort-by :name (for [ns (all-ns)
+                                                                       :when (contains? (ns-publics ns) (clojure.core/symbol name))]
+                                                                   {:name (str (ns-name ns)) :type "ns"}))
+                                                  (for [package ["java.util" "java.time"]
+                                                        :let [class (str package "." name)]
+                                                        :when (class? (resolve (clojure.core/symbol class)))]
+                                                    {:name class :type "class"}))))
+      "cider/resolve-alias"
+      (transport/respond-to msg :status "done"
+                            :candidates (if (= "string" alias) [{:ns "clojure.string" :source "project" :count 1}] []))
+      (handler msg))))
+
+(middleware/set-descriptor! #'wrap-fake-resolve {:handles {"cider/resolve-missing" {} "cider/resolve-alias" {}}})
+
 (def ^:private builtin-sources
   "babashka finding the source of its built-ins, as source-fn does for the
   servers in this process. It resolves its own dependencies for that the
@@ -519,15 +544,16 @@
 (defn fixture
   "A :once fixture that runs the tests with an nREPL server listening on
   *port*, with wrap-stuck, wrap-fake-inspector, wrap-fake-tracer,
-  wrap-fake-profiler, wrap-fake-reload, wrap-fake-system-output and
-  wrap-fake-taps unless opts, which go to nrepl.server/start-server, give
+  wrap-fake-profiler, wrap-fake-reload, wrap-fake-system-output,
+  wrap-fake-taps and wrap-fake-resolve unless opts, which go to nrepl.server/start-server, give
   it a :handler."
   [& opts]
   (fn [f]
     @builtin-sources
     (let [srv (apply server/start-server :port 0 :handler (server/default-handler #'wrap-stuck #'wrap-fake-inspector #'wrap-fake-tracer
                                                                                   #'wrap-fake-profiler #'wrap-fake-reload
-                                                                                  #'wrap-fake-system-output #'wrap-fake-taps)
+                                                                                  #'wrap-fake-system-output #'wrap-fake-taps
+                                                                                  #'wrap-fake-resolve)
                      opts)]
       (try
         (binding [*port* (:port srv)]

@@ -12,8 +12,14 @@
   "The statuses that make an evaluation fail, the most telling first."
   ["disconnected" "interrupted" "eval-error" "error"])
 
+(def ^:private err-kept
+  "How much of the end of stderr an evaluation keeps when it doesn't
+  collect what it prints: what an error's message takes."
+  2000)
+
 (defn- add-response
-  "Adds response to acc, keeping only the size of its output unless collect?"
+  "Adds response to acc, keeping only the size of its output, and the end of
+  its stderr, unless collect?"
   [acc {:keys [value out err ns ex root-ex status]} collect?]
   (cond-> (update acc :statuses into status)
     ;; shadow-cljs's way of saying ClojureScript code threw, after the
@@ -26,6 +32,8 @@
     (and collect? value) (update :values conj value)
     (and collect? (seq out)) (update :out conj out)
     (and collect? (seq err)) (update :err conj err)
+    (and (not collect?) (seq err)) (update :err-end #(let [s (str % err)]
+                                                      (subs s (max 0 (- (count s) err-kept)))))
     out (update :out-size + (count out))
     err (update :err-size + (count err))
     ns (assoc :ns ns)
@@ -52,7 +60,7 @@
   "What an evaluation came to, given its accumulated responses and, when
   neorepl stopped waiting for it, why: it ran out of time, the :timeout, with
   whether the interrupt worked, or it got :stopped."
-  [{:keys [values out err ns ex root-ex statuses truncated?]} {:keys [timeout interrupted? stopped]}]
+  [{:keys [values out err err-end ns ex root-ex statuses truncated?]} {:keys [timeout interrupted? stopped]}]
   (let [status (cond
                  timeout "timeout"
                  stopped "stopped"
@@ -69,7 +77,7 @@
                   "disconnected" "Lost the connection to the nREPL server"
                   "error" (str "The server reported " (str/join ", " (sort (disj statuses "done" "error"))))
                   nil)]
-    (cond-> {:status status :values values :out (str/join out) :err (str/join err) :ns ns}
+    (cond-> {:status status :values values :out (str/join out) :err (or err-end (str/join err)) :ns ns}
       truncated? (assoc :truncated true)
       ex (assoc :ex ex :root-ex root-ex)
       message (assoc :message message))))
@@ -168,7 +176,8 @@
                   evaluation that's part of something the :timeout covers
     :max-output   cuts each value at that many characters, and stdout and
                   stderr too, marking the result :truncated
-    :collect?     false to leave :values, :out and :err empty, for callers
+    :collect?     false to leave :values and :out empty, and :err but for
+                  its end, as much as an error's message takes, for callers
                   that print the responses as they come (true by default)
 
   Responses that come after it stops waiting, on a timeout or when told to,

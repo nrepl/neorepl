@@ -23,7 +23,8 @@ issues filed upstream.
   thread per connection handing responses to the handler for their id.
 - `evaluation.clj`: following an eval's responses, stdin and interrupts.
 - `features.clj`: everything else asked of a server. `lookups.clj` is what
-  the commands and the REPL share, `render.clj` turns it into text.
+  the commands and the REPL share, `render.clj` turns it into text, and
+  `hints.clj` finds what could fix an error.
 - `mcp.clj`: the MCP server, over the same features as the commands.
 - `inspector.clj`, `stacktrace.clj`, `ns_browser.clj`, `spec_browser.clj` and
   `browser.clj`: the full-screen views.

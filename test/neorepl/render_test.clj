@@ -187,6 +187,20 @@
                                            {:name "user/g" :file "x.clj" :line 2 :flags ["dup"]}
                                            {:name "java.lang.Object/wait"}]}]))))
 
+(deftest marked-lines-test
+  (let [code "(let [n 1]\n  (mapp inc [n]))"
+        token {:type :symbol :start 14 :end 18}]
+    (testing "the name marked on its line"
+      (is (= ["    (mapp inc [n]))" "     ^^^^"] (render/marked-lines code token 80))))
+    (testing "lined up with the line's tabs"
+      (is (= ["  \t(mapp)" "  \t ^^^^"] (render/marked-lines "\t(mapp)" {:type :symbol :start 2 :end 6} 80))))
+    (testing "and nothing when the line's too wide"
+      (is (nil? (render/marked-lines code token 15))))))
+
+(deftest fix-text-test
+  (is (= "(require '[my.lib :refer [mapp]])" (render/fix-text {:run "(require '[my.lib :refer [mapp]])"})))
+  (is (= "map in place of mapp" (render/fix-text {:replace "map" :in-place-of "mapp"}))))
+
 (deftest inspector-text-test
   (is (= "Class: [0]clojure.lang.PersistentVector\n\n--- Contents:\n  0. [1]{:a 1,\n :b 2}"
          (render/inspector-text [[{:text "Class: "} {:text "clojure.lang.PersistentVector" :index 0}]
@@ -233,6 +247,7 @@
   (is (= (str "autoreload     off  Reload what changed before each evaluation\n"
               "color          on   Colors, unless NO_COLOR is set\n"
               "eldoc          on   The called function's arglists, under the input (C-x C-h)\n"
+              "hints          on   What could fix an error, and where to see more of it\n"
               "outcome        on   The last evaluation's outcome and time, right of the prompt\n"
               "pretty         on   Values pretty printed, as wide as the terminal (C-x C-p)\n"
               "print-length   off  The items of a collection a value shows, or all\n"

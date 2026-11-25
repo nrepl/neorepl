@@ -17,6 +17,8 @@
     :help "Colors, unless NO_COLOR is set"}
    {:name :eldoc :default true :key \H
     :help "The called function's arglists, under the input"}
+   {:name :hints :default true
+    :help "What could fix an error, and where to see more of it"}
    {:name :outcome :default true :help "The last evaluation's outcome and time, right of the prompt"}
    {:name :pretty :default true :key \P
     :help "Values pretty printed, as wide as the terminal"}

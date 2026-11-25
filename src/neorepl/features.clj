@@ -415,6 +415,28 @@
           (some :completions)
           (mapv #(select-keys % [:candidate :type :ns]))))))
 
+(defn resolve-missing
+  "What could give where ctx says sym, the text of a symbol it can't
+  resolve, by cider-nrepl's resolve-missing: maps with the :name and the
+  :type, ns for a namespace to require, class for a class to import, type
+  for a deftype's or defrecord's class, with the :ns that defines it, or
+  macro for a ClojureScript namespace's. Nil without the op, which came
+  with cider-nrepl 0.64."
+  ([client sym ctx] (resolve-missing client sym ctx {}))
+  ([client sym ctx opts]
+   (when (supports? client "cider/resolve-missing")
+     (some :candidates (ask client (lookup-msg {:op "cider/resolve-missing" :symbol sym} ctx) opts)))))
+
+(defn resolve-alias
+  "The namespaces alias could stand for where ctx says, which has no such
+  alias, by cider-nrepl's resolve-alias, the ones the project's files
+  require under it first: maps with the :ns, as written in a libspec. Nil
+  without the op, which came with cider-nrepl 0.64."
+  ([client alias ctx] (resolve-alias client alias ctx {}))
+  ([client alias ctx opts]
+   (when (supports? client "cider/resolve-alias")
+     (some :candidates (ask client (lookup-msg {:op "cider/resolve-alias" :alias alias} ctx) opts)))))
+
 (defn- definition?
   "Whether form, as text, is a list whose head defines something: def, defn,
   defmacro and the like."

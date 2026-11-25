@@ -384,6 +384,20 @@
                                   "demo.core=> [(0 1 2 3 4 5 6 7 8 9) [[1]]]\n"
                                   "demo.core=> [(0 1 2 ...) [#]]\ndemo.core=> \n"))))))))
 
+(deftest hints-test
+  (on-each-server
+   (fn [server]
+     (let [{:keys [status out err]} (run-with server "(mapp inc [1])\n,fix 1\n(Instant/now)\n,fix 1\n" "repl")]
+       (is (= 0 status))
+       (testing "the name code has a typo of"
+         (is (str/includes? err "  ,fix 1  map in place of mapp\n"))
+         (is (str/includes? out "user=> (2)\n")))
+       ;; bb's before 1.13.230 has neither resolve-missing nor resolve-alias.
+       (when-not (old-bb? server)
+         (testing "and the import it needs"
+           (is (str/includes? err "  ,fix 1  (import 'java.time.Instant)\n"))
+           (is (re-find #"user=> java\.time\.Instant\n#object\[java\.time\.Instant " out))))))))
+
 (deftest mcp-test
   (on-each-server
    (fn [server]

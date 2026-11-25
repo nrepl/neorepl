@@ -6,6 +6,7 @@
 
 - [#89](https://github.com/nrepl/neorepl/pull/89): neorepl installs as a Clojure CLI tool, from git, with `clojure -Ttools install-latest :lib io.github.nrepl/neorepl :as neorepl`, and each command is a function of the tool, as in `clojure -Tneorepl repl`.
 - [#90](https://github.com/nrepl/neorepl/pull/90): `neorepl apropos --tooling` and the REPL's `tooling` setting keep the namespaces of nREPL, cider-nrepl and its libraries in apropos, and, for the setting, in the namespace browser's list of every namespace.
+- [#93](https://github.com/nrepl/neorepl/pull/93): The REPL follows an error with what to try: for code naming something that isn't there, the name marked in the input and the requires, imports and corrected names that could fix it, numbered for `,fix N`, and for the first few other errors, `,pst` and `,stacktrace`, which the `hints` setting turns off.
 
 ### Changes
 
