@@ -99,8 +99,11 @@ When code names something that isn't there, the REPL marks the name in what
 you typed and lists what could fix it, each with the `,fix` that tries it:
 the requires and imports cider-nrepl 0.64 or babashka 1.13.230 finds for it,
 which `,fix` runs before the form again, and the names it's a typo of, which
-it runs the form with. After the first few other errors, it says where to
-see more of them.
+it runs the form with. Other errors get what they say past their message:
+an ex-info's data as fields, the arglists of a function called with the
+wrong number of arguments, a line on what the commonest errors tend to
+mean, like arithmetic getting nil, and the line of the project's code the
+error came from, and the first few get where to see more of them.
 
 ```
 user=> (join ", " ["a" "b"])

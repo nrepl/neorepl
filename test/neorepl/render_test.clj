@@ -197,6 +197,18 @@
     (testing "and nothing when the line's too wide"
       (is (nil? (render/marked-lines code token 15))))))
 
+(deftest detail-lines-test
+  (is (= ["  Arithmetic got nil"] (render/detail-lines {:explanation "Arithmetic got nil"} 80)))
+  (is (= ["  :reason    :card-expired" "  :order-id  1042"]
+         (render/detail-lines {:fields [[":reason" ":card-expired"] [":order-id" "1042"]]} 80)))
+  (is (= ["  #:a{:b 1}"] (render/detail-lines {:data "#:a{:b 1}"} 80)))
+  (is (= ["  user/f takes [a] [a b]"] (render/detail-lines {:name "user/f" :arglists ["[a]" "[a b]"]} 80)))
+  (testing "the lines of the code it came from, numbered, its own marked"
+    (is (= ["  /no/app.clj:10" "   9  (defn f []" "  10>   (/ 1 0))"]
+           (render/detail-lines {:frame {:path "/no/app.clj" :line 10} :lines [[9 "(defn f []"] [10 "  (/ 1 0))"]]} 80))))
+  (testing "cut to fit"
+    (is (= ["  :k  aaaa…"] (render/detail-lines {:fields [[":k" "aaaaaaaa"]]} 11)))))
+
 (deftest fix-text-test
   (is (= "(require '[my.lib :refer [mapp]])" (render/fix-text {:run "(require '[my.lib :refer [mapp]])"})))
   (is (= "map in place of mapp" (render/fix-text {:replace "map" :in-place-of "mapp"}))))

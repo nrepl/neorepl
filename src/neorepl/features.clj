@@ -1317,6 +1317,12 @@
        (throw (ex-info (str "The server couldn't do " (:op msg))
                        {:type ::failed :statuses (into #{} (mapcat :status) responses)}))))))
 
+(defn analyzes-errors?
+  "Whether the server has cider-nrepl's analyze-last-stacktrace, which
+  last-error asks rather than evaluating code."
+  [client]
+  (supports? client "analyze-last-stacktrace"))
+
 (defn inspects-errors?
   "Whether the server can inspect the causes of the error last-error found."
   [client]
