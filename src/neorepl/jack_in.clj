@@ -83,6 +83,12 @@
   (ex-info (str "No " (project-files tool-name) " in " (.getCanonicalPath (io/file dir)) " or its parents")
            {:type ::no-project}))
 
+(def ^:private attach-self
+  "What lets nREPL stop a thread on JDK 20 and later, for Ctrl-C and the
+  debugger's q, by loading its JVMTI agent, as CIDER's jack-in does, since
+  Thread.stop doesn't anymore."
+  "-Djdk.attach.allowAttachSelf")
+
 (defn command
   "The command line that starts an nREPL server with cider-nrepl for tool,
   on port, or any port without one, for the tools that take one. aliases are
@@ -92,6 +98,7 @@
   (let [{:keys [nrepl cider-nrepl piggieback]} versions]
     (case tool-name
       "clojure" (cond-> ["clojure"
+                         (str "-J" attach-self)
                          ;; The same every time, so the CLI's classpath cache
                          ;; keeps working.
                          "-Sdeps" (binding [*print-namespace-maps* false]
@@ -106,6 +113,7 @@
                          (str "-M" (str/join (map #(str ":" %) (concat aliases ["neorepl/jack-in"]))))]
                   port (conj "--port" (str port)))
       "lein" (concat ["lein"
+                      "update-in" ":jvm-opts" "conj" (pr-str attach-self) "--"
                       "update-in" ":dependencies" "conj" (str "[nrepl/nrepl " (pr-str nrepl) "]") "--"
                       "update-in" ":dependencies" "conj" (str "[cider/piggieback " (pr-str piggieback) "]") "--"
                       "update-in" ":repl-options:nrepl-middleware" "conj" "cider.piggieback/wrap-cljs-repl" "--"
