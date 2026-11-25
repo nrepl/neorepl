@@ -54,7 +54,9 @@
 (deftest command-test
   (let [{:keys [nrepl cider-nrepl piggieback]} jack-in/versions]
     (testing "the Clojure CLI, with the deps and an alias of its own"
-      (let [[clojure sdeps deps & more] (jack-in/command "clojure" {:aliases ["dev" "test"] :port 7888})]
+      (let [[clojure attach sdeps deps & more] (jack-in/command "clojure" {:aliases ["dev" "test"] :port 7888})]
+        (testing "letting nREPL stop threads on JDK 20 and later"
+          (is (= "-J-Djdk.attach.allowAttachSelf" attach)))
         (is (= ["clojure" "-Sdeps"] [clojure sdeps]))
         (is (= {:deps {'nrepl/nrepl {:mvn/version nrepl}
                        'cider/cider-nrepl {:mvn/version cider-nrepl}
@@ -69,6 +71,7 @@
           (is (= ["-M:dev:test:neorepl/jack-in" "--port" "7888"] more)))))
     (testing "Leiningen"
       (is (= ["lein"
+              "update-in" ":jvm-opts" "conj" "\"-Djdk.attach.allowAttachSelf\"" "--"
               "update-in" ":dependencies" "conj" (str "[nrepl/nrepl \"" nrepl "\"]") "--"
               "update-in" ":dependencies" "conj" (str "[cider/piggieback \"" piggieback "\"]") "--"
               "update-in" ":repl-options:nrepl-middleware" "conj" "cider.piggieback/wrap-cljs-repl" "--"

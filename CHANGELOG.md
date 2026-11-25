@@ -21,6 +21,7 @@
 ### Bug fixes
 
 - [#87](https://github.com/nrepl/neorepl/pull/87): `,reload` leaves `*1` as it was, rather than setting it to the REPL's namespace.
+- [#94](https://github.com/nrepl/neorepl/pull/94): Ctrl-C stops code that won't stop on JDK 20 and later in the servers `neorepl server` starts for the Clojure CLI and Leiningen, which get `-Djdk.attach.allowAttachSelf` for nREPL's agent.
 
 ## 0.5.1 (2026-11-05)
 
