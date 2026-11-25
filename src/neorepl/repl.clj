@@ -625,21 +625,35 @@
 
 (defn- hint
   "Prints what could fix the error evaluating code at place got, having
-  printed err, numbered for ,fix, and returns the fixes, or prints where
-  to see more of the error, for the first few errors, as :hinted, an atom,
-  counts them. Looking for fixes runs as a command does, through quietly,
-  so that Ctrl-C stops it."
+  printed err, numbered for ,fix, and returns the fixes, or else what the
+  error says past its message, and where to see more of it, for the first
+  few errors, as :hinted, an atom, counts them. Looking for all that runs
+  as a command does, through quietly, so that Ctrl-C stops it."
   [client place code err {:keys [hinted command-thread quietly width print-message]}]
-  (let [{:keys [token fixes]} (try
-                                (as-command command-thread #(quietly (fn [] (hints/suggest client place code err {}))))
-                                ;; They're only hints, which a server that
-                                ;; can't give them shouldn't get in the way of.
-                                (catch Exception _ nil))
+  (let [{:keys [token fixes details]}
+        (try
+          (as-command command-thread
+                      (fn []
+                        (quietly
+                         (fn []
+                           (or (hints/suggest client place code err {})
+                               ;; Two seconds between them, and only from the
+                               ;; server's analysis, rather than evaluating
+                               ;; code in a copy of the session at every error.
+                               (let [deadline (+ (System/currentTimeMillis) 2000)
+                                     left #(hash-map :timeout-ms (max 1 (- deadline (System/currentTimeMillis))))]
+                                 {:details (when (features/analyzes-errors? client)
+                                             (some->> (features/last-error client (:session place) (left))
+                                                      (hints/details client place (left))))}))))))
+          ;; They're only hints, which a server that can't give them
+          ;; shouldn't get in the way of.
+          (catch Exception _ nil))
         more? (and (empty? fixes) (< @hinted error-hints))
         lines (concat (when token (render/marked-lines code token (width)))
                       (when (seq fixes)
                         [(cli/indented-columns (map-indexed (fn [i fix] [(str ",fix " (inc i)) (render/fix-text fix)])
                                                             fixes))])
+                      (mapcat #(render/detail-lines % (width)) details)
                       (when more? [error-hint]))]
     (when more?
       (swap! hinted inc))

@@ -8,6 +8,7 @@
 - [#90](https://github.com/nrepl/neorepl/pull/90): `neorepl apropos --tooling` and the REPL's `tooling` setting keep the namespaces of nREPL, cider-nrepl and its libraries in apropos, and, for the setting, in the namespace browser's list of every namespace.
 - [#93](https://github.com/nrepl/neorepl/pull/93): The REPL follows an error with what to try: for code naming something that isn't there, the name marked in the input and the requires, imports and corrected names that could fix it, numbered for `,fix N`, and for the first few other errors, `,pst` and `,stacktrace`, which the `hints` setting turns off.
 - [#94](https://github.com/nrepl/neorepl/pull/94): `,break` has a function stop at each step, through cider-nrepl's debugger, as `#dbg` in the input does, with CIDER's keys at each breakpoint, `,breaks` to list what stops and `,unbreak` to take it out.
+- [#95](https://github.com/nrepl/neorepl/pull/95): Other errors in the REPL get what they say past their message: an ex-info's data as fields, the arglists of a function called with the wrong number of arguments, what the commonest errors tend to mean, and the line of the project's code they came from.
 
 ### Changes
 

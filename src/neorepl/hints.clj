@@ -1,9 +1,11 @@
 (ns neorepl.hints
-  "What to suggest after code fails for naming something that isn't there:
-  where the name is in the code, and the fixes to try, the requires and
-  imports cider-nrepl's resolve-missing and resolve-alias find for it and
-  the names completion has that it's a typo of."
-  (:require [clojure.string :as str]
+  "What to suggest after code fails: for naming something that isn't
+  there, where the name is in the code, and the fixes to try, the requires
+  and imports cider-nrepl's resolve-missing and resolve-alias find for it
+  and the names completion has that it's a typo of, and for the rest, what
+  the error has to say past its message."
+  (:require [clojure.java.io :as io]
+            [clojure.string :as str]
             [neorepl.features :as features]
             [neorepl.lexer :as lexer]))
 
@@ -209,3 +211,83 @@
                         (concat (alias-typos alias (found alias-names))
                                 (requires alias name (found aliases) (found missing))
                                 (name-typos sym alias bare dot (found names))))})))))
+
+(def ^:private explanations
+  "What the commonest errors tend to mean, by the class of the cause and
+  what its message has."
+  [["java.lang.ClassCastException" #"cannot be cast to class clojure\.lang\.IFn"
+    "A value that isn't a function got called, as the first in a list is"]
+   ["java.lang.ClassCastException" #"cannot be cast to class java\.lang\.Number"
+    "Arithmetic got a value that isn't a number"]
+   ["java.lang.IllegalArgumentException" #"Don't know how to create ISeq from"
+    "A sequence function got a value that isn't a collection"]])
+
+(defn- explanation
+  "What cause, as features/last-error has it, tends to mean, if it's one of
+  the commonest errors: arithmetic getting nil is a NullPointerException in
+  clojure.lang.Numbers."
+  [{:keys [class message stacktrace]}]
+  (or (some (fn [[c re text]] (when (and (= c class) (re-find re (str message))) text)) explanations)
+      (when (and (= "java.lang.NullPointerException" class)
+                 (some-> (first stacktrace) :name (str/starts-with? "clojure.lang.Numbers/")))
+        "Arithmetic got nil, as a key a map doesn't have gives")))
+
+(defn- fields
+  "The ex-data printed as data, a map's, as [key value] rows, each on a
+  line, a namespaced map's keys qualified, but for the :clojure.error/ keys
+  Clojure's compiler adds, which its message says already. Nil for
+  anything else."
+  [data]
+  (when-let [[_ ns body] (re-matches #"(?s)(?:#:([^\s{]+))?\{(.*)\}" (str/trim (str data)))]
+    (let [forms (lexer/forms body)
+          qualified #(if (and ns (re-matches #":[^:/]+" %)) (str ":" ns "/" (subs % 1)) %)]
+      (when (even? (count forms))
+        (into [] (comp (map (fn [[k v]] [(qualified k) (str/replace v #"\s*\n\s*" " ")]))
+                       (remove #(str/starts-with? (first %) ":clojure.error/")))
+              (partition 2 forms))))))
+
+(defn- source-lines
+  "The line of frame, one of the project's, in its file, and the one
+  before it, as [number text] pairs, or nil when this machine can't read
+  the file."
+  [{:keys [path line]}]
+  (when (and path line)
+    (try
+      (with-open [r (io/reader path)]
+        (let [from (max 1 (dec line))
+              found (vec (take (- (inc line) from) (drop (dec from) (line-seq r))))]
+          (when (= (- (inc line) from) (count found))
+            (mapv vector (range from (inc line)) found))))
+      (catch Exception _ nil))))
+
+(defn details
+  "What the error whose causes features/last-error found says past its
+  message, as a vector of maps: an :explanation of what the commonest
+  errors tend to mean, the :fields of a cause's ex-data, or its :data when
+  it's no map, the :arglists of the function an arity error is about, by
+  its :name, and the :lines of the project's code the error came from, its
+  :frame's. The arglists are info's where ctx says."
+  [client ctx opts causes]
+  (let [root (last causes)
+        [_ called] (re-find #"^Wrong number of args \(\d+\) passed to: (\S+)$" (str (:message root)))
+        ;; A var's, rather than a function's of no var, or babashka's
+        ;; interpreter's, which it names.
+        arglists (when (and called (re-matches #"[^/$]+/[^/$]+" called) (not (re-find #"--|/eval\d" called)))
+                   (try
+                     (:arglists (features/info client called ctx opts))
+                     (catch clojure.lang.ExceptionInfo _ nil)))
+        ;; The full path cider-nrepl has from the frame's URL, or the one
+        ;; babashka's has as its file, unlike the REPL's frames.
+        frame (some #(when-let [path (or (:path %) (when (some-> (:file %) io/file .isAbsolute) (:file %)))]
+                       (when (some #{"project"} (:flags %))
+                         (assoc % :path path)))
+                    (:stacktrace root))
+        lines (some-> frame source-lines)]
+    (vec (concat (when-let [text (explanation root)] [{:explanation text}])
+                 (for [{:keys [data]} causes
+                       :when data
+                       :let [rows (fields data)]
+                       :when (or (nil? rows) (seq rows))]
+                   (if rows {:fields rows} {:data data}))
+                 (when (seq arglists) [{:name called :arglists arglists}])
+                 (when lines [{:frame frame :lines lines}])))))

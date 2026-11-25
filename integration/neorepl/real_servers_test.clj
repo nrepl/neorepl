@@ -387,11 +387,14 @@
 (deftest hints-test
   (on-each-server
    (fn [server]
-     (let [{:keys [status out err]} (run-with server "(mapp inc [1])\n,fix 1\n(Instant/now)\n,fix 1\n" "repl")]
+     (let [{:keys [status out err]} (run-with server "(mapp inc [1])\n,fix 1\n(Instant/now)\n,fix 1\n(demo.core/boom 1)\n" "repl")]
        (is (= 0 status))
        (testing "the name code has a typo of"
          (is (str/includes? err "  ,fix 1  map in place of mapp\n"))
          (is (str/includes? out "user=> (2)\n")))
+       (testing "and what an error says past its message: its data, and the line of the project's code it came from"
+         (is (str/includes? err "\n  :x  1\n"))
+         (is (str/includes? err "\n  9>   (throw (ex-info \"boom\" {:x x})))\n")))
        ;; bb's before 1.13.230 has neither resolve-missing nor resolve-alias.
        (when-not (old-bb? server)
          (testing "and the import it needs"

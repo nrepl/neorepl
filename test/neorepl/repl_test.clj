@@ -1189,6 +1189,11 @@
             (is (screen #"Divide by zero.*\n  ,pst shows its stack trace, ,stacktrace browses it\nuser=> $")))
           (type "(/ 1 0)\r")
           (is (= 3 (count (re-seq #",pst shows" (screen #"Divide by zero.*\nuser=> $")))))))))
+  (testing "but nothing past the message from a server that doesn't analyze errors, rather than evaluating code at each"
+    (call-with-repl {:hints true}
+      (fn [type screen]
+        (type "(throw (ex-info \"boom\" {:a 1}))\r")
+        (is (screen #"boom.*\n  ,pst shows its stack trace, ,stacktrace browses it\nuser=> $")))))
   (testing "or neither, with them off"
     (call-with-repl {:hints true}
       (fn [type screen]

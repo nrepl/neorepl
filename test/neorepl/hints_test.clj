@@ -89,3 +89,44 @@
           (is (nil? (suggest "(/ 1 0)"))))
         (testing "for a name the code doesn't have, as when loading a file fails"
           (is (nil? (suggest "(load-file \"x.clj\")" "Syntax error compiling at (x.clj:1:1).\nUnable to resolve symbol: nope in this context\n"))))))))
+
+(deftest details-test
+  (with-client [client {:port *port*}]
+    (let [details #(hints/details client {:ns "user"} {} %)]
+      (testing "what the commonest errors tend to mean"
+        (is (= [{:explanation "Arithmetic got nil, as a key a map doesn't have gives"}]
+               (details [{:class "java.lang.NullPointerException" :message "Cannot invoke \"Object.getClass()\""
+                          :stacktrace [{:name "clojure.lang.Numbers/ops"}]}])))
+        (is (= [{:explanation "A value that isn't a function got called, as the first in a list is"}]
+               (details [{:class "java.lang.ClassCastException"
+                          :message "class java.lang.Long cannot be cast to class clojure.lang.IFn"}]))))
+      (testing "the ex-data of a map as fields"
+        (is (= [{:fields [[":reason" ":card-expired"] [":order-id" "1042"]]}]
+               (details [{:class "clojure.lang.ExceptionInfo" :message "Payment declined"
+                          :data "{:reason :card-expired,\n :order-id 1042}"}]))))
+      (testing "a namespaced map's keys qualified"
+        (is (= [{:fields [[":a/b" "1"] [":c/d" "2"]]}] (details [{:class "clojure.lang.ExceptionInfo" :data "#:a{:b 1, :c/d 2}\n"}]))))
+      (testing "without the keys of Clojure's compiler, however they're printed"
+        (is (= [] (details [{:class "clojure.lang.Compiler$CompilerException" :data "{:clojure.error/phase :print-eval-result}"}])))
+        (is (= [] (details [{:class "clojure.lang.Compiler$CompilerException" :data "#:clojure.error{:phase :macro-syntax-check}"}]))))
+      (testing "or as it is, for what's no map"
+        (is (= [{:data "#{1}"}] (details [{:class "clojure.lang.ExceptionInfo" :data "#{1}"}]))))
+      (testing "the arglists of the function an arity error is about"
+        (nrepl/request client {:op "eval" :code "(defn takes-two [a b] [a b])"} {})
+        (is (= [{:name "user/takes-two" :arglists ["[a b]"]}]
+               (details [{:class "clojure.lang.ArityException" :message "Wrong number of args (1) passed to: user/takes-two"}]))))
+      (testing "but not babashka's interpreter's function, which it names for a var's"
+        (is (= [] (details [{:class "clojure.lang.ArityException" :message "Wrong number of args (3) passed to: sci.impl.fns/fun/arity-1--1778"}]))))
+      (testing "the line of the project's code it came from"
+        (test-server/call-with-temp-dir
+         (fn [dir]
+           (let [file (test-server/spit-file dir "app.clj" "(ns app)\n(defn f []\n  (/ 1 0))\n")
+                 frame {:name "app$f/invokeStatic" :flags ["project" "clj"] :path (str file) :line 3}]
+             (is (= [{:frame frame :lines [[2 "(defn f []"] [3 "  (/ 1 0))"]]}]
+                    (details [{:class "java.lang.ArithmeticException" :message "Divide by zero"
+                               :stacktrace [{:name "clojure.lang.Numbers/divide" :flags ["java"]} frame]}])))
+             (testing "by its file, when babashka's gives the path, rather than the REPL's"
+               (is (= [{:frame (assoc frame :file (str file)) :lines [[2 "(defn f []"] [3 "  (/ 1 0))"]]}]
+                      (details [{:class "java.lang.ArithmeticException"
+                                 :stacktrace [{:name "user/fn" :file "NO_SOURCE_PATH" :line 1 :flags ["project"]}
+                                              (-> frame (dissoc :path) (assoc :file (str file)))]}])))))))))))

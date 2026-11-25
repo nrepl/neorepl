@@ -118,6 +118,14 @@
                      pieces
                      [[")"]]))))))
 
+(defn- fit
+  "s cut to width columns, an ellipsis ending what's cut, short of
+  splitting a surrogate pair."
+  [^String s width]
+  (if (< width (.codePointCount s 0 (count s)))
+    (str (subs s 0 (.offsetByCodePoints s 0 (max 0 (dec width)))) "…")
+    s))
+
 (defn apropos-text
   "apropos matches, a line each: the name and the first line of the doc.
   In width columns, the names take at most a third of them, a longer one
@@ -132,13 +140,12 @@
        (let [cap (max 20 (quot width 3))
              column (transduce (comp (map (comp count first)) (filter #(<= % cap))) max 0 rows)
              room (- width column 2)
-             fit #(if (and (> (count %) room) (pos? room)) (str (subs % 0 (dec room)) "…") %)
              pad #(str % (str/join (repeat (- column (count %)) " ")) "  ")]
          (str/join "\n" (for [[name doc] rows]
                           (cond
                             (or (str/blank? doc) (not (pos? room))) name
-                            (<= (count name) column) (str (pad name) (fit doc))
-                            :else (str name "\n" (pad "") (fit doc))))))))))
+                            (<= (count name) column) (str (pad name) (fit doc room))
+                            :else (str name "\n" (pad "") (fit doc room))))))))))
 
 (defn frame-text
   "A frame of a stack trace, from last-error, as Java prints it, after at."
@@ -234,6 +241,21 @@
   ([location] (location-text location (System/getProperty "user.dir")))
   ([{:keys [file line column]} dir]
    (str/join ":" (remove nil? [(some-> file str (relative dir)) line column]))))
+
+(defn detail-lines
+  "A detail of an error, as hints/details has it, as lines, indented and
+  cut to width."
+  [{:keys [explanation fields data name arglists frame lines]} width]
+  (map #(fit % width)
+       (cond
+         explanation [(str "  " explanation)]
+         fields (map #(str "  " %) (cli/columns fields))
+         data (data-lines data)
+         arglists [(str "  " name " takes " (str/join " " arglists))]
+         lines (let [digits (count (str (first (peek lines))))]
+                 (cons (str "  " (location-text {:file (:path frame) :line (:line frame)}))
+                       (for [[n text] lines]
+                         (str "  " (format (str "%" digits "d") n) (if (= n (:line frame)) "> " "  ") text)))))))
 
 (defn references-text
   "Cross-references, from features/references, a line each: the function's
