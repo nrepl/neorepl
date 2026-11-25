@@ -1307,6 +1307,31 @@
              (is (not (left "dbg.exits/mine")))
              (is (left "dbg.exits/theirs")))
            (features/instrument client "dbg.exits/theirs" {:ns "user"} nil {}))))))
+  (testing "a breakpoint on a thread of its own, which waits for ,stop"
+    (let [stop "(neorepl.test-server/break! \"(f x)\" [1] \"1\" [[\"x\" \"1\"]])"]
+      (call-with-repl {}
+        (fn [type screen]
+          (type ",stop\r")
+          (is (screen #"No breakpoint is waiting\nuser=> $"))
+          (type "#dbg (defn dbg-start [] 1)\r")
+          (screen #"#'user/dbg-start\nuser=> $")
+          (type (str "(def parked (future (Thread/sleep 200) [" stop " " stop "]))\r"))
+          (is (screen #"● user stopped at a breakpoint on a thread of its own, which waits: ,stop goes to it\n(?s).*user=> $"))
+          (type ",stop\r")
+          (is (screen #",stop\n● user\n  \(f x\)\n     \^\n  => 1\ndebug> $"))
+          (type "n")
+          (testing "and the ones after it"
+            (is (screen #"debug> next\n● user\n(?s).*debug> $")))
+          (type "c")
+          (is (screen #"debug> continue\nuser=> $"))
+          (type "@parked\r")
+          (is (screen #"\[\":next\" \":continue\"\]\nuser=> $"))
+          (testing "which go on when the REPL exits"
+            (type (str "(def left (future (Thread/sleep 200) " stop "))\r"))
+            ;; The screen has the note before too.
+            (screen #"(?s)\(def left .*stopped at a breakpoint on a thread of its own.*user=> $")))))
+    (with-client [client {:port *port*}]
+      (is (= "\":continue-all\"" (some :value (nrepl/request client {:op "eval" :code "(deref user/left 5000 :timeout)"} {:timeout-ms 10000}))))))
   (testing "or #dbg in the input"
     (call-with-repl {}
       (fn [type screen]
