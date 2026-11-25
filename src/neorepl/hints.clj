@@ -7,7 +7,8 @@
   (:require [clojure.java.io :as io]
             [clojure.string :as str]
             [neorepl.features :as features]
-            [neorepl.lexer :as lexer]))
+            [neorepl.lexer :as lexer]
+            [neorepl.nrepl :as nrepl]))
 
 (def ^:private unresolved-patterns
   "What Clojure's compiler and babashka say when code names something that
@@ -211,6 +212,24 @@
                         (concat (alias-typos alias (found alias-names))
                                 (requires alias name (found aliases) (found missing))
                                 (name-typos sym alias bare dot (found names))))})))))
+
+(defn with-suggestions
+  "result, of evaluating code in session, with the :suggestions suggest
+  finds for it, when it's an eval-error it finds fixes for, where the code
+  ran: in ns, or the session's namespace. The lookups get two seconds,
+  or till the :deadline in opts, if that's sooner."
+  [client session ns code {:keys [status err] :as result} {:keys [deadline]}]
+  (let [timeout-ms (cond-> 2000 deadline (min (- deadline (System/currentTimeMillis))))]
+    (if-let [fixes (when (and (= "eval-error" status) (pos? timeout-ms) (unresolved err))
+                     (try
+                       (some-> (suggest client {:session session :ns (or ns (:ns result) (nrepl/evaluation-ns client session))}
+                                        code err {:timeout-ms timeout-ms})
+                               :fixes
+                               not-empty)
+                       ;; They're only suggestions.
+                       (catch Exception _ nil)))]
+      (assoc result :suggestions fixes)
+      result)))
 
 (def ^:private explanations
   "What the commonest errors tend to mean, by the class of the cause and

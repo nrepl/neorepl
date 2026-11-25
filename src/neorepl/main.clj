@@ -6,6 +6,7 @@
             [neorepl.discovery :as discovery]
             [neorepl.evaluation :as evaluation]
             [neorepl.features :as features]
+            [neorepl.hints :as hints]
             [neorepl.jack-in :as jack-in]
             [neorepl.json :as json]
             [neorepl.lexer :as lexer]
@@ -326,7 +327,8 @@ when it times out.")
   "Runs (run client session opts) on the server options point at, in the
   session they name, where opts are evaluation/evaluate's, prints the result
   in the format they ask for, with (text result) after the output for text,
-  if it says anything, and returns the exit status."
+  if it says anything, and on stderr, its message and the :suggestions it
+  has, and returns the exit status."
   [run {:keys [session timeout max-output format] :as options} {:keys [dir sessions-file]} text]
   (with-client options dir
     (fn [client]
@@ -346,7 +348,8 @@ when it times out.")
                 (when-not (or (empty? out) (str/ends-with? out "\n"))
                   (newline))
                 (println text))
-              (some-> message warn))
+              (some-> message warn)
+              (run! warn (render/suggestion-lines (:suggestions result))))
           (emit format result))
         (case status "ok" 0 "timeout" 124 "disconnected" 3 1)))))
 
@@ -377,7 +380,10 @@ when it times out.")
        neorepl eval [options] -f FILE
        neorepl eval [options] -"
    "Evaluates CODE, the contents of FILE or, with -, standard input. Output is
-printed as it arrives and each value on a line of its own.
+printed as it arrives and each value on a line of its own. When the code
+names something that isn't there, the fixes to try come after the error:
+the requires and imports cider-nrepl finds for it, and the names it's a typo
+of, as suggestions in edn and json.
 
 With --ns, the code goes into the namespace NS, and the session stays in its
 own. With --line, only the top-level form of FILE that line N, column COL is
@@ -449,8 +455,11 @@ reload only starts noting what changes."
         ;; input.
         evaluate-options (when (= ["-"] args)
                            {:read-line (constantly nil)})]
-    (report-run #(features/evaluate-in-ns %1 (assoc msg :session %2) ns ns-msg
-                                          (merge %3 evaluate-options {:reload? reload}))
+    (report-run (fn [client session opts]
+                  (features/evaluate-in-ns client (assoc msg :session session) ns ns-msg
+                                           (merge opts evaluate-options
+                                                  {:reload? reload
+                                                   :then (partial hints/with-suggestions client session ns (:code msg))})))
                 options
                 ctx
                 (constantly nil))))

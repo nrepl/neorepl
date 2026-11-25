@@ -78,6 +78,15 @@
       (is (= 1 status))
       (is (= "eval-error" (:status result)))
       (is (= "class java.lang.ArithmeticException" (:ex result)))))
+  (testing "the fixes to try for a name that isn't there"
+    (let [{:keys [status err]} (run "(mapp inc [1])")]
+      (is (= 1 status))
+      (is (str/includes? err "neorepl: A fix to try: map in place of mapp\n")))
+    (testing "as suggestions in edn and json, with the code to evaluate for each"
+      (is (= {:replace "map" :in-place-of "mapp" :input "(map inc [1])"}
+             (first (:suggestions (edn/read-string (:out (run "--format" "edn" "(mapp inc [1])")))))))
+      (is (= {:replace "map" :in-place-of "mapp" :input "(map inc [1])"}
+             (first (:suggestions (json/read-str (:out (run "--format" "json" "(mapp inc [1])")))))))))
   (testing "json"
     (let [{:keys [status out]} (run "--format" "json" "(+ 1 2) \"s\"")]
       (is (zero? status))

@@ -395,6 +395,9 @@
        (testing "and what an error says past its message: its data, and the line of the project's code it came from"
          (is (str/includes? err "\n  :x  1\n"))
          (is (str/includes? err "\n  9>   (throw (ex-info \"boom\" {:x x})))\n")))
+       (testing "and neorepl eval's, as suggestions"
+         (is (= {:replace "map" :in-place-of "mapp" :input "(map inc [1])"}
+                (first (:suggestions (json/read-str (:out (run server "eval" "--format" "json" "(mapp inc [1])"))))))))
        ;; bb's before 1.13.230 has neither resolve-missing nor resolve-alias.
        (when-not (old-bb? server)
          (testing "and the import it needs"

@@ -564,6 +564,11 @@
   (with-client [client {:port *port*}]
     (let [session (nrepl/clone-session client)
           evaluate #(features/evaluate-in-ns client {:op "eval" :session session :code %1} %2 %3 (merge {:collect? true} %4))]
+      (testing "with :then getting the code's own result, rather than loading the namespace's"
+        (let [then (fn [result {:keys [deadline]}] (assoc result :then (boolean deadline)))]
+          (is (= true (:then (evaluate "1" nil nil {:then then :timeout 5}))))
+          (is (= "eval-error" (:status (evaluate "1" "no.such.namespace.at.all" nil {:then then}))))
+          (is (not (contains? (evaluate "1" "no.such.namespace.at.all" nil {:then then}) :then)))))
       (testing "in the namespace, loaded first"
         (is (= {:status "ok" :values ["{:a 1}"]}
                (select-keys (evaluate "(first (clojure.data/diff {:a 1} {}))" "clojure.data" nil {}) [:status :values])))
