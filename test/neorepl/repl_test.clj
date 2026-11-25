@@ -1197,6 +1197,62 @@
         (type "(/ 1 0)\r")
         (is (screen #"Divide by zero.*\nuser=> $"))))))
 
+(deftest debugger-test
+  (let [;; Which the debugger answers once #dbg has the REPL start it.
+        stop (str "#dbg (defn dbg-start [] 1)\r"
+                  "(neorepl.test-server/break! \"(defn f [x]\\n  (* x 2))\" [3 1] \"3\" [[\"x\" \"3\"]])\r")]
+    (testing "a breakpoint: what it's in, the form marked on its line, the value, and keys that act at once"
+      (call-with-repl {}
+        (fn [type screen]
+          (type stop)
+          (is (screen #"\n● user/f\n    \(\* x 2\)\)\n       \^\n  => 3\ndebug> $"))
+          (type "l")
+          (is (screen #"debug> locals\n  x  3\ndebug> $"))
+          (type "?")
+          (is (screen #"  n  Go to the next step\n(?s).*debug> $"))
+          (type "n")
+          (is (screen #"debug> next\n\":next\"\nuser=> $")))))
+    (testing "Enter for the next step, and ( for an expression with the locals"
+      (call-with-repl {}
+        (fn [type screen]
+          (type stop)
+          (screen #"debug> $")
+          (type "\r")
+          (is (screen #"debug> next\n\":next\"\nuser=> $"))
+          (type stop)
+          (screen #"debug> $")
+          (type "(")
+          (is (screen #"eval> \($"))
+          (type "inc x)\r")
+          (is (screen #"\[\":eval\" \"\(inc x\)\"\]\nuser=> $")))))
+    (testing "Ctrl-C to quit"
+      (call-with-repl {}
+        (fn [type screen]
+          (type stop)
+          (screen #"debug> $")
+          (type "\u0003")
+          (is (screen #"\":quit\"\nuser=> $"))))))
+  (testing ",break, ,breaks and ,unbreak, which start the debugger"
+    (call-with-temp-dir
+     (fn [dir]
+       (let [file (test-server/spit-file dir "dbg/repl.clj" "(ns dbg.repl)\n\n(defn g [x]\n  (* x 2))\n")]
+         (call-with-repl {}
+           (fn [type screen]
+             (type (str "(load-file " (pr-str (str file)) ")\r"))
+             (screen #"#'dbg\.repl/g\nuser=> $")
+             (type ",break dbg.repl/g\r")
+             (is (screen #"The server's breakpoints stop in this REPL now.*\ndbg\.repl/g stops at each step now\nuser=> $"))
+             (type ",breaks\r")
+             (is (re-find #"(?m)^dbg\.repl/g$" (screen #",breaks\n(?s).*user=> $")))
+             ;; Every one, those of the tests before included.
+             (type ",unbreak\r")
+             (is (screen #",unbreak\n(?s).*dbg\.repl/g runs without stopping again\n(?s).*user=> $"))))))))
+  (testing "or #dbg in the input"
+    (call-with-repl {}
+      (fn [type screen]
+        (type "#dbg (defn dbg-tagged [] 1)\r")
+        (is (screen #"The server's breakpoints stop in this REPL now(?s).*#'user/dbg-tagged\nuser=> $"))))))
+
 (deftest edit-test
   ;; The editor's a shell script.
   (when-not (test-server/windows?)

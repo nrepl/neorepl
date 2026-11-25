@@ -823,6 +823,16 @@
       (is (str/includes? (repl "(/ 1 0)\n,pst\n") "user=> java.lang.ArithmeticException: Divide by zero\n"))
       (is (str/includes? (repl "(/ 1 0)\n,stacktrace\n") "user=> java.lang.ArithmeticException: Divide by zero\n"))
       (is (= "user=> No error yet\nuser=> \n" (repl ",stacktrace\n")))
+      (testing "a breakpoint, its commands taken as lines"
+        (let [{:keys [out]} (run-in *dir* (str "#dbg (defn dbg-start [] 1)\n"
+                                               "(neorepl.test-server/break! \"(inc x)\" [1] \"1\" [[\"x\" \"1\"]])\n"
+                                               "l\n(+ x 10)\n"
+                                               "(neorepl.test-server/break! \"(inc x)\" [1] \"1\" [])\nnext\n")
+                                    "repl" "-p" (str *port*))]
+          (is (str/includes? out "user=> ● user\n  (inc x)\n       ^\n  => 1\ndebug> "))
+          (is (str/includes? out "debug>   x  1\ndebug> [\":eval\" \"(+ x 10)\"]\nuser=> "))
+          (testing "or the command's name"
+            (is (str/includes? out "debug> \":next\"\nuser=> ")))))
       (testing "the fixes after an error, on stderr"
         (let [{:keys [out err]} (run-in *dir* "(mapp inc [1])\n,fix 1\n" "repl" "-p" (str *port*))]
           (is (str/includes? err "  ,fix 1  map in place of mapp\n"))

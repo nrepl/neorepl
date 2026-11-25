@@ -25,6 +25,18 @@
         (is (= 2000 (count err)))
         (is (str/ends-with? err "x end"))))))
 
+(deftest on-start-test
+  (with-client [client {:port *port*}]
+    (let [here (atom nil)
+          ran (promise)]
+      (evaluation/evaluate client {:op "eval" :code "(Thread/sleep 300) 1"}
+                           {:on-start #(reset! here %)
+                            :on-send (fn [_ _] (future (Thread/sleep 50) (@here #(deliver ran (Thread/currentThread)))))})
+      (testing "running what it's given on the thread waiting for the evaluation"
+        (is (= (Thread/currentThread) (deref ran 1000 nil))))
+      (testing "until it's done waiting"
+        (is (false? (boolean (@here (fn [])))))))))
+
 (deftest forms-test
   (with-client [client {:port *port*}]
     (let [session (nrepl/clone-session client)

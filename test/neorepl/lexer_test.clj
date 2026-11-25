@@ -413,3 +413,28 @@
       (is (= ["a" "b"] (map first (ns-forms "(ns a)\n(def x 1)\n(ns b)")))))
     (testing "not the ones that only look like one"
       (is (empty? (ns-forms "(nsa b)\n'(ns c)\n#_(ns d)\n(ns)\n(ns \"e\")\n(def ns 1)\n(foo (ns f))"))))))
+
+(deftest coordinate-span-test
+  (let [at #(some->> (lexer/coordinate-span %1 %2) (apply subs %1))
+        code "(defn f [x]\n  ;; a comment\n  (let [y (inc x)\n        m {:a y}]\n    (* y #_ignored 2)))"]
+    (testing "the forms the reader reads, past comments and what #_ discards"
+      (is (= "x" (at code [3 1 1 1])))
+      (is (= "(inc x)" (at code [3 1 1])))
+      (is (= "2" (at code [3 2 2])))
+      (is (= code (at code []))))
+    (testing "a map's keys and values, in order"
+      (is (= "y" (at code [3 1 3 1]))))
+    (testing "as the reader reads quotes, derefs, #(...) and metadata"
+      (let [code "(map #(* % @a) '(1 2) ^:m [x])"]
+        (is (= "a" (at code [1 2 2 1])))
+        (is (= "(1 2)" (at code [2 1])))
+        (is (= "[x]" (at code [3])))))
+    (testing "and tags, which babashka's debugger leaves in"
+      (is (= "x" (at "#dbg\n(defn f [x] (inc x))" [3 1]))))
+    (testing "the branch a reader conditional takes, or none, or what it splices"
+      (is (= "2" (at "(f #?(:cljs 1 :clj (inc 2)))" [1 1])))
+      (is (= "x" (at "(f #?(:cljs 1) x)" [1])))
+      (is (= "c" (at "(g #?@(:clj [a b]) c)" [3]))))
+    (testing "nothing past what's there"
+      (is (nil? (at code [9])))
+      (is (nil? (at code [3 1 1 1 0]))))))

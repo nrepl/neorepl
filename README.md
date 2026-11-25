@@ -312,6 +312,39 @@ neorepl eval '(my.app/handler {:uri "/"})'
 neorepl untrace
 ```
 
+`,break` has a function stop at each step, through cider-nrepl's debugger,
+CIDER's: it evaluates the function's source again with `#dbg` in front, the
+file's as it is now, which `#dbg` or `#break` typed in front of a form does
+too. When an evaluation gets there, the REPL shows the form it stopped at,
+marked on its line, and its value, and the keys act at once: `n` for the
+next step, `i` and `o` to step in and out, `c` to go on to the next
+breakpoint, `l` for the locals, `e` or `(` for an expression evaluated with
+them, `j` for one to return in place of the form, `p` to inspect the value,
+`q` to stop, and `?` for the rest. Enter repeats the last step. Without a
+terminal they're lines. `,breaks` lists what stops and `,unbreak` evaluates
+the source again without `#dbg`. A server's debugger has one client, the
+last to start it, so CIDER's stops getting the breakpoints once the REPL
+starts it, and only an evaluation of the REPL's stops: a breakpoint on
+another thread, like an HTTP handler's, goes on. `q` takes JDK 19 or older,
+or `-Djdk.attach.allowAttachSelf`, which the servers `neorepl server`
+starts have, for nREPL to stop the evaluation.
+
+```
+user=> ,break demo.cart/line-total
+The server's breakpoints stop in this REPL now, as its debugger answers one client, the last to start it
+demo.cart/line-total stops at each step now
+user=> (demo.cart/total [{:price 3 :qty 4}])
+● demo.cart/line-total  src/demo/cart.clj:5
+    (* price qty))
+       ^^^^^
+  => 3
+debug> locals
+  price  3
+  qty    4
+debug> continue
+12
+```
+
 `,profile` times every call of a function, or of every function in a
 namespace, and without a name shows what it measured: how many calls each
 function had, and how long they took, on average, in all, at the shortest

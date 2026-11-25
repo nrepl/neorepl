@@ -4,6 +4,7 @@
             [clojure.string :as str]
             [neorepl.browser :as browser]
             [neorepl.cli :as cli]
+            [neorepl.debugger :as debugger]
             [neorepl.editor :as editor]
             [neorepl.evaluation :as evaluation]
             [neorepl.features :as features]
@@ -72,7 +73,7 @@
                      thread))}))
 
 (declare edit enter-ns switch-session inspect inspect-tapped run-tests browse-error autoreload change-setting
-         browse-specs fix)
+         browse-specs fix break breaks unbreak)
 
 (def ^:private commands
   "The REPL's commands, the CIDER way: a comma, which Clojure reads as
@@ -93,6 +94,13 @@
             :run (fn [state _] (browse-error state))}
            {:name "fix" :arg "N" :help "Try fix N of the ones the last error listed"
             :run #(fix %1 %2)}
+           {:name "break" :arg "SYM" :help "Stop at each step of SYM, evaluating its source again with #dbg"
+            :run #(break %1 %2)}
+           {:name "breaks" :help "List the functions that stop at each step"
+            :run (fn [state _] (breaks state))}
+           {:name "unbreak" :arg "SYM" :optional? true
+            :help "Stop stopping in SYM, or in every function that does, evaluating its source again"
+            :run #(unbreak %1 %2)}
            {:name "edit" :arg "SYM" :optional? true
             :help "Open where SYM, or this namespace, is defined in your EDITOR"
             :run #(edit %1 %2)}
@@ -318,6 +326,55 @@
     (out (if-let [found (seq @fixes)]
            (str "Usage: ,fix N, N being 1" (when (next found) (str " to " (count found))))
            "No fixes to try: the last evaluation's error listed none"))))
+
+(def ^:private no-debugger
+  "The debugger takes cider-nrepl, or babashka 1.13.230 or later, on the server")
+
+(def ^:private nothing-breaks
+  "Nothing stops at each step")
+
+(defn- instrument-text
+  "Has the debugger stop at each step of the function sym names, or stop
+  that, unless on?, as features/instrument does, calling done once it has,
+  and says so, or why not."
+  [{:keys [client] :as state} sym on? done]
+  (try
+    (let [name (features/instrument client sym state on? {})]
+      (done)
+      (str name (if on? " stops at each step now" " runs without stopping again")))
+    (catch clojure.lang.ExceptionInfo e
+      (when (= ::nrepl/disconnected (:type (ex-data e)))
+        (throw e))
+      (ex-message e))))
+
+(defn- break
+  "Has the debugger stop at each step of the function sym names, starting
+  it, with the REPL's :debugger function, once that's done. Returns what
+  to print, as command-output does."
+  [{:keys [client debugger] :as state} sym]
+  (if (features/debugger? client)
+    (out (instrument-text state sym true debugger))
+    (out no-debugger)))
+
+(defn- breaks
+  "Lists the functions the debugger stops in, as break has them do. Returns
+  what to print, as command-output does."
+  [{:keys [client]}]
+  (if (features/debugger? client)
+    (out (or (some->> (features/instrumented client {}) seq (str/join "\n"))
+             nothing-breaks))
+    (out no-debugger)))
+
+(defn- unbreak
+  "Has the function sym names run without stopping again, or without sym,
+  every one the debugger stops in. Returns what to print, as
+  command-output does."
+  [{:keys [client] :as state} sym]
+  (cond
+    (not (features/debugger? client)) (out no-debugger)
+    sym (out (instrument-text state sym false (fn [])))
+    :else (out (or (some->> (features/instrumented client {}) seq (map #(instrument-text state % false (fn []))) (str/join "\n"))
+                   nothing-breaks))))
 
 (defn- show-inspector
   "Shows the inspector's view, the lines (view page-size) returns, with a
@@ -550,6 +607,14 @@
       ;; In case Ctrl-C came after it was done.
       (Thread/interrupted))))
 
+(defn- debugging?
+  "Whether code has a tag that has cider-nrepl's debugger instrument it."
+  [code]
+  (boolean (and (str/includes? code "#")
+                (some #(and (= :reader-macro (:type %))
+                            (#{"#dbg" "#dbg!" "#break" "#break!"} (lexer/text code %)))
+                      (lexer/tokenize code)))))
+
 (def ^:private error-hints
   "How many errors get the hint saying where to see more of them."
   3)
@@ -621,6 +686,13 @@
         ;; errors got the hint saying where to see more of them.
         fixes (atom nil)
         hinted (atom 0)
+        ;; What has the thread waiting for the evaluation that's running do
+        ;; something, as evaluation/evaluate's :on-start gives it, the
+        ;; session neorepl's debugger answers in, once it's started, and
+        ;; what the debugger last did.
+        here (atom nil)
+        debug-session-atom (atom nil)
+        debug-state (atom {})
         ;; The subscription to trace events, once something's traced.
         traces (atom nil)
         ;; Without one, the server prints trace events, so failing to get
@@ -649,6 +721,8 @@
         ;; evaluation/evaluate's, after reloading what changed when it's
         ;; reloading, and returns the result after printing its message.
         evaluate (fn [session run]
+                   ;; What the debugger did is the evaluation's.
+                   (reset! debug-state {})
                    (let [run (if (:autoreload @settings)
                                ;; Nothing to reload for ClojureScript.
                                #(or (let [failed (features/reload-changed client session %)]
@@ -660,6 +734,7 @@
                            (quietly
                             (fn []
                               (run {:on-send #(reset! running {:id %1 :interrupt %2})
+                                    :on-start #(reset! here %)
                                     ;; It's not dying after all, so what it says
                                     ;; from then on is worth seeing.
                                     :on-interrupt-failed
@@ -675,7 +750,8 @@
                                     :read-line #(if (= @interrupted (:id @running)) :interrupted (read-line))
                                     :collect? false})))
                            (finally
-                             (reset! running nil)))]
+                             (reset! running nil)
+                             (reset! here nil)))]
                      ;; The Ctrl-C that stopped the wait marked it interrupted again.
                      (when (= "stopped" status)
                        (reset! interrupted nil))
@@ -685,7 +761,37 @@
                      (when (= "disconnected" status)
                        (throw (ex-info message {:type ::nrepl/disconnected})))
                      (some-> message print-message)
-                     result))]
+                     result))
+        ;; What the debugger says, answered on the thread waiting for the
+        ;; evaluation, which reads the input. A breakpoint on a thread no
+        ;; evaluation of the REPL's is waiting on goes on, since the REPL's
+        ;; reading code then.
+        on-debugger (fn [debug-session debug-io response]
+                      (let [note #(send-off late (fn [_] (print-response (out %))))
+                            run @here]
+                        (cond
+                          ;; Another client started the server's debugger.
+                          (nrepl/done? response)
+                          (when (compare-and-set! debug-session-atom debug-session nil)
+                            (note "The server's breakpoints stop in another client now"))
+
+                          (not (and run (run #(debugger/handle client debug-session response debug-io debug-state))))
+                          (when (debugger/let-go client debug-session response)
+                            (note "A breakpoint stopped a thread the REPL isn't evaluating on, which goes on")))))
+        ;; The session the debugger answers in, starting it the first time,
+        ;; or nil when the server has none.
+        debugger (fn []
+                   (when (features/debugger? client)
+                     (locking debug-session-atom
+                       (or @debug-session-atom
+                           (let [debug-session (nrepl/clone-session client session)
+                                 debug-io (assoc io :inspect-lines
+                                                 (fn [lines ns]
+                                                   (print-response (show-inspector (assoc io :client client :session debug-session :ns ns)
+                                                                                   (constantly lines)))))]
+                             (features/start-debugger client debug-session (partial on-debugger debug-session debug-io))
+                             (print-message "The server's breakpoints stop in this REPL now, as its debugger answers one client, the last to start it")
+                             (reset! debug-session-atom debug-session))))))]
     ;; Late output comes on the client's reader thread, which mustn't wait
     ;; for the terminal: it has the responses lookups are waiting for.
     ;; So do trace events, and taps, and what the server prints itself,
@@ -719,7 +825,10 @@
             (try
               (features/unsubscribe-taps client subscription)
               (catch Exception _)))
-          (when-let [session (when (realized? forwarding) @forwarding)]
+          ;; Leaving the debugger first, so it's not taken for another
+          ;; client starting it.
+          (doseq [session [(when (realized? forwarding) @forwarding) (first (reset-vals! debug-session-atom nil))]
+                  :when session]
             (try
               (nrepl/close-session client session)
               (catch Exception _))))
@@ -739,7 +848,7 @@
                output (when name
                         (as-command command-thread
                                     #(command-output (merge io place {:client client :evaluate (partial evaluate session)
-                                                                      :test-errors test-errors :fixes fixes
+                                                                      :test-errors test-errors :fixes fixes :debugger debugger
                                                                       :show-traces show-traces :hide-traces hide-traces
                                                                       :taps taps :tapped tapped :own own :quietly quietly})
                                                      name arg)))]
@@ -751,11 +860,13 @@
                                (some->> [(:input output) more] (remove nil?) seq (str/join "\n"))
                                nil))
              :else
-             (let [started (System/nanoTime)
+             (let [_ (when (and (nil? @debug-session-atom) (debugging? code))
+                       (debugger))
+                   started (System/nanoTime)
                    result (evaluate session #(evaluation/evaluate client (eval-msg session code (width) @settings) %))
                    ms (quot (- (System/nanoTime) started) 1000000)
                    place (assoc place :ns (or (:ns result) ns))]
-               (reset! fixes (when (and (= "eval-error" (:status result)) (:hints @settings))
+               (reset! fixes (when (and (= "eval-error" (:status result)) (:hints @settings) (not (:quit @debug-state)))
                                (hint client place code (:err result)
                                      (assoc io :hinted hinted :command-thread command-thread :quietly quietly))))
                (recur place nil {:status (:status result) :ms ms})))))))))
@@ -780,6 +891,13 @@
           (str/join "\n" lines)))
       (when (seq lines)
         (str/join "\n" lines)))))
+
+(defn- prompted-line
+  "A line read from *in* after printing prompt."
+  [prompt]
+  (print prompt)
+  (flush)
+  (read-line))
 
 (defn- echoes-ctrl-c?
   "Whether standard input is a terminal that echoes the ^C that interrupts,
@@ -825,6 +943,14 @@
                                       (print-response)
                                       code))
                        :read-line read-line
+                       ;; For the debugger: a key, Enter, or an expression.
+                       :read-key #(when-let [line (some-> (prompted-line %) str/trim)]
+                                    (case (count line)
+                                      0 :enter
+                                      1 line
+                                      [:expression line]))
+                       :read-form (fn [prompt _] (not-empty (prompted-line prompt)))
+                       :print-line println
                        :width (constantly 80)
                        :print-response print-response
                        :print-message #(binding [*out* *err*]
@@ -834,6 +960,13 @@
       (newline)
       (finally
         (Signal/handle (Signal. "INT") previous)))))
+
+(defn- line-printer
+  "A function printing a line of text on editor, in the style k names, on a
+  line of its own."
+  [editor k]
+  #(do (editor/fresh-line editor)
+       (editor/print-text editor k (str % "\n"))))
 
 (defn- printer
   "A response handler printing output and values on editor."
@@ -947,13 +1080,19 @@
                                    (if (= ::editor/interrupted line)
                                      (do (interrupt) :interrupted)
                                      line))
+                     ;; For the debugger.
+                     :read-key #(do (editor/fresh-line editor)
+                                    (editor/print-text editor :notice %)
+                                    (editor/read-key editor))
+                     :read-form (partial editor/read-form editor)
+                     :echo #(editor/print-text editor :notice (str % "\n"))
+                     :print-line (line-printer editor nil)
                      :width #(editor/width editor)
                      ;; What lists get fitted to, which the plain REPL keeps whole.
                      :columns #(editor/width editor)
                      :height #(editor/height editor)
                      :print-response (printer editor)
-                     :print-message #(do (editor/fresh-line editor)
-                                         (editor/print-text editor :notice (str % "\n")))
+                     :print-message (line-printer editor :notice)
                      :suspended #(editor/suspended editor %)
                      :quietly #(editor/quietly editor %)
                      :browse (partial browser/browse editor)))))

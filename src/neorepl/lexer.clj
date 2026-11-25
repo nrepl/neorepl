@@ -426,6 +426,70 @@
       (= :open-string (:type (peek tokens))) {:error :open-string :open (peek tokens)}
       (next frames) {:error :unclosed :open (:open (second frames))})))
 
+(defn- read-form
+  "The form that starts at the token at index i of tokens, s's, the way the
+  reader sees it, as [form next]: a map with the :start and :end of its
+  text and its :kind, with the :children of a #(...) :fn or another :coll,
+  or the :inner form of a :wrap, a quote, deref or var, and the index of
+  the token after it. Comments and what #_ discards don't count, metadata
+  and tags leave the form they go on as it is, and a reader conditional is
+  the branch Clojure's takes, or a :splice of its forms for #?@. With no
+  form left before a closer, or the end, [nil index-of-the-closer]."
+  [s tokens i]
+  (let [{:keys [type start end] :as token} (get tokens i)
+        t (some->> token (text s))]
+    (case type
+      (nil :close) [nil i]
+      :comment (recur s tokens (inc i))
+      :discard (let [[_ j] (read-form s tokens (inc i))] (recur s tokens j))
+      :macro-char (let [[inner j] (read-form s tokens (inc i))]
+                    (cond
+                      ;; The metadata, which goes on the form after it.
+                      (= "^" t) (read-form s tokens j)
+                      inner [{:kind :wrap :start start :end (:end inner) :inner inner} j]
+                      :else [nil j]))
+      :reader-macro (if (#{"#?" "#?@"} t)
+                      (let [[{:keys [children]} j] (read-form s tokens (inc i))
+                            branch (some (fn [[k v]] (when (#{":clj" ":default"} (text s k)) v)) (partition 2 children))]
+                        (cond
+                          (nil? branch) (read-form s tokens j)
+                          (= "#?" t) [branch j]
+                          :else [{:kind :splice :children (:children branch)} j]))
+                      ;; Tags, and a namespaced map's #:ns, go on the form after.
+                      (recur s tokens (inc i)))
+      :open (loop [j (inc i)
+                   children []]
+              (let [[child k] (read-form s tokens j)]
+                (if child
+                  (recur k (if (= :splice (:kind child)) (into children (:children child)) (conj children child)))
+                  (let [close (get tokens k)]
+                    [{:kind (if (= "#(" t) :fn :coll)
+                      :start start
+                      :end (if close (:end close) (count s))
+                      :children children}
+                     (if close (inc k) k)]))))
+      [{:kind :atom :start start :end end} (inc i)])))
+
+(defn coordinate-span
+  "Where the form at coor is in the first form in s, as [start end]: coor
+  is a vector of indexes into the forms each holds, the way the reader
+  reads them, as cider-nrepl's debugger has them, so a quote, deref or var
+  holds its form second, and a #(...) its body third. Nil when s has
+  nothing there."
+  [s coor]
+  (let [tokens (:tokens (lex s))]
+    (loop [form (first (read-form s tokens 0))
+           [i & more :as coor] coor]
+      (cond
+        (nil? form) nil
+        (empty? coor) [(:start form) (:end form)]
+        :else (recur (case (:kind form)
+                       :wrap (when (= 1 i) (:inner form))
+                       :fn (when (= 2 i) (assoc form :kind :coll))
+                       :coll (get (:children form) i)
+                       nil)
+                     more)))))
+
 (defn position
   "The line and column, both counting from 1, of index in s. Columns count
   characters the way editors do, with surrogate pairs as one."

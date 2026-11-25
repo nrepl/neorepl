@@ -465,6 +465,16 @@
                   form)))))))
     (catch Exception _ nil)))
 
+(defn- source-of
+  "The source of the var sym names where ctx says, the one info found, as
+  source has it."
+  [client sym ctx opts {:keys [file line column class]}]
+  ;; A Java class's source isn't a form.
+  (when-not class
+    (or (when (and file line)
+          (form-at file line column))
+        (eval-in client (:ns ctx) ['clojure.repl] "(clojure.repl/source-fn (symbol %s))" [sym] opts))))
+
 (defn source
   "The source of the var sym names where ctx says, or nil when it can't be
   found: read from the file and line info finds, as CIDER does, which works
@@ -473,12 +483,7 @@
   files on the server's classpath."
   ([client sym ctx] (source client sym ctx {}))
   ([client sym ctx opts]
-   (when-let [{:keys [file line column class]} (info client sym ctx opts)]
-     ;; A Java class's source isn't a form.
-     (when-not class
-       (or (when (and file line)
-             (form-at file line column))
-           (eval-in client (:ns ctx) ['clojure.repl] "(clojure.repl/source-fn (symbol %s))" [sym] opts))))))
+   (some->> (info client sym ctx opts) (source-of client sym ctx opts))))
 
 (def ^:private project-source-code
   "A function telling whether the URL of a source file, a string, is a
@@ -674,7 +679,7 @@
        vec
        not-empty))
 
-(defn- normalize-causes
+(defn normalize-causes
   "causes, as analyze-last-stacktrace and test-stacktrace have them, or
   causes-code, in the shape last-error returns them."
   [causes]
@@ -1195,7 +1200,7 @@
             ;; There's nothing to close when the connection is gone.
             (try (nrepl/close-session client copy) (catch Exception _ nil))))))))
 
-(defn- inspector-lines
+(defn inspector-lines
   "What cider-nrepl's inspector renders, a list of strings, (:newline) and
   (:value text index), as lines: vectors of segments, maps with the :text and,
   for a value to inspect further, its :index, or :heading? for a section's
@@ -1635,6 +1640,73 @@
       (throw (if (contains? (:statuses (ex-data e)) "tap-value-not-retained")
                (ex-info "The server doesn't keep that value anymore, only the last 100 tapped" {:type ::failed})
                e)))))
+
+(defn- debug-op
+  "The name the server takes the debugger's op by, cider-nrepl 0.64's when
+  it has it."
+  [client op]
+  (if (supports? client (str "cider/" op)) (str "cider/" op) op))
+
+(defn debugger?
+  "Whether the server has cider-nrepl's debugger, which babashka's has since
+  1.13.230."
+  [client]
+  (supports? client "init-debugger"))
+
+(defn start-debugger
+  "Has the server send what its debugger asks and says to handler, on the
+  reader thread, in session: a response with the status need-debug-input
+  for each breakpoint the code it instruments reaches, with the :code of
+  the instrumented form, the :coor of the one it stopped at in it, its
+  :debug-value, the :locals, as [name value] pairs, the :line, :column and
+  :file of the code, the :input-type, the commands the stop takes or
+  expression, for one asking for an expression, and the :key to answer it
+  with, by debug-input. A server's debugger has one client, the last to
+  start it, which done tells the one before."
+  [client session handler]
+  (nrepl/send! client {:op (debug-op client "init-debugger") :session session} handler))
+
+(defn debug-input
+  "Answers the debugger's need-debug-input with key: input, a command's
+  name as a keyword, :next, or an expression."
+  [client session key input]
+  (nrepl/send! client {:op (debug-op client "debug-input") :session session :key key :input input} (fn [_])))
+
+(defn instrumented
+  "The qualified names of the functions the debugger has instrumented,
+  sorted."
+  [client opts]
+  (->> (ask client {:op (debug-op client "debug-instrumented-defs")} opts)
+       (some :list)
+       (mapcat (fn [[ns & names]] (map #(str ns "/" %) names)))
+       sort
+       vec))
+
+(defn instrument
+  "Evaluates the source of the var sym names where ctx says again, with
+  #dbg in front, for the debugger to stop at each step of it, or without it
+  unless on?, which stops that, in a session of its own, so that the user's
+  *1 stays put. Returns the var's name, qualified. Throws ::failed when there's
+  nothing called sym, or no source, as for a function defined at the REPL,
+  or the source isn't its definition, as when the file's changed since."
+  [client sym ctx on? opts]
+  (let [{:keys [ns name file line column] :as found} (info client sym ctx opts)
+        code (when found (source-of client sym ctx opts found))
+        named (some->> (when code (lexer/coordinate-span code [1])) (apply subs code))]
+    (cond
+      (nil? found) (throw (ex-info (str "Nothing called " sym " in " (:ns ctx)) {:type ::failed}))
+      (nil? code) (throw (ex-info (str "No source for " sym ", which takes evaluating it "
+                                       (if on? "with #dbg in front" "again without #dbg") " instead")
+                                  {:type ::failed}))
+      (not (and (definition? code) (= name named)))
+      (throw (ex-info (str "The file doesn't have " ns "/" name " where it was loaded from, which reloading it fixes")
+                      {:type ::failed})))
+    (ask client (cond-> {:op "eval" :ns ns :code (str (when on? "#dbg\n") code)}
+                  file (assoc :file file)
+                  ;; Where the code starts, past the line #dbg takes.
+                  line (assoc :line (cond-> line on? dec) :column (or column 1)))
+         opts)
+    (str ns "/" name)))
 
 (defn- ns-list
   "The names of the loaded namespaces, from ns-list, in the language of
