@@ -39,17 +39,23 @@
     (when (some->> (part 0) (re-find #"^(?:.*/)?def"))
       (some->> (part 1) (str ns "/")))))
 
+(defn stop-name
+  "What the breakpoint, a need-debug-input, is in: the function, or what's
+  defined, or its namespace."
+  [{:keys [code original-ns]}]
+  (or (defined code original-ns) original-ns))
+
 (defn stop-text
   "What a breakpoint, a need-debug-input, shows: what it's in and where,
   the line of the form it stopped at with the form marked, unless that's
   wider than width, and the form's value, or what it threw, for one #dbg!
   or #break! stop at."
-  [{:keys [code coor debug-value file line original-ns caught-msg]} width]
+  [{:keys [code coor debug-value file line caught-msg] :as stop} width]
   (let [[start end] (some->> coor seq (lexer/coordinate-span code))
         at (+ (or line 1) -1 (first (lexer/position code (or start 0))))
         ;; A REPL's code has no file, which comes as an empty list.
         file (when (string? file) (not-empty file))]
-    (str/join "\n" (concat [(str "● " (or (defined code original-ns) original-ns)
+    (str/join "\n" (concat [(str "● " (stop-name stop)
                                  (when file (str "  " (render/location-text {:file file :line at}))))]
                            (when start
                              (render/marked-lines code {:start start :end (min end (or (str/index-of code "\n" start) end))}
@@ -91,12 +97,27 @@
         (some (fn [[key name]] (when (= (second k) name) key)) commands))
       k))
 
+(defn breakpoint?
+  "Whether response, what the debugger says, is a breakpoint asking for a
+  command, rather than for an expression or saying something."
+  [{:keys [input-type] :as response}]
+  (and (nrepl/status? response "need-debug-input") (sequential? input-type)))
+
 (defn let-go
   "Answers response, what the debugger says, as features/start-debugger
-  has it, for session, when there's no one to ask: a breakpoint goes on."
+  has it, for session, when there's no one to ask: a breakpoint goes on,
+  past the ones after it in what it's evaluating."
   [client session {:keys [input-type key] :as response}]
   (when (nrepl/status? response "need-debug-input")
-    (features/debug-input client session key (if (sequential? input-type) ":continue" "nil"))))
+    (features/debug-input client session key (if (sequential? input-type) ":continue-all" "nil"))))
+
+(defn said
+  "What the debugger says in response, as text: the error an expression it
+  evaluated threw, or the stack trace asked for. Nil for anything else."
+  [{:keys [causes] :as response}]
+  (cond
+    (nrepl/status? response "eval-error") (str/join "\n" (map #(str "  " (render/cause-text 0 %)) causes))
+    (nrepl/status? response "stack") (render/error-text (features/normalize-causes causes))))
 
 (defn handle
   "Answers what the debugger says in response, as features/start-debugger
@@ -109,7 +130,7 @@
   lines, defining vars in a namespace, and :width says how wide the
   terminal is. state, an atom, keeps the last command, the expression for
   the one that takes it, and whether the user quit the evaluation."
-  [client session {:keys [input-type key inspect causes debug-value locals original-ns] :as response}
+  [client session {:keys [input-type key inspect debug-value locals original-ns] :as response}
    {print :print-line :keys [read-key read-form echo inspect-lines width] :or {echo (fn [_])}} state]
   (let [send! (fn [name]
                 (swap! state #(cond-> (assoc % :last name) (= "quit" name) (assoc :quit true)))
@@ -119,13 +140,7 @@
                           (swap! state assoc :expression text)
                           (send! name))]
     (cond
-      (nrepl/status? response "eval-error")
-      (print (str/join "\n" (map #(str "  " (render/cause-text 0 %)) causes)))
-
-      (nrepl/status? response "stack")
-      (print (render/error-text (features/normalize-causes causes)))
-
-      (not (nrepl/status? response "need-debug-input")) nil
+      (not (nrepl/status? response "need-debug-input")) (some-> (said response) print)
 
       ;; Asking for the expression its command went out with.
       (not (sequential? input-type))

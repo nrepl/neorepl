@@ -23,6 +23,7 @@
   (:import (java.io File)
            (java.lang ProcessBuilder$Redirect)
            (java.security MessageDigest)
+           (java.util.concurrent LinkedBlockingQueue TimeUnit)
            (java.util.regex Pattern)
            (sun.misc Signal SignalHandler)))
 
@@ -75,6 +76,11 @@
 (declare edit enter-ns switch-session inspect inspect-tapped run-tests browse-error autoreload change-setting
          browse-specs fix break breaks unbreak debug)
 
+(def ^:private parked-wait
+  "How long ,stop waits for the next breakpoint of the thread it goes to,
+  in milliseconds, before the prompt comes back."
+  1000)
+
 (def ^:private commands
   "The REPL's commands, the CIDER way: a comma, which Clojure reads as
   whitespace, then a name. Most are the lookups in neorepl.lookups, the
@@ -98,6 +104,8 @@
             :run #(break %1 %2)}
            {:name "debug" :help "Run the input that failed again, stopping where it throws" :debugger? true
             :run (fn [state _] (debug state))}
+           {:name "stop" :help "Go to the breakpoint a thread of its own stopped at" :debugger? true
+            :run (fn [{:keys [stop]} _] (stop))}
            {:name "breaks" :help "List the functions that stop at each step" :debugger? true
             :run (fn [state _] (breaks state))}
            {:name "unbreak" :arg "SYM" :optional? true :debugger? true
@@ -755,8 +763,13 @@
         failed (atom nil)
         after-eval (atom nil)
         ;; The functions the REPL instrumented, which it puts back as they
-        ;; were when it exits.
+        ;; were when it exits, and the breakpoints threads of their own
+        ;; stopped at, waiting for ,stop.
         mine (atom #{})
+        parked (atom clojure.lang.PersistentQueue/EMPTY)
+        ;; Whether the REPL's exiting, when a breakpoint goes on rather than
+        ;; waiting for a ,stop that won't come.
+        leaving (atom false)
         ;; What has the thread waiting for the evaluation that's running do
         ;; something, as evaluation/evaluate's :on-start gives it, the
         ;; session neorepl's debugger answers in, once it's started, and
@@ -837,20 +850,32 @@
                      result))
         ;; What the debugger says, answered on the thread waiting for the
         ;; evaluation, which reads the input. A breakpoint on a thread no
-        ;; evaluation of the REPL's is waiting on goes on, since the REPL's
-        ;; reading code then.
+        ;; evaluation of the REPL's is waiting on waits for ,stop, since the
+        ;; REPL's reading code then.
         on-debugger (fn [debug-session debug-io response]
                       (let [note #(send-off late (fn [_] (print-response (out %))))
-                            run @here]
+                            run @here
+                            answer #(debugger/handle client debug-session response debug-io debug-state)
+                            let-go #(debugger/let-go client debug-session response)]
                         (cond
-                          ;; Another client started the server's debugger.
+                          ;; Another client started the server's debugger,
+                          ;; which leaves no one here to answer the parked ones.
                           (nrepl/done? response)
                           (when (compare-and-set! debug-session-atom debug-session nil)
+                            (doseq [[_ go] (first (reset-vals! parked clojure.lang.PersistentQueue/EMPTY))]
+                              (go))
                             (note "The server's breakpoints stop in another client now"))
 
-                          (not (and run (run #(debugger/handle client debug-session response debug-io debug-state))))
-                          (when (debugger/let-go client debug-session response)
-                            (note "A breakpoint stopped a thread the REPL isn't evaluating on, which goes on")))))
+                          (and run (run answer)) nil
+
+                          ;; A thread of its own, which waits for ,stop.
+                          (and (debugger/breakpoint? response) (not @leaving))
+                          (do (swap! parked conj [answer let-go])
+                              (note (str "● " (debugger/stop-name response)
+                                         " stopped at a breakpoint on a thread of its own, which waits: ,stop goes to it")))
+
+                          :else (do (some-> (debugger/said response) note)
+                                    (let-go)))))
         ;; The session the debugger answers in, starting it the first time,
         ;; or nil when the server has none.
         debugger (fn []
@@ -864,7 +889,27 @@
                                                                                    (constantly lines)))))]
                              (features/start-debugger client debug-session (partial on-debugger debug-session debug-io))
                              (print-message "The server's breakpoints stop in this REPL now, as its debugger answers one client, the last to start it")
-                             (reset! debug-session-atom debug-session))))))]
+                             (reset! debug-session-atom debug-session))))))
+        ;; ,stop: answers the breakpoint parked first on this thread, and the
+        ;; ones after it, from whichever thread, until a while goes by
+        ;; without one.
+        stop (fn []
+               (if-let [[answer] (peek (first (swap-vals! parked pop)))]
+                 (let [queue (LinkedBlockingQueue.)
+                       [give close] (evaluation/hand-off queue)]
+                   (reset! debug-state {})
+                   (reset! here give)
+                   (try
+                     (loop [f answer]
+                       (f)
+                       (when-let [f (.poll queue parked-wait TimeUnit/MILLISECONDS)]
+                         (recur f)))
+                     (finally
+                       ;; One that comes after this gets parked.
+                       (close)
+                       (reset! here nil)))
+                   {})
+                 (out "No breakpoint is waiting")))]
     ;; Late output comes on the client's reader thread, which mustn't wait
     ;; for the terminal: it has the responses lookups are waiting for.
     ;; So do trace events, and taps, and what the server prints itself,
@@ -899,7 +944,13 @@
               (features/unsubscribe-taps client subscription)
               (catch Exception _)))
           ;; cider-nrepl's breakpoints wait for good once the debugger's
-          ;; client is gone, so what's instrumented runs as it is again.
+          ;; client is gone, so the ones waiting go on, and what's
+          ;; instrumented runs as it is again.
+          (reset! leaving true)
+          (doseq [[_ go] @parked]
+            (try
+              (go)
+              (catch Exception _)))
           (let [deadline (+ (System/currentTimeMillis) 5000)]
             (doseq [name @mine
                     :let [left (- deadline (System/currentTimeMillis))]
@@ -932,6 +983,7 @@
                                     #(command-output (merge io place {:client client :evaluate (partial evaluate session)
                                                                       :test-errors test-errors :fixes fixes :debugger debugger
                                                                       :failed failed :after-eval after-eval :mine mine
+                                                                      :stop stop
                                                                       :show-traces show-traces :hide-traces hide-traces
                                                                       :taps taps :tapped tapped :own own :quietly quietly})
                                                      name arg)))]

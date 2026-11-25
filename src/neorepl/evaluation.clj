@@ -146,6 +146,24 @@
   only the form's, as the server sees it too."
   #{"interrupted" "disconnected" "error"})
 
+(defn hand-off
+  "How other threads have the thread taking from queue call a function:
+  [give close], where (give f) puts f on queue and returns true, or nil
+  once (close) has stopped that, calling what's still on queue, on its own
+  thread."
+  [^LinkedBlockingQueue queue]
+  (let [lock (Object.)
+        closed (volatile! false)]
+    [#(locking lock
+        (when-not @closed
+          (.put queue %)
+          true))
+     #(do (locking lock
+            (vreset! closed true))
+          (doseq [f (.toArray queue)
+                  :when (fn? f)]
+            (f)))]))
+
 (defn evaluate
   "Sends msg, an eval or load-file, and returns its result: a map with the
   :status (ok, eval-error, interrupted, disconnected, error, timeout or
@@ -205,9 +223,8 @@
         lock (Object.)
         out (atom (constantly true))
         halted? (atom false)
-        ;; Under the lock too: whether the thread's done waiting, and won't
-        ;; take what's put on the queue for it anymore.
-        waited? (atom false)
+        ;; What other threads have this one call while it waits.
+        [give close] (hand-off responses)
         halt! #(locking lock
                  (reset! halted? true)
                  @out)
@@ -261,10 +278,7 @@
                               (answer))))
             interrupted #(result (update % :statuses conj "interrupted") nil)
             acc {:values [] :out [] :err [] :out-size 0 :err-size 0 :statuses #{}}]
-        (on-start #(locking lock
-                     (when-not @waited?
-                       (.put responses %)
-                       true)))
+        (on-start give)
         (if-not (send-msg msg)
           (interrupted acc)
           (loop [more more
@@ -314,12 +328,7 @@
                         (not (send-msg (first more))) (interrupted acc)
                         :else (recur (rest more) acc))))))))))
       (finally
-        (locking lock
-          (reset! waited? true))
-        ;; What came for this thread as it stopped waiting.
-        (doseq [f (.toArray responses)
-                :when (fn? f)]
-          (f))
+        (close)
         (deliver finished true)
         (shutdown/remove! cleanup)))))
 
