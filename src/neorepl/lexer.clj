@@ -5,7 +5,8 @@
   It deliberately doesn't read code: reading on the client breaks on
   `::alias/kw`, reader conditionals and unknown tagged literals, none of
   which matter for telling whether the user has finished typing a form."
-  (:require [clojure.string :as str]))
+  (:require [clojure.string :as str])
+  (:import (java.util Collections)))
 
 ;; Characters that end a symbol, keyword or number: whitespace, delimiters and
 ;; the reader's terminating macro characters.
@@ -432,7 +433,8 @@
   text and its :kind, with the :children of a #(...) :fn or another :coll,
   or the :inner form of a :wrap, a quote, deref or var, and the index of
   the token after it. Comments and what #_ discards don't count, metadata
-  and tags leave the form they go on as it is, and a reader conditional is
+  and tags leave the form they go on as it is, but for a namespaced map's
+  #:ns, which starts it, and a reader conditional is
   the branch Clojure's takes, or a :splice of its forms for #?@. With no
   form left before a closer, or the end, [nil index-of-the-closer]."
   [s tokens i]
@@ -455,8 +457,13 @@
                           (nil? branch) (read-form s tokens j)
                           (= "#?" t) [branch j]
                           :else [{:kind :splice :children (:children branch)} j]))
-                      ;; Tags, and a namespaced map's #:ns, go on the form after.
-                      (recur s tokens (inc i)))
+                      (let [[form j] (read-form s tokens (inc i))]
+                        (if (and form (str/starts-with? t "#:"))
+                          ;; A namespaced map's #:ns, which nothing can come
+                          ;; between, is part of it.
+                          [(assoc form :start start) j]
+                          ;; Tags go on the form after.
+                          [form j])))
       :open (loop [j (inc i)
                    children []]
               (let [[child k] (read-form s tokens j)]
@@ -513,6 +520,55 @@
           end))
       (when-let [newline (str/index-of s "\n" start)]
         (recur (inc newline) (inc n))))))
+
+(defn line-starts
+  "The index each line of s starts at."
+  [^String s]
+  (loop [from 0
+         starts [0]]
+    (if-let [i (str/index-of s "\n" from)]
+      (recur (inc i) (conj starts (inc i)))
+      starts)))
+
+(defn line-of
+  "The line, counting from 0, that index is on, given the line-starts."
+  [starts index]
+  (let [i (Collections/binarySearch starts (long index))]
+    (if (neg? i) (- (- i) 2) i)))
+
+(defn line-forms
+  "Where the outermost forms that start on one of lines of the first form in
+  s are, as [start end] pairs, in order, lines counting from 1, but for
+  those inside another of them. They're the forms coordinate-span counts:
+  no comments or what #_ discards, a quote, deref or var with its form, a
+  namespaced map with its #:ns, and metadata or a tag left out of the form
+  they go on. On the first line, that's the first form itself."
+  [s lines]
+  (let [tokens (:tokens (lex s))
+        starts (line-starts s)
+        on? (comp (set (map dec lines)) #(line-of starts %))]
+    (letfn [(starting [{:keys [kind start end] :as form}]
+              (cond
+                (nil? form) nil
+                (on? start) [[start end]]
+                :else (case kind
+                        :wrap (starting (:inner form))
+                        (:coll :fn) (mapcat starting (:children form))
+                        nil)))]
+      (vec (starting (first (read-form s tokens 0)))))))
+
+(defn defined
+  "What code, a form's text, defines, when it's a def of some sort, a list
+  whose head is a symbol named def or starting with it, as defn and
+  defmethod are, as [head name], or nil. Metadata and tags before it, as
+  babashka's debugger leaves #dbg, don't count."
+  [code]
+  (let [part #(some->> (coordinate-span code [%]) (apply subs code))
+        head (when (some-> (coordinate-span code []) first (->> (get code)) (= \())
+               (part 0))]
+    (when (some->> head (re-find #"^(?:.*/)?def"))
+      (when-let [name (part 1)]
+        [head name]))))
 
 (defn- ns-name-token
   "The token naming the namespace in tokens, those of an ns form after ns,

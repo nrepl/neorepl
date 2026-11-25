@@ -12,6 +12,7 @@
 - [#96](https://github.com/nrepl/neorepl/pull/96): `neorepl eval` and the MCP `eval` tool follow an error about a name that isn't there with the fixes to try, which `--format edn` and `json` and the tool's structured content have as `suggestions`, each with the code to evaluate for it.
 - [#97](https://github.com/nrepl/neorepl/pull/97): `,debug` runs the input that failed last again, stopping where it throws, with the locals, and what the REPL instrumented runs as it is again once it exits, rather than leaving breakpoints no one answers.
 - [#98](https://github.com/nrepl/neorepl/pull/98): A breakpoint on a thread of its own, like an HTTP handler's, waits with a note above the prompt, rather than going on, until `,stop` goes to it.
+- [#99](https://github.com/nrepl/neorepl/pull/99): `,break-at FILE LINE` has what starts at a line of a file stop at each step, in a method or a `def` too, and `,unbreak-at` takes the line out.
 
 ### Changes
 

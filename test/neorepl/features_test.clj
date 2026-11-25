@@ -1274,4 +1274,70 @@
                                    (features/instrument client "dbg.demo/f" {:ns "user"} "#dbg" {}))))
            (testing "nor nothing"
              (is (thrown-with-msg? clojure.lang.ExceptionInfo #"^Nothing called nope in user"
-                                   (features/instrument client "nope" {:ns "user"} "#dbg" {}))))))))))
+                                   (features/instrument client "nope" {:ns "user"} "#dbg" {}))))
+           (testing "keeping #dbg in front of what starts on the lines it's given"
+             (spit file "(ns dbg.demo)\n\n(defn f [x]\n  (* x 2))\n")
+             (features/instrument client "dbg.demo/f" {:ns "user"} nil {:lines {"dbg.demo/f" #{2}} :timeout-ms 5000})
+             (is (= "(defn f [x]\n  #dbg (* x 2))" (test-server/evaluated "f"))))))))))
+
+(deftest file-forms-test
+  (test-server/call-with-temp-dir
+   (fn [dir]
+     (let [file (test-server/spit-file dir "forms.clj" (str "(ns my.forms)\n\n(defn f [x]\n  (* x 2))\n\n"
+                                                           ";; (not this)\n  (defmethod m :k [x]\n  x) (def y 日本)\n#_(gone)\n"
+                                                           "#?(:cljs (defn g [])\n   :clj (defn g [y]\n          y))\n"
+                                                           "^:meta (comment\n  (f 1))\n"))
+           [ns-form f m y g c :as forms] (features/file-forms (str file))]
+       (testing "the top-level forms of a file, where they start and end, and the namespace they're in"
+         (is (= 6 (count forms)))
+         (is (= {:code "(ns my.forms)" :line 1 :column 1 :end 1 :in "my.forms" :key "(ns my.forms)"} ns-form))
+         (is (= {:code "(defn f [x]\n  (* x 2))" :line 3 :column 1 :end 4 :in "my.forms" :key "defn f" :define "my.forms/f"}
+                f)))
+       (testing "and where they start on a line with another"
+         (is (= [7 3 8] ((juxt :line :column :end) m)))
+         (is (= [8 6] ((juxt :line :column) y))))
+       (testing "what they define, which for a method is its multimethod, with its dispatch value in its key"
+         (is (= "my.forms/m" (:define m)))
+         (is (= "defmethod m :k" (:key m)))
+         (is (= "my.forms/y" (:define y))))
+       (testing "past a reader conditional, the form of Clojure's branch, and past metadata"
+         (is (= {:code "(defn g [y]\n          y)" :line 11 :column 9 :end 12 :define "my.forms/g"}
+                (select-keys g [:code :line :column :end :define])))
+         (is (= ["(comment\n  (f 1))" 13 "(comment"] ((juxt :code :line :key) c)))))
+     (testing "and why not, for a file that isn't there or doesn't balance"
+       (is (thrown-with-msg? clojure.lang.ExceptionInfo #"^Can't read the file nope\.clj"
+                             (features/file-forms "nope.clj")))
+       (let [file (test-server/spit-file dir "open.clj" "(ns open)\n\n(defn f [x]\n")]
+         (is (thrown-with-msg? clojure.lang.ExceptionInfo #"open\.clj:3:1: Unclosed \("
+                               (features/file-forms (str file)))))))))
+
+(deftest instrument-form-test
+  (test-server/call-with-temp-dir
+   (fn [dir]
+     (let [file (str (test-server/spit-file dir "dbg/lines.clj" "(ns dbg.lines)\n\n(defn f [x]\n  (let [y (inc x)]\n    (* y 2)))\n"))]
+       (with-client [client {:port *port*}]
+         (nrepl/request client {:op "eval" :code (str "(load-file " (pr-str file) ")")})
+         (let [form (second (features/file-forms file))]
+           (testing "the forms that start on the lines it's given get #dbg in front"
+             (is (= "dbg.lines/f" (features/instrument-form client file form #{3} {:ns "user"} {})))
+             (is (= "(defn f [x]\n  (let [y (inc x)]\n    #dbg (* y 2)))" (test-server/evaluated "f")))
+             (testing "but not the ones inside another"
+               (features/instrument-form client file form #{2 3} {:ns "user"} {})
+               (is (= "(defn f [x]\n  #dbg (let [y (inc x)]\n    (* y 2)))" (test-server/evaluated "f")))))
+           (testing "and on its first line, all of it, as instrument has it"
+             (features/instrument-form client file form #{1 3} {:ns "user"} {})
+             (is (= "#dbg\n(defn f [x]\n  (let [y (inc x)]\n    #dbg (* y 2)))" (test-server/evaluated "f")))
+             (is (some #{"dbg.lines/f"} (features/instrumented client {}))))
+           (testing "and without lines, none, in the file's namespace"
+             (features/instrument-form client file form #{} {:ns "user"} {})
+             (is (= (:code form) (test-server/evaluated "f")))
+             (is (not (some #{"dbg.lines/f"} (features/instrumented client {}))))
+             (is (= "4" (some :value (nrepl/request client {:op "eval" :code "(dbg.lines/f 1)"})))))
+           (testing "or why not"
+             (is (thrown-with-msg? clojure.lang.ExceptionInfo #"^No namespace called nope"
+                                   (features/instrument-form client file (assoc form :in "nope") #{} {:ns "user"} {})))
+             (testing "as for what evaluating again leaves as it was"
+               (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                                     #"^A defmulti stays as it is when it's evaluated again, so the debugger can't stop in it"
+                                     (features/instrument-form client file {:code "(defmulti area\n  :shape)" :line 1}
+                                                               #{2} {:ns "user"} {})))))))))))

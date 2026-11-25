@@ -31,19 +31,11 @@
   "What the commands that take an expression ask for it with."
   {"eval" "eval> " "inject" "inject> " "inspect-prompt" "inspect> "})
 
-(defn- defined
-  "The name of what code, a form's, defines, qualified with ns, when it's a
-  def of some sort."
-  [code ns]
-  (let [part #(some->> (lexer/coordinate-span code [%]) (apply subs code))]
-    (when (some->> (part 0) (re-find #"^(?:.*/)?def"))
-      (some->> (part 1) (str ns "/")))))
-
 (defn stop-name
   "What the breakpoint, a need-debug-input, is in: the function, or what's
-  defined, or its namespace."
+  defined, qualified, or its namespace."
   [{:keys [code original-ns]}]
-  (or (defined code original-ns) original-ns))
+  (or (some->> (lexer/defined code) second (str original-ns "/")) original-ns))
 
 (defn stop-text
   "What a breakpoint, a need-debug-input, shows: what it's in and where,

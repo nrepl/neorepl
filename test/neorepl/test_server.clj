@@ -536,8 +536,15 @@
 (def ^:private debugger
   "The message wrap-fake-debugger answers the debugger's breakpoints with,
   the init-debugger it got last, the answers waiting for a debug-input, by
-  key, and the functions it instruments, by namespace."
-  (atom {:msg nil :answers {} :instrumented {}}))
+  key, the functions it instruments, by namespace, and the code it last
+  evaluated of each defn, by name."
+  (atom {:msg nil :answers {} :instrumented {} :evaluated {}}))
+
+(defn evaluated
+  "The code of the defn of the function called name wrap-fake-debugger
+  evaluated last, as it came, tags and all."
+  [name]
+  (get-in @debugger [:evaluated name]))
 
 (def ^:private debug-commands
   ["next" "in" "out" "here" "continue" "continue-all" "eval" "inject" "locals" "inspect" "inspect-prompt"
@@ -570,8 +577,8 @@
   "cider-nrepl's debugger, roughly: init-debugger takes the breakpoints
   break! has the client stop at, debug-input answers them, and evaluating
   a defn with #dbg or #dbg! in front instruments it, which evaluating it
-  without undoes, for debug-instrumented-defs. Other code with a tag in
-  front gets evaluated without it."
+  without undoes, for debug-instrumented-defs. Code gets evaluated without
+  its tags, the ones in it too."
   [handler]
   (fn [{:keys [op code ns key input] :as msg}]
     (case op
@@ -581,13 +588,17 @@
       (transport/respond-to msg :status "done"
                             :list (for [[ns names] (:instrumented @debugger) :when (seq names)]
                                     (cons ns (sort names))))
-      (let [[_ tag space name] (when (= "eval" op) (re-find #"^(#dbg!?(\s+))?(?:\(defn-? (\S+))?" (str code)))]
+      (let [eval? (= "eval" op)
+            [_ tag space name] (when eval? (re-find #"^(#dbg!?(\s+))?(?:\(defn-? (\S+))?" (str code)))]
         (when name
-          (swap! debugger update-in [:instrumented (or ns "user")] (fnil (if tag conj disj) #{}) name))
+          (swap! debugger #(-> %
+                               (update-in [:instrumented (or ns "user")] (fnil (if tag conj disj) #{}) name)
+                               (assoc-in [:evaluated name] code))))
         (handler (cond-> msg
-                   tag (update :code subs (count tag))
                    ;; Where the code is, past the line the tag takes.
-                   (some-> space (str/includes? "\n")) (update :line #(some-> % inc))))))))
+                   (some-> space (str/includes? "\n")) (update :line #(some-> % inc))
+                   ;; Past what can't come before a tag, as in a string.
+                   eval? (update :code #(some-> % (str/replace #"(^|[\s(\[{])#dbg!?\s+" "$1")))))))))
 
 (middleware/set-descriptor! #'wrap-fake-debugger
                             {:requires #{"clone"}

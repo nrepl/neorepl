@@ -437,13 +437,6 @@
    (when (supports? client "cider/resolve-alias")
      (some :candidates (ask client (lookup-msg {:op "cider/resolve-alias" :alias alias} ctx) opts)))))
 
-(defn- definition?
-  "Whether form, as text, is a list whose head defines something: def, defn,
-  defmacro and the like."
-  [form]
-  (let [[head] (some-> (re-find #"^\((.*)\)$" (str/replace form #"\s+" " ")) second lexer/forms)]
-    (boolean (some-> head (str/includes? "def")))))
-
 (defn- form-at
   "The text of the definition at line and column of file, a path or a URL
   like jar:file:...!/clojure/core.clj, read as far as it goes, or nil when
@@ -461,7 +454,7 @@
             (if (and (lexer/incomplete? text) (seq more))
               (recur (conj lines (first more)) (rest more))
               (let [form (first (lexer/forms text))]
-                (when (some-> form definition?)
+                (when (some-> form lexer/defined)
                   form)))))))
     (catch Exception _ nil)))
 
@@ -1690,35 +1683,115 @@
        sort
        vec))
 
+(defn- tagged
+  "code, a form, with #dbg in front of the forms that start on lines past
+  its first, counting from 1, as lexer/line-forms finds them."
+  [code lines]
+  (reduce (fn [code [start]] (str (subs code 0 start) "#dbg " (subs code start)))
+          code
+          (rseq (lexer/line-forms code (disj (set lines) 1)))))
+
+(defn- instrument-code
+  "Evaluates code again, a form's, from file, at line and column, in ns, in
+  a session of its own, so that the user's *1 stays put, with tag in front,
+  #dbg for the debugger to stop at each step of it or #dbg! for it to stop
+  where something in it throws, and #dbg in front of the forms that start
+  on lines, counting from its first, as tagged puts it, or without any,
+  which stops that. Line 1 is the form itself, which #dbg goes in front of
+  on a line of its own, so that what the form defines starts at its column.
+  Returns the responses. Throws ::failed when it doesn't evaluate, or for
+  tags in a defonce or a defmulti, which evaluating again leaves as it was."
+  [client {:keys [code ns file line column]} tag lines opts]
+  (let [tag (or tag (when (contains? (set lines) 1) "#dbg"))
+        in-code (tagged code lines)
+        [head] (lexer/defined code)]
+    (when (and (or tag (not= code in-code))
+               (#{"defonce" "defmulti"} (some-> head (str/replace #"^.*/" ""))))
+      (throw (ex-info (str "A " head " stays as it is when it's evaluated again, so the debugger can't stop in it")
+                      {:type ::failed})))
+    (ask client (cond-> {:op "eval" :ns ns :code (str (some-> tag (str "\n")) in-code)}
+                  file (assoc :file file)
+                  ;; Where the code starts, past the line the tag takes.
+                  line (assoc :line (cond-> line tag dec) :column (or column 1)))
+         opts)))
+
 (defn instrument
   "Evaluates the source of the var sym names where ctx says again, with tag
-  in front, #dbg for the debugger to stop at each step of it or #dbg! for
-  it to stop where something in it throws, or without one, which stops
-  that, in a session of its own, so that the user's *1 stays put. Returns
-  the var's name, qualified. Throws ::failed when there's nothing called
-  sym, or no source, as for a function defined at the REPL, or the source
-  isn't its definition, as when the file's changed since."
+  in front, as instrument-code does, and the lines the :lines of opts, a
+  function or a map, gives for the var's qualified name. Returns the var's
+  name, qualified. Throws ::failed when there's nothing called sym, or no
+  source, as for a function defined at the REPL, or the source isn't its
+  definition, as when the file's changed since."
   [client sym ctx tag opts]
   (let [{:keys [ns name file line column] :as found} (info client sym ctx opts)
         code (when found (source-of client sym ctx opts found))
-        named (some->> (when code (lexer/coordinate-span code [1])) (apply subs code))]
+        [_ named] (some-> code lexer/defined)
+        qualified (str ns "/" name)]
     (cond
       (nil? found) (throw (ex-info (str "Nothing called " sym " in " (:ns ctx)) {:type ::failed}))
       ;; As babashka's frames name anonymous functions after the fn macro.
       (or (:macro found) (:special-form found))
-      (throw (ex-info (str ns "/" name " is a macro, which the debugger doesn't step through") {:type ::failed}))
+      (throw (ex-info (str qualified " is a macro, which the debugger doesn't step through") {:type ::failed}))
       (nil? code) (throw (ex-info (str "No source for " sym ", which takes evaluating it "
                                        (if tag (str "with " tag " in front") "again without #dbg") " instead")
                                   {:type ::failed}))
-      (not (and (definition? code) (= name named)))
-      (throw (ex-info (str "The file doesn't have " ns "/" name " where it was loaded from, which reloading it fixes")
+      (not= name named)
+      (throw (ex-info (str "The file doesn't have " qualified " where it was loaded from, which reloading it fixes")
                       {:type ::failed})))
-    (ask client (cond-> {:op "eval" :ns ns :code (str (some-> tag (str "\n")) code)}
-                  file (assoc :file file)
-                  ;; Where the code starts, past the line the tag takes.
-                  line (assoc :line (cond-> line tag dec) :column (or column 1)))
-         opts)
-    (str ns "/" name)))
+    (instrument-code client {:code code :ns ns :file file :line line :column column}
+                     tag (some-> (:lines opts) (apply [qualified])) opts)
+    qualified))
+
+(defn file-forms
+  "The top-level forms of the file at path, in order, as maps of their
+  :code, the :line and :column it starts at, the line it ends on, :end, the
+  namespace they're :in, the last ns form's before them, if there's one,
+  and a :key that tells them apart once the file's changed: a definition's
+  head and name, with a method's dispatch value, or else the first line. A
+  definition has the var it may define too, qualified, as :define, which
+  for a method is its multimethod's. The code is the form the reader
+  reads, past metadata and the reader conditional around it, whose branch
+  for Clojure is what evaluating it all does. Throws ::failed when the file
+  can't be read, or its delimiters don't balance."
+  [path]
+  (let [text (checked-text (io/file path) path "neorepl check --fix")
+        lexed (lexer/lex text)
+        ns-forms (lexer/ns-forms lexed)
+        ;; Found once for the file, as counting lines for each form takes a
+        ;; while on babashka.
+        starts (lexer/line-starts text)
+        line-of #(lexer/line-of starts %)]
+    (vec (for [[from to] (lexer/form-spans lexed)
+               :let [[s e] (lexer/coordinate-span (subs text from to) [])
+                     ;; What #?@ splices is no one form.
+                     [start end] (if s [(+ from s) (+ from e)] [from to])
+                     code (subs text start end)
+                     [head named] (lexer/defined code)
+                     line (line-of start)
+                     in (:name (last (take-while #(<= (:start %) start) ns-forms)))]]
+           (cond-> {:code code
+                    :line (inc line)
+                    :column (inc (.codePointCount text (int (nth starts line)) (int start)))
+                    :end (inc (line-of (dec end)))
+                    :key (if named
+                           (str/join " " (cond-> [head named]
+                                           (str/ends-with? head "defmethod")
+                                           (conj (some->> (lexer/coordinate-span code [2]) (apply subs code)))))
+                           (first (str/split-lines code)))}
+             in (assoc :in in)
+             (and in named) (assoc :define (str in "/" named)))))))
+
+(defn instrument-form
+  "Evaluates form, one of file-forms' of the file at path, again, in its
+  namespace, or else ctx's, with #dbg in front of the forms that start on
+  each of lines, as instrument-code does. Returns the var it evaluates to,
+  qualified, when it does, as a definition does."
+  [client path {:keys [in] :as form} lines ctx opts]
+  (some->> (instrument-code client (assoc form :ns (or in (:ns ctx)) :file (.getAbsolutePath (io/file path)))
+                            nil lines opts)
+           (some :value)
+           (re-matches #"#'(.+)")
+           second))
 
 (defn- ns-list
   "The names of the loaded namespaces, from ns-list, in the language of

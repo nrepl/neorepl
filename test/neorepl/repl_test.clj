@@ -1252,6 +1252,120 @@
              ;; Every one, those of the tests before included.
              (type ",unbreak\r")
              (is (screen #",unbreak\n(?s).*dbg\.repl/g runs without stopping again\n(?s).*user=> $"))))))))
+  (testing ",break-at and ,unbreak-at, for the lines of a file"
+    (call-with-temp-dir
+     (fn [dir]
+       (let [file (str (test-server/spit-file dir "dbg/at.clj" "(ns dbg.at)\n\n(defn h [x]\n  (let [y (inc x)]\n    (* y 2)))\n"))
+             at #(Pattern/quote (str file ":" %))]
+         (call-with-repl {}
+           (fn [type screen]
+            (let [;; What command printed, as the screen has what came
+                  ;; before too.
+                  after (fn [command printed]
+                          (screen (re-pattern (str "(?s)" (Pattern/quote command) "\n" printed "\nuser=> $"))))]
+             (type (str "(load-file " (pr-str file) ")\r"))
+             (screen #"#'dbg\.at/h\nuser=> $")
+             (type (str ",break-at " file " 5\r"))
+             (is (screen (re-pattern (str (at 5) " stops at each step now\nuser=> $"))))
+             (is (= "(defn h [x]\n  (let [y (inc x)]\n    #dbg (* y 2)))" (test-server/evaluated "h")))
+             (testing "which keep the other lines of the form"
+               (type (str ",break-at " file " 4\r"))
+               (is (screen (re-pattern (str (at 4) " stops at each step now\nuser=> $"))))
+               ;; Line 5 is in line 4's let.
+               (is (= "(defn h [x]\n  #dbg (let [y (inc x)]\n    (* y 2)))" (test-server/evaluated "h")))
+               (type ",breaks\r")
+               (is (after ",breaks" (str ".*" (at 4) "\n" (at 5))))
+               (type (str ",unbreak-at " file " 4\r"))
+               (is (screen (re-pattern (str (at 4) " runs without stopping again\nuser=> $"))))
+               (is (= "(defn h [x]\n  (let [y (inc x)]\n    #dbg (* y 2)))" (test-server/evaluated "h"))))
+             (testing "but not where nothing starts, or stops"
+               (type (str ",break-at " file " 2\r"))
+               (is (screen (re-pattern (str "Nothing starts at line 2 of " (Pattern/quote file) "\nuser=> $"))))
+               (type (str ",unbreak-at " file " 4\r"))
+               (is (screen (re-pattern (str "Nothing stops at line 4 of " (Pattern/quote file) ", ,breaks lists what does\nuser=> $"))))
+               (type (str ",break-at " file "\r"))
+               (is (screen #"Usage: ,break-at FILE LINE\nuser=> $")))
+             (testing "with a definition's first line for its function, as ,break has it"
+               (type (str ",break-at " file " 3\r"))
+               (is (screen #"\ndbg\.at/h stops at each step now\nuser=> $"))
+               (is (= "#dbg\n(defn h [x]\n  (let [y (inc x)]\n    #dbg (* y 2)))" (test-server/evaluated "h")))
+               (type ",breaks\r")
+               (is (after ",breaks" (str "(?m).*^dbg\\.at/h$.*" (at 5))))
+               (testing "which ,unbreak takes out, keeping the lines"
+                 (type ",unbreak dbg.at/h\r")
+                 (is (screen #"dbg\.at/h only stops at the lines ,breaks lists now\nuser=> $"))
+                 (is (= "(defn h [x]\n  (let [y (inc x)]\n    #dbg (* y 2)))" (test-server/evaluated "h")))))
+             (testing "and ,unbreak without one, every line"
+               (type ",unbreak\r")
+               (is (screen (re-pattern (str "(?s),unbreak\n.*" (at 5) " runs without stopping again\nuser=> $"))))
+               (is (= "(defn h [x]\n  (let [y (inc x)]\n    (* y 2)))" (test-server/evaluated "h")))
+               (type ",breaks\r")
+               ;; The tests before leave a function defined at the REPL.
+               (let [listed (re-pattern (str "(?s)" (at 5) " runs without stopping again\nuser=> ,breaks\n(.*)user=> $"))]
+                 (is (not (re-find (re-pattern (at 5)) (second (re-find listed (screen listed))))))))))))
+       (testing "which follow the file's edits"
+         (let [file (str (test-server/spit-file dir "dbg/edits.clj" "(ns dbg.edits)\n\n(defn e [x]\n  (let [y (inc x)]\n    (* y 2)))\n"))
+               at #(Pattern/quote (str file ":" %))]
+           (call-with-repl {}
+             (fn [type screen]
+               (type (str "(load-file " (pr-str file) ")\r"))
+               (screen #"#'dbg\.edits/e\nuser=> $")
+               (type (str ",break-at " file " 5\r"))
+               (screen (re-pattern (str (at 5) " stops at each step now\nuser=> $")))
+               (spit file "(ns dbg.edits)\n\n(def z 1)\n\n(defn e [w]\n  (let [y (inc w)]\n    (+ 1)\n    (* y 2)))\n")
+               (type ",breaks\r")
+               (is (screen (re-pattern (str ",breaks\n(?s).*" (at 8) "\nuser=> $"))))
+               (type (str ",break-at " file " 7\r"))
+               (screen (re-pattern (str (at 7) " stops at each step now\nuser=> $")))
+               (is (= "(defn e [w]\n  (let [y (inc w)]\n    #dbg (+ 1)\n    #dbg (* y 2)))" (test-server/evaluated "e")))
+               (testing "keeping a line whose form can't be evaluated"
+                 (spit file "(ns dbg.edits)\n\n(defn e [w]\n")
+                 (type ",unbreak\r")
+                 (is (screen (re-pattern (str (at 7) ", " (at 8) ": .*Unclosed \\(.*\nuser=> $"))))
+                 (spit file "(ns dbg.edits)\n\n(def z 1)\n\n(defn e [w]\n  (let [y (inc w)]\n    (+ 1)\n    (* y 2)))\n")
+                 (type ",unbreak\r")
+                 (is (screen (re-pattern (str (at 7) " runs without stopping again\n" (at 8) " runs without stopping again\nuser=> $"))))))))
+         (testing "in the namespace it was evaluated in, for a file without an ns form"
+           (let [file (str (test-server/spit-file dir "dbg/no_ns.clj" "(defn no-ns [x]\n  (inc x))\n"))]
+             (call-with-repl {}
+               (fn [type screen]
+                 (type "(ns dbg.home)\r")
+                 (screen #"dbg\.home=> $")
+                 (type (str ",break-at " file " 2\r"))
+                 (screen #"stops at each step now\ndbg\.home=> $")
+                 (type "(ns user)\r")
+                 (screen #"\(ns user\)\nnil\nuser=> $")
+                 (type (str ",unbreak-at " file " 2\r"))
+                 (screen #"runs without stopping again\nuser=> $")
+                 (type "[(resolve 'user/no-ns) (some? (resolve 'dbg.home/no-ns))]\r")
+                 (is (screen #"\[nil true\]\nuser=> $"))))))
+         (testing "but not in what evaluating again leaves as it was"
+           (let [file (str (test-server/spit-file dir "dbg/multi.clj" "(ns dbg.multi)\n\n(defmulti area\n  :shape)\n"))]
+             (call-with-repl {}
+               (fn [type screen]
+                 (type (str ",break-at " file " 4\r"))
+                 (is (screen #"A defmulti stays as it is when it's evaluated again, so the debugger can't stop in it\nuser=> $"))))))
+         (testing "taking out a line of the form break-at put it in, of two on that line"
+           (let [file (str (test-server/spit-file dir "dbg/two.clj" "(ns dbg.two)\n\n(defn one [x]\n  x) (defn two [y]\n  (inc y))\n"))
+                 at #(Pattern/quote (str file ":" %))]
+             (call-with-repl {}
+               (fn [type screen]
+                 (type (str "(load-file " (pr-str file) ")\r"))
+                 (screen #"#'dbg\.two/two\nuser=> $")
+                 (type (str ",break-at " file " 5\r"))
+                 (screen (re-pattern (str (at 5) " stops at each step now\nuser=> $")))
+                 (type (str ",unbreak-at " file " 5\r"))
+                 (is (screen (re-pattern (str (at 5) " runs without stopping again\nuser=> $"))))
+                 (is (= "(defn two [y]\n  (inc y))" (test-server/evaluated "two"))))))))
+       (testing "which it takes out as it exits"
+         (let [file (str (test-server/spit-file dir "dbg/left.clj" "(ns dbg.left)\n\n(defn left [x]\n  (inc x))\n"))]
+           (call-with-repl {}
+             (fn [type screen]
+               (type (str "(load-file " (pr-str file) ")\r"))
+               (screen #"#'dbg\.left/left\nuser=> $")
+               (type (str ",break-at " file " 4\r"))
+               (screen #"stops at each step now\nuser=> $")))
+           (is (= "(defn left [x]\n  (inc x))" (test-server/evaluated "left"))))))))
   (testing ",debug, running the input that failed again, stopping where it throws"
     (call-with-repl {}
       (fn [type screen]
