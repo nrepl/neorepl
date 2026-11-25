@@ -164,6 +164,13 @@
                   stops waiting for the evaluation
     :on-interrupt-failed
                   called when the server can't interrupt the evaluation
+    :on-start     called before anything goes out with a function that has
+                  the thread waiting for the evaluation call the function
+                  it's given, as soon as it can, for what has to happen on
+                  that thread while the evaluation runs, like answering
+                  cider-nrepl's debugger. It returns false once the
+                  evaluation's done, as the function won't get called then.
+                  A :timeout waits for what it runs
     :on-response  called with each response as it arrives
     :read-line    called when the code reads *in*, for the next line, nil
                   at end of input or :interrupted to leave the read
@@ -182,9 +189,10 @@
 
   Responses that come after it stops waiting, on a timeout or when told to,
   go where the client's unclaimed responses go."
-  [client {:keys [session] :as msg} {:keys [on-send on-interrupt-failed on-response read-line timeout deadline max-output collect?]
+  [client {:keys [session] :as msg} {:keys [on-send on-interrupt-failed on-start on-response read-line timeout deadline max-output collect?]
                                      :or {on-send (fn [_ _])
                                           on-interrupt-failed (fn [])
+                                          on-start (fn [_])
                                           on-response (fn [_])
                                           read-line clojure.core/read-line
                                           collect? true}}]
@@ -197,6 +205,9 @@
         lock (Object.)
         out (atom (constantly true))
         halted? (atom false)
+        ;; Under the lock too: whether the thread's done waiting, and won't
+        ;; take what's put on the queue for it anymore.
+        waited? (atom false)
         halt! #(locking lock
                  (reset! halted? true)
                  @out)
@@ -250,6 +261,10 @@
                               (answer))))
             interrupted #(result (update % :statuses conj "interrupted") nil)
             acc {:values [] :out [] :err [] :out-size 0 :err-size 0 :statuses #{}}]
+        (on-start #(locking lock
+                     (when-not @waited?
+                       (.put responses %)
+                       true)))
         (if-not (send-msg msg)
           (interrupted acc)
           (loop [more more
@@ -263,6 +278,10 @@
 
                 (= ::stop response)
                 (give-up acc {:stopped true})
+
+                (fn? response)
+                (do (response)
+                    (recur more acc))
 
                 (= ::interrupt-failed response)
                 (do (when-not (realized? interrupt-failed)
@@ -295,6 +314,12 @@
                         (not (send-msg (first more))) (interrupted acc)
                         :else (recur (rest more) acc))))))))))
       (finally
+        (locking lock
+          (reset! waited? true))
+        ;; What came for this thread as it stopped waiting.
+        (doseq [f (.toArray responses)
+                :when (fn? f)]
+          (f))
         (deliver finished true)
         (shutdown/remove! cleanup)))))
 

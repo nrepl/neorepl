@@ -1233,3 +1233,31 @@
           (is (nil? (features/forward-system-output (assoc client :ops {})))))
         (testing "or when what it prints comes out here already"
           (is (nil? (features/forward-system-output (assoc client :shares-output? true)))))))))
+
+(deftest instrument-test
+  (test-server/call-with-temp-dir
+   (fn [dir]
+     (let [file (test-server/spit-file dir "dbg/demo.clj" "(ns dbg.demo)\n\n(defn f [x]\n  (* x 2))\n")]
+       (with-client [client {:port *port*}]
+         (let [session (nrepl/clone-session client)
+               value #(some :value (nrepl/request client {:op "eval" :session session :code %}))]
+           (value (str "(load-file " (pr-str (str file)) ")"))
+           (testing "a function, by evaluating its source again with #dbg in front"
+             (is (= "dbg.demo/f" (features/instrument client "f" {:ns "dbg.demo"} true {})))
+             (is (some #{"dbg.demo/f"} (features/instrumented client {})))
+             (testing "where it is"
+               (is (= "3" (value "(:line (meta #'dbg.demo/f))")))))
+           (testing "and without, which takes the instrumenting out"
+             (is (= "dbg.demo/f" (features/instrument client "dbg.demo/f" {:ns "user"} false {})))
+             (is (not (some #{"dbg.demo/f"} (features/instrumented client {})))))
+           (testing "but not a function with no source"
+             (value "(defn no-source [])")
+             (is (thrown-with-msg? clojure.lang.ExceptionInfo #"^No source for no-source, which takes evaluating it with #dbg"
+                                   (features/instrument client "no-source" {:ns "user"} true {}))))
+           (testing "nor one whose file's changed since it was loaded"
+             (spit file "(ns dbg.demo)\n\n(defn g [])\n\n(defn f [x]\n  (* x 2))\n")
+             (is (thrown-with-msg? clojure.lang.ExceptionInfo #"^The file doesn't have dbg\.demo/f where it was loaded from"
+                                   (features/instrument client "dbg.demo/f" {:ns "user"} true {}))))
+           (testing "nor nothing"
+             (is (thrown-with-msg? clojure.lang.ExceptionInfo #"^Nothing called nope in user"
+                                   (features/instrument client "nope" {:ns "user"} true {}))))))))))

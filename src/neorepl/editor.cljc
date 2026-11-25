@@ -714,6 +714,17 @@
           (recur)
           line)))))
 
+(defn read-form
+  "Reads code from the user with prompt, the way read-code does, starting
+  with text, if any, and leaving it out of the history. Returns nil on
+  Ctrl-C, as at the end of input."
+  [editor prompt text]
+  (fresh-line editor)
+  (try
+    (read-with editor prompt {:text text :history? false})
+    (catch UserInterruptException _ nil)
+    (catch EndOfFileException _ nil)))
+
 (defn read-line
   "Reads a line as typed, for code reading *in*, leaving it out of the
   history. Returns nil at the end of input and ::interrupted on Ctrl-C."
@@ -788,6 +799,15 @@
         :else (.styled sb (style styles k) ^CharSequence text)))
     (.columnSubSequence (.toAttributedString sb) 0 width)))
 
+(defn- raw-mode
+  "Puts terminal in raw mode, with Ctrl-C a key like the others, and returns
+  the attributes it had, to put back."
+  ^Attributes [^Terminal terminal]
+  (let [attributes (.enterRawMode terminal)]
+    (.setAttributes terminal (doto (Attributes. (.getAttributes terminal))
+                               (.setLocalFlag Attributes$LocalFlag/ISIG false)))
+    attributes))
+
 (defn full-screen
   "Takes the whole terminal for a view, the way less does, until (handle key)
   returns :done. (draw width height) says what the view shows: up to height
@@ -799,7 +819,7 @@
   :other. Output waits till the view's done."
   [{:keys [^Terminal terminal styles lock] :as editor} draw handle]
   (locking lock
-    (let [attributes (.enterRawMode terminal)
+    (let [attributes (raw-mode terminal)
           display (Display. terminal true)
           drawing (Object.)
           ;; Display takes the cursor to be at the top left of a blank
@@ -821,9 +841,6 @@
                                                                 (reset! clear? true)
                                                                 (redraw))))]
       (try
-        ;; Ctrl-C is a key like the others here.
-        (.setAttributes terminal (doto (Attributes. (.getAttributes terminal))
-                                   (.setLocalFlag Attributes$LocalFlag/ISIG false)))
         (puts terminal InfoCmp$Capability/enter_ca_mode)
         (puts terminal InfoCmp$Capability/keypad_xmit)
         (puts terminal InfoCmp$Capability/cursor_invisible)
@@ -842,3 +859,15 @@
           (.flush terminal)
           (.setAttributes terminal attributes)
           (.handle terminal Terminal$Signal/WINCH previous))))))
+
+(defn read-key
+  "Reads a key, as full-screen's handle gets them, Ctrl-C among them, on
+  the terminal as it is, rather than on a screen of its own. Nil at the end
+  of the input."
+  [{:keys [^Terminal terminal]}]
+  (let [attributes (raw-mode terminal)]
+    (try
+      (.flush terminal)
+      (.readBinding (BindingReader. (.reader terminal)) (key-map terminal))
+      (finally
+        (.setAttributes terminal attributes)))))

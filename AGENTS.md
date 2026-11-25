@@ -27,7 +27,8 @@ issues filed upstream.
   `hints.clj` finds what could fix an error.
 - `mcp.clj`: the MCP server, over the same features as the commands.
 - `inspector.clj`, `stacktrace.clj`, `ns_browser.clj`, `spec_browser.clj` and
-  `browser.clj`: the full-screen views.
+  `browser.clj`: the full-screen views. `debugger.clj` is the REPL's side of
+  cider-nrepl's debugger.
 - `lexer.clj`: tells finished forms from unfinished ones and classifies
   tokens. It doesn't read code, on purpose. `repair.clj` fixes delimiters
   from indentation.

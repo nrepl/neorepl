@@ -398,6 +398,22 @@
            (is (str/includes? err "  ,fix 1  (import 'java.time.Instant)\n"))
            (is (re-find #"user=> java\.time\.Instant\n#object\[java\.time\.Instant " out))))))))
 
+(deftest debugger-test
+  (on-each-server
+   (fn [server]
+     (let [{:keys [status out]} (run-with server (str ",break demo.core/greet\n(demo.core/greet \"d\")\nl\nc\n"
+                                                      ",unbreak demo.core/greet\n(demo.core/greet \"e\")\n")
+                                          "repl")]
+       (is (= 0 status))
+       ;; bb's server has the debugger since 1.13.230.
+       (if (old-bb? server)
+         (is (str/includes? out "The debugger takes cider-nrepl, or babashka 1.13.230 or later, on the server"))
+         (do (testing "stopping at each step, with the locals"
+               (is (str/includes? out "user=> ● demo.core/greet"))
+               (is (str/includes? out "  => \"d\"\ndebug>   who  \"d\"\ndebug> \"hi d\"\n")))
+             (testing "until it's taken out"
+               (is (str/includes? out "demo.core/greet runs without stopping again\nuser=> \"hi e\"\n")))))))))
+
 (deftest mcp-test
   (on-each-server
    (fn [server]

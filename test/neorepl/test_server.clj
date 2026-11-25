@@ -533,6 +533,66 @@
 
 (middleware/set-descriptor! #'wrap-fake-resolve {:handles {"cider/resolve-missing" {} "cider/resolve-alias" {}}})
 
+(def ^:private debugger
+  "The message wrap-fake-debugger answers the debugger's breakpoints with,
+  the init-debugger it got last, the answers waiting for a debug-input, by
+  key, and the functions it instruments, by namespace."
+  (atom {:msg nil :answers {} :instrumented {}}))
+
+(def ^:private debug-commands
+  ["next" "in" "out" "here" "continue" "continue-all" "eval" "inject" "locals" "inspect" "inspect-prompt"
+   "stacktrace" "trace" "quit"])
+
+(defn- debug-ask
+  "Sends the debugger's client a need-debug-input with what extra says, and
+  returns its answer, or :timeout."
+  [extra]
+  (let [key (str (java.util.UUID/randomUUID))
+        answer (promise)]
+    (swap! debugger assoc-in [:answers key] answer)
+    (transport/respond-to (:msg @debugger) (merge {:status "need-debug-input" :key key :input-type debug-commands
+                                                   :file [] :line 1 :column 1 :original-ns "user"}
+                                                  extra))
+    (deref answer 10000 :timeout)))
+
+(defn break!
+  "Has the debugger's client stop at a breakpoint, as cider-nrepl's does, at
+  the form at coor in code, whose value is value, with locals, [name value]
+  pairs, and returns what it answered: the command, or for one that takes
+  an expression, the command and the expression, which it's asked for."
+  [code coor value locals & {:as extra}]
+  (let [answer (debug-ask (merge {:code code :coor coor :debug-value value :locals locals} extra))]
+    (if (#{":eval" ":inject" ":inspect-prompt"} answer)
+      [answer (debug-ask {:input-type "expression" :prompt "Expression to evaluate: "})]
+      answer)))
+
+(defn wrap-fake-debugger
+  "cider-nrepl's debugger, roughly: init-debugger takes the breakpoints
+  break! has the client stop at, debug-input answers them, and evaluating
+  a defn with #dbg in front instruments it, which evaluating it without
+  undoes, for debug-instrumented-defs."
+  [handler]
+  (fn [{:keys [op code ns key input] :as msg}]
+    (case op
+      "init-debugger" (swap! debugger assoc :msg msg)
+      "debug-input" (some-> (get-in @debugger [:answers key]) (deliver input))
+      "debug-instrumented-defs"
+      (transport/respond-to msg :status "done"
+                            :list (for [[ns names] (:instrumented @debugger) :when (seq names)]
+                                    (cons ns (sort names))))
+      (if-let [[_ tag space name] (when (= "eval" op) (re-find #"^(#dbg(\s+))?\(defn-? (\S+)" (str code)))]
+        (do (swap! debugger update-in [:instrumented (or ns "user")] (fnil (if tag conj disj) #{}) name)
+            (handler (cond-> msg
+                       tag (update :code subs (count tag))
+                       ;; Where the defn is, past the line #dbg takes.
+                       (some-> space (str/includes? "\n")) (update :line #(some-> % inc)))))
+        (handler msg)))))
+
+(middleware/set-descriptor! #'wrap-fake-debugger
+                            {:requires #{"clone"}
+                             :expects #{"eval"}
+                             :handles {"init-debugger" {} "debug-input" {} "debug-instrumented-defs" {}}})
+
 (def ^:private builtin-sources
   "babashka finding the source of its built-ins, as source-fn does for the
   servers in this process. It resolves its own dependencies for that the
@@ -545,7 +605,7 @@
   "A :once fixture that runs the tests with an nREPL server listening on
   *port*, with wrap-stuck, wrap-fake-inspector, wrap-fake-tracer,
   wrap-fake-profiler, wrap-fake-reload, wrap-fake-system-output,
-  wrap-fake-taps and wrap-fake-resolve unless opts, which go to nrepl.server/start-server, give
+  wrap-fake-taps, wrap-fake-resolve and wrap-fake-debugger unless opts, which go to nrepl.server/start-server, give
   it a :handler."
   [& opts]
   (fn [f]
@@ -553,7 +613,7 @@
     (let [srv (apply server/start-server :port 0 :handler (server/default-handler #'wrap-stuck #'wrap-fake-inspector #'wrap-fake-tracer
                                                                                   #'wrap-fake-profiler #'wrap-fake-reload
                                                                                   #'wrap-fake-system-output #'wrap-fake-taps
-                                                                                  #'wrap-fake-resolve)
+                                                                                  #'wrap-fake-resolve #'wrap-fake-debugger)
                      opts)]
       (try
         (binding [*port* (:port srv)]
