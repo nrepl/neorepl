@@ -74,7 +74,7 @@
                      thread))}))
 
 (declare edit enter-ns switch-session inspect inspect-tapped run-tests browse-error autoreload change-setting
-         browse-specs fix break breaks unbreak debug)
+         browse-specs fix break break-at breaks unbreak unbreak-at debug)
 
 (def ^:private parked-wait
   "How long ,stop waits for the next breakpoint of the thread it goes to,
@@ -102,15 +102,21 @@
             :run #(fix %1 %2)}
            {:name "break" :arg "SYM" :help "Stop at each step of SYM, evaluating its source again with #dbg" :debugger? true
             :run #(break %1 %2)}
+           {:name "break-at" :arg "FILE LINE" :debugger? true
+            :help "Stop at each step of what starts at LINE of FILE, evaluating its top-level form again with #dbg there"
+            :run #(break-at %1 %2)}
            {:name "debug" :help "Run the input that failed again, stopping where it throws" :debugger? true
             :run (fn [state _] (debug state))}
            {:name "stop" :help "Go to the breakpoint a thread of its own stopped at" :debugger? true
             :run (fn [{:keys [stop]} _] (stop))}
-           {:name "breaks" :help "List the functions that stop at each step" :debugger? true
+           {:name "breaks" :help "List the functions, and the lines of files, that stop at each step" :debugger? true
             :run (fn [state _] (breaks state))}
            {:name "unbreak" :arg "SYM" :optional? true :debugger? true
-            :help "Stop stopping in SYM, or in every function that does, evaluating its source again"
+            :help "Stop stopping in SYM, or in every function and line that does, evaluating the source again"
             :run #(unbreak %1 %2)}
+           {:name "unbreak-at" :arg "FILE LINE" :debugger? true
+            :help "Stop stopping at LINE of FILE, evaluating its top-level form again"
+            :run #(unbreak-at %1 %2)}
            {:name "edit" :arg "SYM" :optional? true
             :help "Open where SYM, or this namespace, is defined in your EDITOR"
             :run #(edit %1 %2)}
@@ -343,15 +349,82 @@
 (def ^:private nothing-breaks
   "Nothing stops at each step")
 
+(defn- place-arg
+  "The FILE LINE ,break-at and ,unbreak-at take, arg, as [file line], or nil
+  when it isn't that."
+  [arg]
+  (when-let [[_ file line] (some->> arg (re-matches #"(.+?)\s+(\S+)"))]
+    (some->> (cli/parse-count line) (vector file))))
+
+(defn- nearest
+  "The one of xs whose (f x) is nearest n, or nil without any."
+  [f n xs]
+  (some->> (seq xs) (apply min-key #(Math/abs (long (- (f %) n))))))
+
+(defn- located
+  "The form of forms, those features/file-forms finds in the file of place,
+  one ,break-at has stop, that place is in: the one with the same :key,
+  nearest the line it was at, or nil when the file has none."
+  [{:keys [key line]} forms]
+  (nearest :line line (filter #(= key (:key %)) forms)))
+
+(defn- line-text
+  "The text of line n of form, counting from its first, trimmed."
+  [{:keys [code]} n]
+  (some-> (get (str/split-lines code) (dec n)) str/trim))
+
+(defn- moved
+  "lines, those of a place ,break-at has stop, a map from a line of its
+  form, counting from the first, to the line's text, where they are in
+  form now: at the nearest line with the text, or left out when none has
+  it."
+  [lines {:keys [code]}]
+  (let [texts (mapv str/trim (str/split-lines code))]
+    (into {} (keep (fn [[n text]]
+                     (some-> (nearest identity n (keep-indexed #(when (= text %2) (inc %1)) texts))
+                             (vector text)))
+                   lines))))
+
+(defn- current
+  "place, one ,break-at has stop, as its file has it now, the forms
+  forms-of, features/file-forms or one that remembers them, finds in it:
+  with its :form, and its :line and :lines where they are, or nil when the
+  file doesn't have the form anymore. Throws what features/file-forms
+  throws."
+  [{:keys [file lines] :as place} forms-of]
+  (when-let [form (located place (forms-of file))]
+    (assoc place :form form :line (:line form) :lines (moved lines form))))
+
+(defn- place-lines
+  "A function from a var's name to the lines places, those ,break-at has
+  stop, have in its definition, where they are in its file now, counting
+  from the definition's first, as features/instrument takes them, reading
+  each file once."
+  [places]
+  (let [forms-of (memoize features/file-forms)]
+    (memoize (fn [name]
+               (set (mapcat #(keys (:lines (try
+                                             (current % forms-of)
+                                             (catch clojure.lang.ExceptionInfo _ %))))
+                            (filter #(= name (:define %)) places)))))))
+
+(defn- unstepped-text
+  "What to say once the function called name stops at each step no more,
+  with lines that still stop."
+  [name lines]
+  (str name (if (seq lines) " only stops at the lines ,breaks lists now" " runs without stopping again")))
+
 (defn- instrument-text
   "Has the debugger stop at each step of the function sym names, or stop
-  that, unless on?, as features/instrument does, calling done with its
-  name once it has, and says so, or why not."
-  [{:keys [client] :as state} sym on? done]
+  that, unless on?, as features/instrument does, keeping the lines of it
+  the :places ,break-at has stop, calling done with its name once it has,
+  and says so, or why not."
+  [{:keys [client places] :as state} sym on? done]
   (try
-    (let [name (features/instrument client sym state (when on? "#dbg") {})]
+    (let [lines (place-lines @places)
+          name (features/instrument client sym state (when on? "#dbg") {:lines lines})]
       (done name)
-      (str name (if on? " stops at each step now" " runs without stopping again")))
+      (if on? (str name " stops at each step now") (unstepped-text name (lines name))))
     (catch clojure.lang.ExceptionInfo e
       (when (= ::nrepl/disconnected (:type (ex-data e)))
         (throw e))
@@ -365,22 +438,160 @@
   [{:keys [debugger mine] :as state} sym]
   (out (instrument-text state sym true #(do (debugger) (swap! mine conj %)))))
 
+(defn- place-of
+  "The place in places, those ,break-at has stop, as keep-place! keeps
+  them, for form, one of forms, those of the file at path, or a new one."
+  [places file path form forms]
+  (or (some #(when (and (= path (:path %)) (= form (located % forms))) %) places)
+      {:file file :path path}))
+
+(defn- keep-place!
+  "Keeps place in places, an atom with the ones ,break-at has stop, as a
+  map of the :file and its :path, the :ns its form's evaluated in, the
+  form's :key, the :line it starts at and the var it defines, :define, from
+  form, and lines, the :lines that stop, as moved has them, or takes it out
+  without any."
+  [places place form ns lines]
+  (swap! places (fn [all]
+                  (cond-> (vec (remove #{place} all))
+                    (seq lines) (conj (assoc place :ns ns :key (:key form) :line (:line form)
+                                             :define (:define form) :lines lines))))))
+
+(defn- stepped?
+  "Whether the debugger stops at each step of the var form defines, as
+  features/file-forms has it."
+  [client {:keys [define]}]
+  (and define (some #{define} (features/instrumented client {}))))
+
+(defn- found-at
+  "The first of the forms of file, as features/file-forms has them, that
+  takes line n and that good? takes, as a map of the :form, its :place in
+  the :places atom, as place-of has it, the :line, counting from the
+  form's first, the :lines its place has, where they are now, as moved has
+  them, and the :ns to evaluate it in, or an empty map when there's none."
+  [{:keys [places] :as state} file n good?]
+  (let [path (.getCanonicalPath (io/file file))
+        forms (features/file-forms file)]
+    (or (some (fn [form]
+                (when (<= (:line form) n (:end form))
+                  (let [place (place-of @places file path form forms)
+                        found {:form form :place place :line (- n (:line form) -1)
+                               :lines (moved (:lines place) form) :ns (or (:ns place) (:ns state))}]
+                    (when (good? found)
+                      found))))
+              forms)
+        {})))
+
+(defn- at-text
+  "Line n of file, as FILE:LINE."
+  [file n]
+  (render/location-text {:file file :line n}))
+
+(defn- break-at
+  "Has the debugger stop at each step of what starts at the line of the
+  file arg, FILE LINE, says, as features/instrument-form does, keeping the
+  other lines of its top-level form the :places atom has stop, and the
+  stopping at each step of all of it, when it did, and keeping the line in
+  :places, or for a definition's first line, the var in :mine, as break
+  does, starting the debugger. Returns what to print, as command-output
+  does."
+  [{:keys [client debugger places mine] :as state} arg]
+  (if-let [[file n] (place-arg arg)]
+    (let [{:keys [form place line lines ns]} (found-at state file n #(seq (lexer/line-forms (:code (:form %)) #{(:line %)})))]
+      (if-not form
+        (out (str "Nothing starts at line " n " of " file))
+        (let [lines (assoc lines line (line-text form line))
+              ;; What it defines, as what it evaluates to says.
+              form (assoc form :define (features/instrument-form client file form
+                                                                 (cond-> (set (keys lines)) (stepped? client form) (conj 1))
+                                                                 {:ns ns} {}))
+              whole? (and (= 1 line) (stepped? client form))]
+          (debugger)
+          (keep-place! places place form ns (cond-> lines whole? (dissoc 1)))
+          (when whole?
+            (swap! mine conj (:define form)))
+          (out (str (if whole? (:define form) (at-text file n)) " stops at each step now")))))
+    (out "Usage: ,break-at FILE LINE")))
+
+(defn- unbreak-at
+  "Has the debugger stop no more at the line of the file arg, FILE LINE,
+  says, as break-at has it stop there, or at each step of the var whose
+  definition starts there, evaluating the top-level form it's in again,
+  with the other lines it has stop. Returns what to print, as
+  command-output does."
+  [{:keys [client places mine] :as state} arg]
+  (if-let [[file n] (place-arg arg)]
+    (let [{:keys [form place line lines ns]} (found-at state file n (fn [{:keys [form line lines]}]
+                                                                      (or (contains? lines line)
+                                                                          (and (= 1 line) (:define form)))))
+          stepped (when form (stepped? client form))
+          whole? (and (= 1 line) stepped)
+          left (dissoc lines line)]
+      (if (or whole? (contains? lines line))
+        (let [form (assoc form :define (features/instrument-form client file form
+                                                                 (cond-> (set (keys left)) (and stepped (not whole?)) (conj 1))
+                                                                 {:ns ns} {}))]
+          (keep-place! places place form ns left)
+          (when whole?
+            (swap! mine disj (:define form)))
+          (out (if whole? (unstepped-text (:define form) left) (str (at-text file n) " runs without stopping again"))))
+        (out (str "Nothing stops at line " n " of " file ", ,breaks lists what does"))))
+    (out "Usage: ,unbreak-at FILE LINE")))
+
+(defn- place-texts
+  "Each line place, one ,break-at has stop, has, as FILE:LINE."
+  [{:keys [file line lines]}]
+  (map #(at-text file (+ line % -1)) (sort (keys lines))))
+
+(defn- unplace
+  "Has the debugger stop no more at the lines of place, one ,break-at has
+  stop, evaluating its form again, as the file has it now, the forms
+  forms-of finds in it, in the namespace it was evaluated in. Returns what
+  to say for each line, and place when it's to be kept, as it is when its
+  form can't be evaluated, as [texts kept]."
+  [client {:keys [file ns] :as place} forms-of opts]
+  (try
+    (if-let [{:keys [form] :as now} (current place forms-of)]
+      (do (features/instrument-form client file form #{} {:ns ns} opts)
+          [(map #(str % " runs without stopping again") (place-texts now))])
+      [(map #(str % " isn't in the file anymore, so what it was in still stops there") (place-texts place))])
+    (catch clojure.lang.ExceptionInfo e
+      (when (= ::nrepl/disconnected (:type (ex-data e)))
+        (throw e))
+      [[(str (str/join ", " (place-texts place)) ": " (ex-message e))] place])))
+
 (defn- breaks
-  "Lists the functions the debugger stops in, as break has them do. Returns
-  what to print, as command-output does."
-  [{:keys [client]}]
-  (out (or (some->> (features/instrumented client {}) seq (str/join "\n"))
-           nothing-breaks)))
+  "Lists the functions the debugger stops in, as break has them do, and the
+  lines of files, as break-at has them, where they are in the files now.
+  Returns what to print, as command-output does."
+  [{:keys [client places]}]
+  (let [forms-of (memoize features/file-forms)]
+    (out (or (some->> (concat (features/instrumented client {})
+                              (mapcat #(place-texts (or (try
+                                                          (current % forms-of)
+                                                          (catch clojure.lang.ExceptionInfo _ nil))
+                                                        %))
+                                      (sort-by (juxt :file :line) @places)))
+                      seq
+                      (str/join "\n"))
+             nothing-breaks))))
 
 (defn- unbreak
   "Has the function sym names run without stopping again, or without sym,
-  every one the debugger stops in. Returns what to print, as
-  command-output does."
-  [{:keys [client] :as state} sym]
-  (cond
-    sym (out (instrument-text state sym false #(swap! (:mine state) disj %)))
-    :else (out (or (some->> (features/instrumented client {}) seq (map #(instrument-text state % false (fn [name] (swap! (:mine state) disj name)))) (str/join "\n"))
-                   nothing-breaks))))
+  every one the debugger stops in and every line of the :places atom, but
+  for those whose form can't be evaluated, which it keeps. Returns what to
+  print, as command-output does."
+  [{:keys [client places mine] :as state} sym]
+  (if sym
+    (out (instrument-text state sym false #(swap! mine disj %)))
+    (let [left (first (reset-vals! places []))
+          vars (mapv #(instrument-text state % false (fn [name] (swap! mine disj name)))
+                     (features/instrumented client {}))
+          forms-of (memoize features/file-forms)
+          results (mapv #(unplace client % forms-of {}) left)]
+      (swap! places into (keep second results))
+      (out (or (some->> (concat vars (mapcat first results)) seq (str/join "\n"))
+               nothing-breaks)))))
 
 (defn- throwing-vars
   "The vars of the project's functions in files in the stack trace of the
@@ -393,11 +604,12 @@
        distinct))
 
 (defn- try-instrument
-  "What features/instrument returns for sym, tag and ctx, or nil when it
-  can't, but for a lost connection, which still throws."
-  [client sym ctx tag]
+  "What features/instrument returns for sym, tag, ctx and lines, as
+  place-lines has them, or nil when it can't, but for a lost connection,
+  which still throws."
+  [client sym ctx tag lines]
   (try
-    (features/instrument client sym ctx tag {})
+    (features/instrument client sym ctx tag {:lines lines})
     (catch clojure.lang.ExceptionInfo e
       (when (= ::nrepl/disconnected (:type (ex-data e)))
         (throw e)))))
@@ -410,7 +622,7 @@
   :after-eval atom puts back as it was after it, or else the input does.
   Returns what to print, as command-output does, with the :input to
   evaluate."
-  [{:keys [client session ns debugger failed after-eval] :as state}]
+  [{:keys [client session ns debugger failed after-eval places] :as state}]
   (let [{:keys [code] failed-ns :ns} @failed]
     (cond
       (nil? code) (out "No error to debug: ,debug runs the input that failed last again")
@@ -421,11 +633,12 @@
                      (features/last-error client session)
                      (catch clojure.lang.ExceptionInfo _ nil))
             stepped (set (features/instrumented client {}))
-            instrumented (some #(try-instrument client % state "#dbg!") (throwing-vars causes))]
+            lines (place-lines @places)
+            instrumented (some #(try-instrument client % state "#dbg!" lines) (throwing-vars causes))]
         ;; The input stays what failed, rather than what runs now, and the
         ;; function goes back to stopping at each step, if it did.
         (reset! after-eval #(do (when instrumented
-                                  (try-instrument client instrumented state (when (stepped instrumented) "#dbg")))
+                                  (try-instrument client instrumented state (when (stepped instrumented) "#dbg") lines))
                                 (when @failed
                                   (reset! failed {:code code :ns ns}))))
         (if instrumented
@@ -762,10 +975,12 @@
         ;; the next evaluation, as ,debug takes its #dbg! out.
         failed (atom nil)
         after-eval (atom nil)
-        ;; The functions the REPL instrumented, which it puts back as they
-        ;; were when it exits, and the breakpoints threads of their own
-        ;; stopped at, waiting for ,stop.
+        ;; The functions the REPL instrumented and the lines of files
+        ;; ,break-at has stop, which it puts back as they were when it
+        ;; exits, and the breakpoints threads of their own stopped at,
+        ;; waiting for ,stop.
         mine (atom #{})
+        places (atom [])
         parked (atom clojure.lang.PersistentQueue/EMPTY)
         ;; Whether the REPL's exiting, when a breakpoint goes on rather than
         ;; waiting for a ,stop that won't come.
@@ -957,7 +1172,14 @@
                     :while (pos? left)]
               (try
                 (features/instrument client name {:ns "user"} nil {:timeout-ms left})
-                (catch Exception _))))
+                (catch Exception _)))
+            (let [forms-of (memoize features/file-forms)]
+              (doseq [place @places
+                      :let [left (- deadline (System/currentTimeMillis))]
+                      :while (pos? left)]
+                (try
+                  (unplace client place forms-of {:timeout-ms left})
+                  (catch Exception _)))))
           ;; Leaving the debugger first, so it's not taken for another
           ;; client starting it.
           (doseq [session [(when (realized? forwarding) @forwarding) (first (reset-vals! debug-session-atom nil))]
@@ -982,7 +1204,7 @@
                         (as-command command-thread
                                     #(command-output (merge io place {:client client :evaluate (partial evaluate session)
                                                                       :test-errors test-errors :fixes fixes :debugger debugger
-                                                                      :failed failed :after-eval after-eval :mine mine
+                                                                      :failed failed :after-eval after-eval :mine mine :places places
                                                                       :stop stop
                                                                       :show-traces show-traces :hide-traces hide-traces
                                                                       :taps taps :tapped tapped :own own :quietly quietly})

@@ -431,6 +431,8 @@
         (is (= "[x]" (at code [3])))))
     (testing "and tags, which babashka's debugger leaves in"
       (is (= "x" (at "#dbg\n(defn f [x] (inc x))" [3 1]))))
+    (testing "a namespaced map from its #:ns"
+      (is (= "#:user{:a 1}" (at "(f #:user{:a 1})" [1]))))
     (testing "the branch a reader conditional takes, or none, or what it splices"
       (is (= "2" (at "(f #?(:cljs 1 :clj (inc 2)))" [1 1])))
       (is (= "x" (at "(f #?(:cljs 1) x)" [1])))
@@ -438,3 +440,37 @@
     (testing "nothing past what's there"
       (is (nil? (at code [9])))
       (is (nil? (at code [3 1 1 1 0]))))))
+
+(deftest defined-test
+  (testing "what a def of some sort defines, as its head and name"
+    (is (= ["defn" "f"] (lexer/defined "(defn f [x] x)")))
+    (is (= ["s/def" "::k"] (lexer/defined "(s/def ::k int?)")))
+    (is (= ["defmethod" "m"] (lexer/defined "(defmethod m :k [x] x)"))))
+  (testing "past metadata and tags, as babashka's debugger leaves #dbg"
+    (is (= ["defn" "g"] (lexer/defined "#dbg\n^:m (defn g [])"))))
+  (testing "but not what isn't one"
+    (is (nil? (lexer/defined "(s/fdef f :args any?)")))
+    (is (nil? (lexer/defined "[defn f]")))
+    (is (nil? (lexer/defined "(+ 1 2)")))))
+
+(deftest line-forms-test
+  (let [code "(defn g \"doc\" [x]\n  (let [a (inc x) ; (no)\n        b #_(no) (* a 2)]\n    'q @(atom b) ^:m (str b)\n    #(inc %)))"
+        on #(mapv (partial apply subs code) (lexer/line-forms code (set %&)))]
+    (testing "the outermost forms that start on a line, past comments and what #_ discards"
+      (is (= ["(let [a (inc x) ; (no)\n        b #_(no) (* a 2)]\n    'q @(atom b) ^:m (str b)\n    #(inc %))"] (on 2)))
+      (is (= ["b" "(* a 2)"] (on 3))))
+    (testing "a quote or deref with its form, and a form without its metadata"
+      (is (= ["'q" "@(atom b)" "(str b)"] (on 4)))
+      (is (= ["#(inc %)"] (on 5))))
+    (testing "the form itself on its first line"
+      (is (= [code] (on 1))))
+    (testing "a namespaced map with its #:ns, which nothing can come between"
+      (let [code "(f x\n  #:user{:id 1} #::{:b 2})"]
+        (is (= ["#:user{:id 1}" "#::{:b 2}"] (mapv (partial apply subs code) (lexer/line-forms code #{2}))))))
+    (testing "nothing on a line where nothing starts, or past the end"
+      (is (= [] (on 6)))
+      (is (= [] (lexer/line-forms "(f\n  \"a\n  b\")" #{3})))
+      (is (= [] (lexer/line-forms "(f\n  ;; c\n  x)" #{2}))))
+    (testing "on several lines, the forms on each, but for those inside another"
+      (is (= ["b" "(* a 2)" "'q" "@(atom b)" "(str b)"] (on 3 4)))
+      (is (= [(first (on 2))] (on 2 3))))))

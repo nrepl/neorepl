@@ -324,8 +324,14 @@ next step, `i` and `o` to step in and out, `c` to go on to the next
 breakpoint, `l` for the locals, `e` or `(` for an expression evaluated with
 them, `j` for one to return in place of the form, `p` to inspect the value,
 `q` to stop, and `?` for the rest. Enter repeats the last step. Without a
-terminal they're lines. `,breaks` lists what stops and `,unbreak` evaluates
-the source again without `#dbg`. After an error, `,debug` runs the input
+terminal they're lines. `,break-at FILE LINE` has what starts at a line of a
+file stop at each step, evaluating the top-level form it's in again, as the
+file has it now, with `#dbg` in front of the forms on that line, so a
+method, a function in a `def` or a line in the middle of a long function can
+stop too, and a definition's first line has all of it stop, as `,break`
+does. `,breaks` lists the functions and the lines that stop, `,unbreak`
+evaluates the source again without `#dbg`, and `,unbreak-at FILE LINE` takes
+one line out. After an error, `,debug` runs the input
 again, stopping where it throws: the first of the project's functions in the
 stack trace gets `#dbg!` for that evaluation, which stops only at the form
 that throws, with its locals, where `j` returns a value in its place. When

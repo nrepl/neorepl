@@ -10,19 +10,7 @@
   indentation says nothing about, or tabs in the indentation of a form it
   would change."
   (:require [clojure.string :as str]
-            [neorepl.lexer :as lexer])
-  (:import (java.util Collections)))
-
-(defn- line-starts
-  "The index each line of s starts at."
-  [^String s]
-  (into [0] (keep-indexed (fn [i c] (when (= \newline c) (inc i)))) s))
-
-(defn- line-of
-  "The line, counting from 0, that index is on, given the line-starts."
-  [starts index]
-  (let [i (Collections/binarySearch starts index)]
-    (if (neg? i) (- (- i) 2) i)))
+            [neorepl.lexer :as lexer]))
 
 (defn- indentation
   "The index of the first character on the line starting at start that
@@ -52,7 +40,7 @@
   [^String s starts tokens]
   (-> (reduce
        (fn [state ts]
-         (let [line-start (nth starts (line-of starts (:start (first ts))))
+         (let [line-start (nth starts (lexer/line-of starts (:start (first ts))))
                col #(- (:start %) line-start)
                [first-token] ts
                ;; A line in a multi-line string doesn't start with a token.
@@ -74,7 +62,7 @@
            (cond-> state
              (pos? trail) (assoc :point (:end (nth ts (dec trail)))))))
        {:stack [] :deletes #{} :inserts {} :point nil}
-       (partition-by #(line-of starts (:start %)) (remove #(= :comment (:type %)) tokens)))
+       (partition-by #(lexer/line-of starts (:start %)) (remove #(= :comment (:type %)) tokens)))
       (close-to -1)
       (select-keys [:deletes :inserts])))
 
@@ -83,8 +71,8 @@
   strings in inserts put in at their indexes, and the lines that only had
   deleted closers dropped."
   [^String s starts tokens deletes inserts]
-  (let [emptied (set (for [ts (partition-by #(line-of starts (:start %)) tokens)
-                           :let [line (line-of starts (:start (first ts)))]
+  (let [emptied (set (for [ts (partition-by #(lexer/line-of starts (:start %)) tokens)
+                           :let [line (lexer/line-of starts (:start (first ts)))]
                            :when (every? #(contains? deletes (:start %)) ts)
                            ;; Not one with the end of a multi-line string.
                            :when (= (:start (first ts)) (indentation s (nth starts line)))]
@@ -104,7 +92,7 @@
   start in column 0 with code other than a closer, as [line tokens]."
   [starts tokens]
   (reduce (fn [parts {:keys [type start] :as token}]
-            (let [line (line-of starts start)]
+            (let [line (lexer/line-of starts start)]
               (if (or (empty? parts)
                       (and (= start (nth starts line)) (not (#{:comment :close} type))))
                 (conj parts [line [token]])
@@ -139,7 +127,7 @@
   (some (fn [line]
           (let [start (nth starts line)]
             (str/includes? (subs s start (indentation s start)) "\t")))
-        (distinct (map #(line-of starts (:start %)) tokens))))
+        (distinct (map #(lexer/line-of starts (:start %)) tokens))))
 
 (defn repair
   "s with the delimiters of its top-level forms that don't balance repaired
@@ -147,7 +135,7 @@
   can't repair them."
   [^String s]
   (let [{:keys [tokens]} (lexer/lex s)
-        starts (line-starts s)]
+        starts (lexer/line-starts s)]
     ;; An unterminated string runs to the end, so it's the last token.
     (if (= :open-string (:type (peek tokens)))
       {:error "Can't tell where an unterminated string or regex should end"}

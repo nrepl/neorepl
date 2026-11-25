@@ -424,7 +424,18 @@
                  (testing "and taking the instrumenting out after"
                    (is (str/includes? out "Nothing stops at each step\n")))))
              (testing "until it's taken out"
-               (is (str/includes? out "demo.core/greet runs without stopping again\nuser=> \"hi e\"\n")))))))))
+               (is (str/includes? out "demo.core/greet runs without stopping again\nuser=> \"hi e\"\n")))
+             (testing ",break-at, stopping at each step of what starts at a line of a file"
+               (let [file (str (io/file (project-dir server) "src" "demo" "core.clj"))
+                     {:keys [out]} (run-with server (str "(require 'demo.core)\n,break-at " file " 6\n(demo.core/greet \"f\")\nn\nn\n"
+                                                         ",breaks\n,unbreak-at " file " 6\n(demo.core/greet \"g\")\n")
+                                             "repl")]
+                 (is (str/includes? out (str file ":6 stops at each step now\n")))
+                 (is (str/includes? out "    #dbg (str \"hi \" who))\n"))
+                 (is (str/includes? out "  => \"f\"\ndebug> "))
+                 (is (str/includes? out "debug> \"hi f\"\n"))
+                 (is (str/includes? out (str "user=> " file ":6\n")))
+                 (is (str/includes? out (str file ":6 runs without stopping again\nuser=> \"hi g\"\n")))))))))))
 
 (deftest mcp-test
   (on-each-server
