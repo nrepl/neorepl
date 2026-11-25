@@ -91,10 +91,13 @@ evaluation left running by a call that got killed.
 
 ## When something fails
 
-`eval` and `load` print the error and exit 1. `neorepl pst -s agent` prints
-the stack trace of the session's last error. `neorepl test` prints each
-failure with what it expected, what it got and where, and `neorepl retest
--s agent` reruns only the tests that didn't pass.
+`eval` and `load` print the error and exit 1. When the code names something
+that isn't there, `eval` follows the error with the fixes to try, a require
+or import to run first or the name it's a typo of, and `--format json` has
+them as `suggestions`, each with the code to evaluate for it as its `input`.
+`neorepl pst -s agent` prints the stack trace of the session's last error.
+`neorepl test` prints each failure with what it expected, what it got and
+where, and `neorepl retest -s agent` reruns only the tests that didn't pass.
 
 To see how a function gets called, and what it returns, trace it, run the
 code that calls it, and stop tracing it after. It takes cider-nrepl on the

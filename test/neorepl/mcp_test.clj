@@ -148,6 +148,14 @@
          (is isError)
          (is (= "eval-error" (:status structuredContent)))
          (is (str/includes? (text {:result result}) "Divide by zero"))))
+     (testing "the fixes to try for a name that isn't there"
+       (send (tool-call 40 "eval" {:code "(mapp inc [1])"}))
+       (let [{{:keys [isError structuredContent] :as result} :result} (receive)]
+         (is isError)
+         (is (= {:replace "map" :in-place-of "mapp" :input "(map inc [1])"} (first (:suggestions structuredContent))))
+         (is (str/includes? (text {:result result}) "A fix to try: map in place of mapp"))))
+     (send (tool-call 41 "eval" {:code "(/ 1 0)"}))
+     (receive)
      (testing "and its stack trace"
        (send (tool-call 4 "pst" {}))
        (let [response (receive)]

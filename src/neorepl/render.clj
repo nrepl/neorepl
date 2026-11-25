@@ -220,6 +220,11 @@
   [{:keys [run replace in-place-of]}]
   (or run (str replace " in place of " in-place-of)))
 
+(defn suggestion-lines
+  "The fixes hints/with-suggestions found, a line each."
+  [fixes]
+  (map #(str "A fix to try: " (fix-text %)) fixes))
+
 (defn- relative
   "path relative to dir, when it's in there and isn't dir itself, or else
   as it is, as with a root for dir, which everything is in."

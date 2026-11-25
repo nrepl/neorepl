@@ -1971,12 +1971,14 @@
   makes sure of first, with ns-msg, the namespace's ns form, if there's one
   to evaluate. With :reload? in opts, what changed gets reloaded before
   that, as reload-changed does. The :timeout covers it all, and the session
-  stays in its namespace."
-  [client {:keys [session] :as msg} name ns-msg {:keys [timeout reload?] :as opts}]
+  stays in its namespace. opts' :then, if any, gets the result of
+  evaluating msg itself, rather than of reloading or loading the namespace,
+  and the opts with the :deadline, if there's one, for what to return."
+  [client {:keys [session] :as msg} name ns-msg {:keys [timeout reload? then] :or {then (fn [result _] result)} :as opts}]
   (let [opts (cond-> opts
                timeout (assoc :deadline (+ (System/currentTimeMillis) (long (* 1000 timeout)))))]
     (or (when reload?
           (reload-changed client session opts))
         (when name
           (ensure-ns client session name ns-msg opts))
-        (evaluation/evaluate client (cond-> msg name (assoc :ns name)) opts))))
+        (then (evaluation/evaluate client (cond-> msg name (assoc :ns name)) opts) opts))))

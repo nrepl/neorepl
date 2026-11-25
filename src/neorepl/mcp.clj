@@ -9,6 +9,7 @@
             [neorepl.discovery :as discovery]
             [neorepl.evaluation :as evaluation]
             [neorepl.features :as features]
+            [neorepl.hints :as hints]
             [neorepl.json :as json]
             [neorepl.lexer :as lexer]
             [neorepl.lookups :as lookups]
@@ -203,7 +204,7 @@
   evaluate in their session take their turn there, see call."
   [{:name "eval"
     :evaluates? true
-    :description "Evaluate Clojure code in a session that keeps *ns*, *1 and *e from call to call. Returns what it printed and its values; an exception's message and its class come in the error output, and pst shows the stack trace."
+    :description "Evaluate Clojure code in a session that keeps *ns*, *1 and *e from call to call. Returns what it printed and its values; an exception's message and its class come in the error output, and pst shows the stack trace. When the code names something that isn't there, the fixes to try come as suggestions: a require or import to run first, or a name to put in its place, each with the code to evaluate for it as its input."
     :inputSchema (schema (merge {:code {:type "string" :description "The code, one form or several"}
                                  :ns {:type "string" :description "The namespace to evaluate in, loaded first unless it's there (default: the session's)"}
                                  :reload {:type "boolean" :description "Reload the namespaces whose files changed first, and the ones that use them, keeping what defonce defined; if that fails, the code doesn't run. Takes cider-nrepl."}}
@@ -211,8 +212,11 @@
                          "code")
     :run (fn [server {:keys [code ns reload] :as args} on-send]
            (evaluate server args on-send
-                     #(features/evaluate-in-ns %1 {:op "eval" :code code :session %2} ns nil
-                                               (assoc %3 :reload? reload))))}
+                     (fn [client session opts]
+                       (features/evaluate-in-ns client {:op "eval" :code code :session session} ns nil
+                                                (assoc opts :reload? reload
+                                                       :then (partial hints/with-suggestions client session ns code))))
+                     #(str/join "\n" (render/suggestion-lines (:suggestions %)))))}
    {:name "load"
     :evaluates? true
     :description "Load a Clojure file into the session, so its errors carry the file's name and lines. Check it first."

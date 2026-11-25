@@ -9,6 +9,7 @@
 - [#93](https://github.com/nrepl/neorepl/pull/93): The REPL follows an error with what to try: for code naming something that isn't there, the name marked in the input and the requires, imports and corrected names that could fix it, numbered for `,fix N`, and for the first few other errors, `,pst` and `,stacktrace`, which the `hints` setting turns off.
 - [#94](https://github.com/nrepl/neorepl/pull/94): `,break` has a function stop at each step, through cider-nrepl's debugger, as `#dbg` in the input does, with CIDER's keys at each breakpoint, `,breaks` to list what stops and `,unbreak` to take it out.
 - [#95](https://github.com/nrepl/neorepl/pull/95): Other errors in the REPL get what they say past their message: an ex-info's data as fields, the arglists of a function called with the wrong number of arguments, what the commonest errors tend to mean, and the line of the project's code they came from.
+- [#96](https://github.com/nrepl/neorepl/pull/96): `neorepl eval` and the MCP `eval` tool follow an error about a name that isn't there with the fixes to try, which `--format edn` and `json` and the tool's structured content have as `suggestions`, each with the code to evaluate for it.
 
 ### Changes
 
