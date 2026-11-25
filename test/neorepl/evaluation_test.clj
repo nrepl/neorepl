@@ -15,6 +15,16 @@
                                                   {:on-send (fn [_ interrupt] (interrupt))}))]
           (is (= "interrupted" (:status (deref result 10000 nil)))))))))
 
+(deftest collect-test
+  (with-client [client {:port *port*}]
+    (testing "without collecting, only the end of stderr, where an error's message is"
+      (let [{:keys [values out err]} (evaluation/evaluate client {:op "eval" :code "(binding [*out* *err*] (print (apply str (repeat 3000 \"x\")) \"end\")) 1"}
+                                                          {:collect? false})]
+        (is (= [] values))
+        (is (= "" out))
+        (is (= 2000 (count err)))
+        (is (str/ends-with? err "x end"))))))
+
 (deftest forms-test
   (with-client [client {:port *port*}]
     (let [session (nrepl/clone-session client)

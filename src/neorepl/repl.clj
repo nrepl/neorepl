@@ -7,6 +7,7 @@
             [neorepl.editor :as editor]
             [neorepl.evaluation :as evaluation]
             [neorepl.features :as features]
+            [neorepl.hints :as hints]
             [neorepl.inspector :as inspector]
             [neorepl.lookups :as lookups]
             [neorepl.lexer :as lexer]
@@ -71,7 +72,7 @@
                      thread))}))
 
 (declare edit enter-ns switch-session inspect inspect-tapped run-tests browse-error autoreload change-setting
-         browse-specs)
+         browse-specs fix)
 
 (def ^:private commands
   "The REPL's commands, the CIDER way: a comma, which Clojure reads as
@@ -90,6 +91,8 @@
             :run (fn [state _] (inspect-tapped state))}
            {:name "stacktrace" :help "Browse the last error's stack trace, or the last test run's, and open its frames"
             :run (fn [state _] (browse-error state))}
+           {:name "fix" :arg "N" :help "Try fix N of the ones the last error listed"
+            :run #(fix %1 %2)}
            {:name "edit" :arg "SYM" :optional? true
             :help "Open where SYM, or this namespace, is defined in your EDITOR"
             :run #(edit %1 %2)}
@@ -305,6 +308,17 @@
         (out (render/test-report-text report)))
     {}))
 
+(defn- fix
+  "Has the REPL evaluate the :input of fix n, as typed, of the last error's
+  :fixes, an atom with them, as if it was typed. Returns what to print, as
+  command-output does, with that :input."
+  [{:keys [fixes]} n]
+  (if-let [fix (some->> (cli/parse-count n) dec (get @fixes))]
+    (select-keys fix [:input])
+    (out (if-let [found (seq @fixes)]
+           (str "Usage: ,fix N, N being 1" (when (next found) (str " to " (count found))))
+           "No fixes to try: the last evaluation's error listed none"))))
+
 (defn- show-inspector
   "Shows the inspector's view, the lines (view page-size) returns, with a
   page that fits the screen, letting the user :browse it, or prints it when
@@ -479,7 +493,8 @@
   the :sources-dir, for ,edit, a function that :evaluates the way the REPL
   does, for ,test and ,inspect, and one to :browse what ,inspect and
   ,stacktrace find, as browser/browse does, partly applied to the editor,
-  if the REPL can, an atom with the last test run's :test-errors, functions
+  if the REPL can, an atom with the last test run's :test-errors, one with
+  the last error's :fixes, for ,fix, functions
   that have the REPL :show-traces and :hide-traces, a promise of the
   subscription to :taps and an atom with the summary of the value :tapped
   last, for ,tap, the :sessions-file and
@@ -487,7 +502,8 @@
   its :settings, for ,set and ,autoreload, and a function to run lookups
   :quietly with, as editor/quietly takes f. What to
   print can have the :ns the REPL goes on in, or the :session and its
-  :session-name too, as switch-session says."
+  :session-name too, as switch-session says, and the :input it evaluates
+  next, as if typed."
   [{:keys [client quietly] :as state} name arg]
   (let [{arg-name :arg :keys [code? args? optional?] :as command} (command name)]
     (cond
@@ -520,6 +536,51 @@
   Without a space, which comint modes' prompt patterns don't take."
   [{:keys [ns session-name]}]
   (str (some-> session-name (str ":")) ns "=> "))
+
+(defn- as-command
+  "Calls f the way a command runs, so that Ctrl-C stops it: with the
+  current thread as the :command-thread, the atom interruptions has, while
+  it runs."
+  [command-thread f]
+  (reset! command-thread (Thread/currentThread))
+  (try
+    (f)
+    (finally
+      (reset! command-thread nil)
+      ;; In case Ctrl-C came after it was done.
+      (Thread/interrupted))))
+
+(def ^:private error-hints
+  "How many errors get the hint saying where to see more of them."
+  3)
+
+(def ^:private error-hint
+  "Where to see more of an error, for those who don't know yet."
+  "  ,pst shows its stack trace, ,stacktrace browses it")
+
+(defn- hint
+  "Prints what could fix the error evaluating code at place got, having
+  printed err, numbered for ,fix, and returns the fixes, or prints where
+  to see more of the error, for the first few errors, as :hinted, an atom,
+  counts them. Looking for fixes runs as a command does, through quietly,
+  so that Ctrl-C stops it."
+  [client place code err {:keys [hinted command-thread quietly width print-message]}]
+  (let [{:keys [token fixes]} (try
+                                (as-command command-thread #(quietly (fn [] (hints/suggest client place code err {}))))
+                                ;; They're only hints, which a server that
+                                ;; can't give them shouldn't get in the way of.
+                                (catch Exception _ nil))
+        more? (and (empty? fixes) (< @hinted error-hints))
+        lines (concat (when token (render/marked-lines code token (width)))
+                      (when (seq fixes)
+                        [(cli/indented-columns (map-indexed (fn [i fix] [(str ",fix " (inc i)) (render/fix-text fix)])
+                                                            fixes))])
+                      (when more? [error-hint]))]
+    (when more?
+      (swap! hinted inc))
+    (when (seq lines)
+      (print-message (str/join "\n" lines)))
+    fixes))
 
 (defn- run-loop
   "Reads code with read-code and evaluates it until the input ends or says
@@ -556,6 +617,10 @@
         own {:session session :session-name session-name}
         ;; The errors of the last test run, until an evaluation fails.
         test-errors (atom nil)
+        ;; The fixes the last evaluation's error listed, and how many
+        ;; errors got the hint saying where to see more of them.
+        fixes (atom nil)
+        hinted (atom 0)
         ;; The subscription to trace events, once something's traced.
         traces (atom nil)
         ;; Without one, the server prints trace events, so failing to get
@@ -672,28 +737,28 @@
          (let [code (or pending (read-code place last-eval))
                [name arg more] (some-> code command-call)
                output (when name
-                        (reset! command-thread (Thread/currentThread))
-                        (try
-                          (command-output (merge io place {:client client :evaluate (partial evaluate session)
-                                                           :test-errors test-errors
-                                                           :show-traces show-traces :hide-traces hide-traces
-                                                           :taps taps :tapped tapped :own own :quietly quietly})
-                                          name arg)
-                          (finally
-                            (reset! command-thread nil)
-                            ;; In case Ctrl-C came after the command was done.
-                            (Thread/interrupted))))]
+                        (as-command command-thread
+                                    #(command-output (merge io place {:client client :evaluate (partial evaluate session)
+                                                                      :test-errors test-errors :fixes fixes
+                                                                      :show-traces show-traces :hide-traces hide-traces
+                                                                      :taps taps :tapped tapped :own own :quietly quietly})
+                                                     name arg)))]
            (cond
              (or (nil? code) (= ":repl/quit" (str/trim code)) (= :quit output)) nil
              (str/blank? code) (recur place nil last-eval)
              output (do (print-response output)
-                        (recur (merge place (select-keys output [:session :session-name :ns])) more nil))
+                        (recur (merge place (select-keys output [:session :session-name :ns]))
+                               (some->> [(:input output) more] (remove nil?) seq (str/join "\n"))
+                               nil))
              :else
              (let [started (System/nanoTime)
-                   result (evaluate session #(evaluation/evaluate client (eval-msg session code (width) @settings) %))]
-               (recur (assoc place :ns (or (:ns result) ns))
-                      nil
-                      {:status (:status result) :ms (quot (- (System/nanoTime) started) 1000000)})))))))))
+                   result (evaluate session #(evaluation/evaluate client (eval-msg session code (width) @settings) %))
+                   ms (quot (- (System/nanoTime) started) 1000000)
+                   place (assoc place :ns (or (:ns result) ns))]
+               (reset! fixes (when (and (= "eval-error" (:status result)) (:hints @settings))
+                               (hint client place code (:err result)
+                                     (assoc io :hinted hinted :command-thread command-thread :quietly quietly))))
+               (recur place nil {:status (:status result) :ms ms})))))))))
 
 (defn- read-input
   "Reads lines from *in* until they hold complete forms, or nil at the end of

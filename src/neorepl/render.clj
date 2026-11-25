@@ -194,6 +194,25 @@
   [causes]
   (str/join "\n" (causes-lines causes "    at " 0)))
 
+(defn marked-lines
+  "The line of code token is on, and under it, a line marking the token
+  with carets, lined up with tabs where the line has them, both indented,
+  or nil when the line's wider than width."
+  [code {:keys [start end]} width]
+  (let [line-start (inc (or (str/last-index-of code "\n" (dec start)) -1))
+        ^String line (subs code line-start (or (str/index-of code "\n" start) (count code)))
+        ^String name (subs code start end)]
+    (when (<= (+ 2 (.codePointCount line 0 (count line))) width)
+      [(str "  " line)
+       (str "  " (str/replace (subs code line-start start) #"[^\t]" " ")
+            (apply str (repeat (.codePointCount name 0 (count name)) "^")))])))
+
+(defn fix-text
+  "What a fix hints/suggest found does: the code it runs, or the name it
+  puts in place of another."
+  [{:keys [run replace in-place-of]}]
+  (or run (str replace " in place of " in-place-of)))
+
 (defn- relative
   "path relative to dir, when it's in there and isn't dir itself, or else
   as it is, as with a root for dir, which everything is in."

@@ -95,6 +95,26 @@ an agent's, and `,help` for the rest.
 Without a terminal, say in a pipe or Emacs' `M-x shell`, it works like
 `clojure.main`'s REPL instead.
 
+When code names something that isn't there, the REPL marks the name in what
+you typed and lists what could fix it, each with the `,fix` that tries it:
+the requires and imports cider-nrepl 0.64 or babashka 1.13.230 finds for it,
+which `,fix` runs before the form again, and the names it's a typo of, which
+it runs the form with. After the first few other errors, it says where to
+see more of them.
+
+```
+user=> (join ", " ["a" "b"])
+Syntax error compiling at (REPL:1:1).
+Unable to resolve symbol: join in this context
+  (join ", " ["a" "b"])
+   ^^^^
+  ,fix 1  (require '[clojure.set :refer [join]])
+  ,fix 2  (require '[clojure.string :refer [join]])
+user=> ,fix 2
+nil
+"a, b"
+```
+
 The line editor, JLine, takes the readline settings it knows from
 `~/.inputrc`, or the file `$INPUTRC` names, so `set editing-mode vi` there
 gets you vi's keys, and what's for neorepl alone goes under `$if neorepl`.
@@ -113,7 +133,8 @@ arglists under the input, `color`, `pretty`, for values pretty printed as
 wide as the terminal, `server-output`, what the server's System/out and
 System/err get, and `taps`, for what shows up above the prompt, `quiet`,
 which leaves all of that out for a while, `outcome`, for how the last
-evaluation went at the right of the prompt, `tooling`, for the namespaces
+evaluation went at the right of the prompt, `hints`, for what could fix an
+error and where to see more of it, `tooling`, for the namespaces
 of nREPL, cider-nrepl and its libraries in `,apropos` and `,ns`, which are
 left out unless they're the project's, and `autoreload`. `print-length`
 and `print-level` take a number, how many items of a collection a value
