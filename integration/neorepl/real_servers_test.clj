@@ -71,7 +71,15 @@
          (is (= {:status 0 :out "\"hi x!\"\n" :err ""}
                 (run server "eval" "-s" "lines" "(demo.lines/twice \"x\")")))
          (is (= {:status 0 :out (str file ":4:1\n") :err ""}
-                (run server "where" "demo.lines/twice"))))))))
+                (run server "where" "demo.lines/twice")))
+         (testing "and the whole file, each form where it starts"
+           (spit file "(ns demo.lines\n  (:require [demo.core :as core]))\n\n(defn twice [who]\n  (str (core/greet who) \"!\"))\n(defn thrice [who] (twice who))\n")
+           (is (= {:status 0 :out "nil\n#'demo.lines/twice\n#'demo.lines/thrice\n" :err ""}
+                  (run server "eval" "-s" "lines" "-f" (str file))))
+           (is (= {:status 0 :out (str file ":4:1\n") :err ""}
+                  (run server "where" "demo.lines/twice")))
+           (is (= {:status 0 :out (str file ":6:1\n") :err ""}
+                  (run server "where" "demo.lines/thrice")))))))))
 
 (deftest lookups-test
   (on-each-server

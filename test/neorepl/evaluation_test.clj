@@ -45,6 +45,14 @@
       (testing "each top-level form goes out on its own, starting where it does"
         (is (= ["1" "#'user/defined-on-line-3"] (values "1 ; one\n\n  (defn defined-on-line-3 [] 2)")))
         (is (= ["[3 3]"] (values "((juxt :line :column) (meta #'defined-on-line-3))"))))
+      (testing "past the forms before it, however many lines they take"
+        (values "(defn two-lines []\n  1)\n(defn after-two-lines [] 2) (defn beside-it [] 3)")
+        (is (= ["[3 1]"] (values "((juxt :line :column) (meta #'after-two-lines))")))
+        (is (= ["[3 29]"] (values "((juxt :line :column) (meta #'beside-it))"))))
+      (testing "from where the code starts"
+        (evaluate {:op "eval" :code "(defn on-line-10 []\n  1) (defn on-line-11 [] 2)" :line 10 :column 5} {})
+        (is (= ["[10 5]"] (values "((juxt :line :column) (meta #'on-line-10))")))
+        (is (= ["[11 6]"] (values "((juxt :line :column) (meta #'on-line-11))"))))
       (testing "with what the forms' prefixes take"
         (is (= ["3" "[1 2]"] (values "#_#_ 1 (/ 1 0) 3 ^:foo [1 2]")))
         (is (= ["{:foo true}"] (values "(meta *1)"))))

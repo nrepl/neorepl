@@ -133,9 +133,9 @@
         spans (some-> lexed lexer/form-spans)]
     (if (and (next spans) (not (lexer/delimiter-error lexed)))
       (->> spans
-           (reductions (fn [{:keys [end] :as at} [start form-end]]
-                         (assoc (after at (subs code end start)) :start start :end form-end))
-                       {:line line :column column :end 0})
+           (reductions (fn [at [start end]]
+                         (assoc (after at (subs code (:start at) start)) :start start :end end))
+                       {:line line :column column :start 0})
            rest
            (mapv (fn [{:keys [start end line column]}]
                    (assoc msg :code (subs code start end) :line line :column column))))
