@@ -28,6 +28,7 @@
 
 - [#87](https://github.com/nrepl/neorepl/pull/87): `,reload` leaves `*1` as it was, rather than setting it to the REPL's namespace.
 - [#94](https://github.com/nrepl/neorepl/pull/94): Ctrl-C stops code that won't stop on JDK 20 and later in the servers `neorepl server` starts for the Clojure CLI and Leiningen, which get `-Djdk.attach.allowAttachSelf` for nREPL's agent.
+- [#100](https://github.com/nrepl/neorepl/pull/100): Each form of code evaluated together, as `eval -f` and pasted input are, gets the line and column it starts at, so the errors, stack frames and definitions of the forms after the first point at them rather than somewhere above.
 
 ## 0.5.1 (2026-11-05)
 

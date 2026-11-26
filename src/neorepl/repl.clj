@@ -1159,8 +1159,8 @@
               (features/unsubscribe-taps client subscription)
               (catch Exception _)))
           ;; cider-nrepl's breakpoints wait for good once the debugger's
-          ;; client is gone, so the ones waiting go on, and what's
-          ;; instrumented runs as it is again.
+          ;; client is gone (cider-nrepl#1085), so the ones waiting go on,
+          ;; and what's instrumented runs as it is again.
           (reset! leaving true)
           (doseq [[_ go] @parked]
             (try
