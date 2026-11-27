@@ -117,7 +117,7 @@
 (deftest repl-test
   (on-each-server
    (fn [server]
-     (let [{:keys [status out]} (run-with server (str ",sessions cljs\n(js/parseInt \"7\")\n,reload\n"
+     (let [{:keys [status out]} (run-with server (str ",sessions cljs\n(js/parseInt \"7\")\n,break demo.core/greet\n,reload\n"
                                                       ",set print-length 3\n(range 10)\n,set pretty off\n(range 10)\n"
                                                       ",ns demo.core\n(greet \"r\")\n"
                                                       ",ns demo.a\n,ns demo.a-test\n(a/f)\n"
@@ -126,6 +126,8 @@
                                           "repl")]
        (is (= 0 status))
        (is (str/includes? out "cljs.user=> 7\n"))
+       (testing "with a word for the debugger, which only steps through Clojure"
+         (is (str/includes? out "=> The debugger only steps through Clojure, not ClojureScript\n")))
        (testing "reloading the server's Clojure, which cider-nrepl's refresh won't in the session"
          (is (re-find #"cljs\.user=> (Reloaded \S|Nothing changed\n)" out))
          (is (not (str/includes? out "Clojure-only"))))

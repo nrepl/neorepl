@@ -1278,7 +1278,17 @@
            (testing "keeping #dbg in front of what starts on the lines it's given"
              (spit file "(ns dbg.demo)\n\n(defn f [x]\n  (* x 2))\n")
              (features/instrument client "dbg.demo/f" {:ns "user"} nil {:lines {"dbg.demo/f" #{2}} :timeout-ms 5000})
-             (is (= "(defn f [x]\n  #dbg (* x 2))" (test-server/evaluated "f"))))))))))
+             (is (= "(defn f [x]\n  #dbg (* x 2))" (test-server/evaluated "f"))))
+           (testing "but not what a record defines, whose source is the record's"
+             (let [records (test-server/spit-file dir "dbg/records.clj" "(ns dbg.records)\n\n(defrecord Box [x])\n\n(defn size [b] (:x b))\n")]
+               (value (str "(load-file " (pr-str (str records)) ")"))
+               (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                                     #"^The debugger can't stop in what a defrecord defines, only in the functions its methods call"
+                                     (features/instrument client "dbg.records/->Box" {:ns "user"} "#dbg" {})))
+               (testing "unlike a function whose line has a record now, the file having changed"
+                 (spit records "(ns dbg.records)\n\n(defrecord Box [x])\n\n(defrecord Size [b])\n")
+                 (is (thrown-with-msg? clojure.lang.ExceptionInfo #"^The file doesn't have dbg\.records/size where it was loaded from"
+                                       (features/instrument client "dbg.records/size" {:ns "user"} "#dbg" {}))))))))))))
 
 (deftest file-forms-test
   (test-server/call-with-temp-dir
@@ -1340,4 +1350,18 @@
                (is (thrown-with-msg? clojure.lang.ExceptionInfo
                                      #"^A defmulti stays as it is when it's evaluated again, so the debugger can't stop in it"
                                      (features/instrument-form client file {:code "(defmulti area\n  :shape)" :line 1}
-                                                               #{2} {:ns "user"} {})))))))))))
+                                                               #{2} {:ns "user"} {}))))
+             (testing "or for methods cider-nrepl leaves alone, a record's"
+               (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                                     #"^The debugger can't stop in what a defrecord defines, only in the functions its methods call"
+                                     (features/instrument-form client file {:code "(defrecord Box [x]\n  P\n  (size [_] x))" :line 1}
+                                                               #{3} {:ns "user"} {}))))
+             (testing "or for a ClojureScript file, as it's evaluated in Clojure"
+               (is (thrown-with-msg? clojure.lang.ExceptionInfo #"^The debugger only steps through Clojure, not ClojureScript"
+                                     (features/instrument-form client "web/core.cljs" {:code "(defn f [x]\n  x)" :line 1}
+                                                               #{2} {:ns "user"} {}))))
+             (testing "or for what has no code, and evaluating again would cut off from what implements it"
+               (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                                     #"^A defprotocol has no code to stop in, and evaluating it again breaks what implements it"
+                                     (features/instrument-form client file {:code "(defprotocol P\n  (size [x]))" :line 1}
+                                                               #{1} {:ns "user"} {})))))))))))
