@@ -222,6 +222,11 @@ that use them, so code edited anywhere is what runs, keeping what `defonce`
 defined. That takes cider-nrepl, whose clj-reload notes what changes from
 the first reload on, which neorepl does as soon as a server it starts is up.
 
+When the code names something that isn't there, `neorepl eval` follows the
+error with the fixes to try, the REPL's, and `--format edn` and `json` have
+them as `suggestions`, each with the code to evaluate for it, as the MCP
+`eval` tool does.
+
 Evaluations share a session, so `*ns*`, `*1` and `*e` carry over from one
 call to the next. `--session NAME` keeps separate ones apart, `neorepl
 sessions` lists them and `neorepl sessions close NAME` starts one over.
@@ -316,34 +321,35 @@ neorepl untrace
 ```
 
 `,break` has a function stop at each step, through cider-nrepl's debugger,
-CIDER's: it evaluates the function's source again with `#dbg` in front, the
-file's as it is now, which `#dbg` or `#break` typed in front of a form does
-too. When an evaluation gets there, the REPL shows the form it stopped at,
-marked on its line, and its value, and the keys act at once: `n` for the
-next step, `i` and `o` to step in and out, `c` to go on to the next
-breakpoint, `l` for the locals, `e` or `(` for an expression evaluated with
-them, `j` for one to return in place of the form, `p` to inspect the value,
-`q` to stop, and `?` for the rest. Enter repeats the last step. Without a
-terminal they're lines. `,break-at FILE LINE` has what starts at a line of a
-file stop at each step, evaluating the top-level form it's in again, as the
-file has it now, with `#dbg` in front of the forms on that line, so a
-method, a function in a `def` or a line in the middle of a long function can
-stop too, and a definition's first line has all of it stop, as `,break`
-does. The methods of a `defrecord` or a `deftype` can't, as cider-nrepl's
-debugger leaves them alone, and neither can ClojureScript. `,breaks` lists
-the functions and the lines that stop, `,unbreak` evaluates the source again
-without `#dbg`, and `,unbreak-at FILE LINE` takes one line out. After an
-error, `,debug` runs the input again, stopping where it throws: the first
-of the project's functions in the stack trace gets `#dbg!` for that
-evaluation, which stops only at the form that throws, with its locals,
-where `j` returns a value in its place. When the REPL exits, what it
-instrumented runs as it is again. A server's debugger has one client, the
-last to start it, so CIDER's stops getting the breakpoints once the REPL
-starts it, and a breakpoint on a thread of its own, like an HTTP handler's,
-waits, with a note above the prompt, until `,stop` goes to it, and to the
-ones that come after it, or the REPL exits.
-`q` takes JDK 19 or older, or `-Djdk.attach.allowAttachSelf`, which the
-servers `neorepl server` starts have, for nREPL to stop the evaluation.
+CIDER's, which babashka has too since 1.13.230: it evaluates the function's
+source again with `#dbg` in front, the file's as it is now, which `#dbg` or
+`#break` typed in front of a form does too. When an evaluation gets there,
+the REPL shows the form it stopped at, marked on its line, and its value,
+and the keys act at once: `n` for the next step, `i` and `o` to step in and
+out, `c` to go on to the next breakpoint, `l` for the locals, `e` or `(` for
+an expression evaluated with them, `j` for one to return in place of the
+form, `p` to inspect the value, `q` to stop, and `?` for the rest. Enter
+repeats the last step. Without a terminal they're lines.
+`,break-at FILE LINE` has what starts at a line of a file stop at each step,
+evaluating the top-level form it's in again, as the file has it now, with
+`#dbg` in front of the forms on that line, so a method, a function in a
+`def` or a line in the middle of a long function can stop too, and a
+definition's first line has all of it stop, as `,break` does. The methods of
+a `defrecord` or a `deftype` can't, as cider-nrepl's debugger leaves them
+alone, and neither can ClojureScript. `,breaks` lists the functions and the
+lines that stop, `,unbreak` evaluates the source again without `#dbg`, and
+`,unbreak-at FILE LINE` takes one line out. After an error, `,debug` runs
+the input again, stopping where it throws: the first of the project's
+functions in the stack trace gets `#dbg!` for that evaluation, which stops
+only at the form that throws, with its locals, where `j` returns a value in
+its place. When the REPL exits, what it instrumented runs as it is again. A
+server's debugger has one client, the last to start it, so CIDER's stops
+getting the breakpoints once the REPL starts it, and a breakpoint on a
+thread of its own, like an HTTP handler's, waits, with a note above the
+prompt, until `,stop` goes to it, and to the ones that come after it, or the
+REPL exits. `q` takes JDK 19 or older, or `-Djdk.attach.allowAttachSelf`,
+which the servers `neorepl server` starts have, for nREPL to stop the
+evaluation.
 
 ```
 user=> ,break demo.cart/line-total
@@ -464,6 +470,7 @@ with any nREPL server out there. Here's how the three stack up in practice
 | Test runner | yes | no | no |
 | Browsing namespaces and specs, cross-references | yes | no | no |
 | Reloading, tracing, profiling | yes, and reloading what changed before each evaluation | no | no |
+| Debugger | yes, CIDER's, with its keys | no | no |
 | Beside an editor | evaluates from Neovim, Emacs and Helix without a plugin | shows what the editor evaluates | no |
 | ClojureScript | shadow-cljs, piggieback, figwheel-main | no | evaluation only |
 | CLI for scripts and agents | yes: eval, docs, tests and more, with JSON output | no | no |
