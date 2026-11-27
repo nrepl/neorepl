@@ -19,7 +19,12 @@
                                               80)
                           "\n  ✗ java.lang.ArithmeticException: Divide by zero")))
     (testing "the namespace, for code that defines nothing"
-      (is (= "● my.app\n  (inc x)\n       ^\n  => 3" (debugger/stop-text (assoc stop :code "(inc x)" :coor [1]) 80))))))
+      (is (= "● my.app\n  (inc x)\n       ^\n  => 3" (debugger/stop-text (assoc stop :code "(inc x)" :coor [1]) 80))))
+    (testing "without the #dbg tags ,break-at puts in front of forms"
+      (is (= "● my.app/f\n    (let [y #dbg! (* x 2)]\n                     ^\n  => 3"
+             (debugger/stop-text (assoc stop :code "(defn f [x]\n  (let [#dbg y #dbg! (* x 2)]\n    #dbg y))" :coor [3 1 1 1]) 80)))
+      (is (= "● my.app/f\n      y))\n      ^\n  => 3"
+             (debugger/stop-text (assoc stop :code "(defn f [x]\n  (let [#dbg y #dbg (* x 2)]\n    #dbg y))" :coor [3 2]) 80))))))
 
 (deftest help-text-test
   (let [help (debugger/help-text #{"next" "quit"})]

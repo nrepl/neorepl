@@ -439,7 +439,7 @@
                                                          ",breaks\n,unbreak-at " file " 6\n(demo.core/greet \"g\")\n")
                                              "repl")]
                  (is (str/includes? out (str file ":6 stops at each step now\n")))
-                 (is (str/includes? out "    #dbg (str \"hi \" who))\n"))
+                 (is (str/includes? out "    (str \"hi \" who))\n"))
                  (is (str/includes? out "  => \"f\"\ndebug> "))
                  (is (str/includes? out "debug> \"hi f\"\n"))
                  (is (str/includes? out (str "user=> " file ":6\n")))
