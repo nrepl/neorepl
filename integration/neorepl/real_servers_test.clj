@@ -395,7 +395,7 @@
 (deftest hints-test
   (on-each-server
    (fn [server]
-     (let [{:keys [status out err]} (run-with server "(mapp inc [1])\n,fix 1\n(Instant/now)\n,fix 1\n(demo.core/boom 1)\n" "repl")]
+     (let [{:keys [status out err]} (run-with server "(mapp inc [1])\n,fix 1\n(Instant/now)\n,fix 1\n(demo.core/boom 1)\n(let [x])\n" "repl")]
        (is (= 0 status))
        (testing "the name code has a typo of"
          (is (str/includes? err "  ,fix 1  map in place of mapp\n"))
@@ -403,6 +403,13 @@
        (testing "and what an error says past its message: its data, and the line of the project's code it came from"
          (is (str/includes? err "\n  :x  1\n"))
          (is (str/includes? err "\n  9>   (throw (ex-info \"boom\" {:x x})))\n")))
+       (when-not (old-bb? server)
+         (testing "and ,debug for one it can stop at"
+           (is (str/includes? err "  ,pst shows its stack trace, ,stacktrace browses it, ,debug stops at the throw\n"))))
+       ;; bb's errors don't say which phase they're from.
+       (when-not (= :bb server)
+         (testing "but not for one compiling"
+           (is (str/includes? err "\n  ,pst shows its stack trace, ,stacktrace browses it\n"))))
        (testing "and neorepl eval's, as suggestions"
          (is (= {:replace "map" :in-place-of "mapp" :input "(map inc [1])"}
                 (first (:suggestions (json/read-str (:out (run server "eval" "--format" "json" "(mapp inc [1])"))))))))
@@ -442,7 +449,7 @@
                  (is (str/includes? out "    (str \"hi \" who))\n"))
                  (is (str/includes? out "  => \"f\"\ndebug> "))
                  (is (str/includes? out "debug> \"hi f\"\n"))
-                 (is (str/includes? out (str "user=> " file ":6\n")))
+                 (is (str/includes? out (str "user=> " file ":6  (str \"hi \" who))\n")))
                  (is (str/includes? out (str file ":6 runs without stopping again\nuser=> \"hi g\"\n")))))
              (testing "but not in a protocol's function, whose source is the protocol, nor in a record's methods"
                (let [file (spit-file (project-dir server) "scratch/shapes.clj"

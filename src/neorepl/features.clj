@@ -676,11 +676,11 @@
   "causes, as analyze-last-stacktrace and test-stacktrace have them, or
   causes-code, in the shape last-error returns them."
   [causes]
-  (mapv (fn [{:keys [class message data stacktrace]}]
-          {:class class
-           :message (blank->nil message)
-           :data (blank->nil data)
-           :stacktrace (dups (mapv (fn [{:keys [file file-url] :as frame}]
+  (mapv (fn [{:keys [class message data stacktrace phase]}]
+          (cond-> {:class class
+                   :message (blank->nil message)
+                   :data (blank->nil data)
+                   :stacktrace (dups (mapv (fn [{:keys [file file-url] :as frame}]
                                      (let [var (frame-var frame)
                                            ;; cider-nrepl's, for the exact file the line's in,
                                            ;; or babashka's, which has it as the file.
@@ -692,7 +692,9 @@
                                          flags (assoc :flags flags)
                                          var (assoc :var var)
                                          path (assoc :path path))))
-                                   stacktrace))})
+                                   stacktrace))}
+            ;; Without one, it's an empty list.
+            (string? phase) (assoc :phase (str/replace phase #"^:" ""))))
         causes))
 
 (defn last-error
@@ -701,7 +703,8 @@
   a :name, :file and :line, the :var of the function, for Clojure's frames,
   the full :path of the file, when the server says, and :flags saying what
   kind of frame it is, like tooling for the frames running the code rather
-  than of it. Nil when nothing's gone wrong yet."
+  than of it, and the :phase, as compile-syntax-check, of one compiling,
+  when the server's orchard says. Nil when nothing's gone wrong yet."
   ([client session] (last-error client session {}))
   ([client session opts]
    (some->>

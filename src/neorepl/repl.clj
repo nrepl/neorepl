@@ -539,9 +539,12 @@
     (out "Usage: ,unbreak-at FILE LINE")))
 
 (defn- place-texts
-  "Each line place, one ,break-at has stop, has, as FILE:LINE."
-  [{:keys [file line lines]}]
-  (map #(at-text file (+ line % -1)) (sort (keys lines))))
+  "Each line place, one ,break-at has stop, has, as FILE:LINE, followed by
+  the line's text, trimmed, with text?."
+  ([place] (place-texts place false))
+  ([{:keys [file line lines]} text?]
+   (for [[n text] (sort lines)]
+     (cond-> (at-text file (+ line n -1)) text? (str "  " text)))))
 
 (defn- unplace
   "Has the debugger stop no more at the lines of place, one ,break-at has
@@ -562,15 +565,16 @@
 
 (defn- breaks
   "Lists the functions the debugger stops in, as break has them do, and the
-  lines of files, as break-at has them, where they are in the files now.
-  Returns what to print, as command-output does."
+  lines of files, as break-at has them, where they are in the files now,
+  with their text. Returns what to print, as command-output does."
   [{:keys [client places]}]
   (let [forms-of (memoize features/file-forms)]
     (out (or (some->> (concat (features/instrumented client {})
                               (mapcat #(place-texts (or (try
                                                           (current % forms-of)
                                                           (catch clojure.lang.ExceptionInfo _ nil))
-                                                        %))
+                                                        %)
+                                                    true)
                                       (sort-by (juxt :file :line) @places)))
                       seq
                       (str/join "\n"))
@@ -900,10 +904,12 @@
   "Prints what could fix the error evaluating code at place got, having
   printed err, numbered for ,fix, and returns the fixes, or else what the
   error says past its message, and where to see more of it, for the first
-  few errors, as :hinted, an atom, counts them. Looking for all that runs
-  as a command does, through quietly, so that Ctrl-C stops it."
+  few errors, as :hinted, an atom, counts them, ,debug too for one it can
+  stop at, in running the input, in Clojure. Looking for all that runs as a
+  command does, through quietly, so that Ctrl-C stops it."
   [client place code err {:keys [hinted command-thread quietly width print-message]}]
-  (let [{:keys [token fixes details]}
+  (let [hinting? (< @hinted error-hints)
+        {:keys [token fixes details debuggable?]}
         (try
           (as-command command-thread
                       (fn []
@@ -912,22 +918,33 @@
                            (or (hints/suggest client place code err {})
                                ;; Two seconds between them, and only from the
                                ;; server's analysis, rather than evaluating
-                               ;; code in a copy of the session at every error.
+                               ;; code in a copy of the session at every error,
+                               ;; but for the few the hint is for, asking for
+                               ;; ,debug whether the session's ClojureScript.
                                (let [deadline (+ (System/currentTimeMillis) 2000)
-                                     left #(hash-map :timeout-ms (max 1 (- deadline (System/currentTimeMillis))))]
-                                 {:details (when (features/analyzes-errors? client)
-                                             (some->> (features/last-error client (:session place) (left))
-                                                      (hints/details client place (left))))}))))))
+                                     left #(hash-map :timeout-ms (max 1 (- deadline (System/currentTimeMillis))))
+                                     causes (when (features/analyzes-errors? client)
+                                              (features/last-error client (:session place) (left)))]
+                                 {:details (some->> causes (hints/details client place (left)))
+                                  :debuggable? (and hinting?
+                                                    (features/debugger? client)
+                                                    ;; Compiling, or printing the value
+                                                    ;; after the input's done.
+                                                    (not-any? #(some-> (:phase %) (not= "execution")) causes)
+                                                    (not (some->> err (re-find #"Syntax error|Error printing return value")))
+                                                    ;; Too little time left to ask is a no.
+                                                    (< 200 (:timeout-ms (left)))
+                                                    (not (features/clojurescript? client (:session place) (left))))}))))))
           ;; They're only hints, which a server that can't give them
           ;; shouldn't get in the way of.
           (catch Exception _ nil))
-        more? (and (empty? fixes) (< @hinted error-hints))
+        more? (and (empty? fixes) hinting?)
         lines (concat (when token (render/marked-lines code token (width)))
                       (when (seq fixes)
                         [(cli/indented-columns (map-indexed (fn [i fix] [(str ",fix " (inc i)) (render/fix-text fix)])
                                                             fixes))])
                       (mapcat #(render/detail-lines % (width)) details)
-                      (when more? [error-hint]))]
+                      (when more? [(cond-> error-hint debuggable? (str ", ,debug stops at the throw"))]))]
     (when more?
       (swap! hinted inc))
     (when (seq lines)
@@ -1105,7 +1122,7 @@
                                                    (print-response (show-inspector (assoc io :client client :session debug-session :ns ns)
                                                                                    (constantly lines)))))]
                              (features/start-debugger client debug-session (partial on-debugger debug-session debug-io))
-                             (print-message "The server's breakpoints stop in this REPL now, as its debugger answers one client, the last to start it")
+                             (print-message "The server's breakpoints stop in this REPL now, the last client to start its debugger")
                              (reset! debug-session-atom debug-session))))))
         ;; ,stop: answers the breakpoint parked first on this thread, and the
         ;; ones after it, from whichever thread, until a while goes by
@@ -1125,7 +1142,8 @@
                        ;; One that comes after this gets parked.
                        (close)
                        (reset! here nil)))
-                   {})
+                   ;; Whether it returned or threw, it did so on its thread.
+                   (out "The thread went on without stopping again"))
                  (out "No breakpoint is waiting")))]
     ;; Late output comes on the client's reader thread, which mustn't wait
     ;; for the terminal: it has the responses lookups are waiting for.
