@@ -1654,6 +1654,26 @@
   [client]
   (supports? client "init-debugger"))
 
+(defn clojurescript?
+  "Whether session evaluates ClojureScript, as piggieback's and shadow-cljs's
+  do once a ClojureScript REPL's started in them, which the debugger doesn't
+  step through. An evaluation that fails, or doesn't answer in time, as one
+  in a ClojureScript session without a JavaScript runtime does, counts as
+  ClojureScript, Clojure's never failing. babashka's sessions never are."
+  [client session opts]
+  (and (not (get-in client [:versions :babashka]))
+       (try
+         (in-copy client {:session session}
+                  #(true? (eval-data client {:session (:session %)} "#?(:cljs true :default false)" [] opts)))
+         (catch clojure.lang.ExceptionInfo e
+           (if (= ::nrepl/disconnected (:type (ex-data e)))
+             (throw e)
+             true)))))
+
+(def clojure-only
+  "What the debugger commands say for ClojureScript."
+  "The debugger only steps through Clojure, not ClojureScript")
+
 (defn start-debugger
   "Has the server send what its debugger asks and says to handler, on the
   reader thread, in session: a response with the status need-debug-input
@@ -1691,6 +1711,23 @@
           code
           (rseq (lexer/line-forms code (disj (set lines) 1)))))
 
+(defn- unqualified
+  "head, a definition's, as lexer/defined has it, without its namespace."
+  [head]
+  (some-> head (str/replace #"^.*/" "")))
+
+(defn- unsteppable
+  "Why the debugger can't stop in a definition whose head is head, evaluated
+  again with tags, or nil when it can. A defonce or a defmulti stays as it
+  was, cider-nrepl leaves the methods deftype* compiles alone, and evaluating
+  a protocol or an interface again leaves what implements it behind."
+  [head]
+  (case (unqualified head)
+    ("defonce" "defmulti") (str "A " head " stays as it is when it's evaluated again, so the debugger can't stop in it")
+    ("defrecord" "deftype") (str "The debugger can't stop in what a " head " defines, only in the functions its methods call")
+    ("defprotocol" "definterface") (str "A " head " has no code to stop in, and evaluating it again breaks what implements it")
+    nil))
+
 (defn- instrument-code
   "Evaluates code again, a form's, from file, at line and column, in ns, in
   a session of its own, so that the user's *1 stays put, with tag in front,
@@ -1700,20 +1737,29 @@
   which stops that. Line 1 is the form itself, which #dbg goes in front of
   on a line of its own, so that what the form defines starts at its column.
   Returns the responses. Throws ::failed when it doesn't evaluate, or for
-  tags in a defonce or a defmulti, which evaluating again leaves as it was."
+  tags in a definition unsteppable has a reason for."
   [client {:keys [code ns file line column]} tag lines opts]
   (let [tag (or tag (when (contains? (set lines) 1) "#dbg"))
         in-code (tagged code lines)
         [head] (lexer/defined code)]
-    (when (and (or tag (not= code in-code))
-               (#{"defonce" "defmulti"} (some-> head (str/replace #"^.*/" ""))))
-      (throw (ex-info (str "A " head " stays as it is when it's evaluated again, so the debugger can't stop in it")
-                      {:type ::failed})))
+    (when-let [why (and (or tag (not= code in-code)) (unsteppable head))]
+      (throw (ex-info why {:type ::failed})))
     (ask client (cond-> {:op "eval" :ns ns :code (str (some-> tag (str "\n")) in-code)}
                   file (assoc :file file)
                   ;; Where the code starts, past the line the tag takes.
                   line (assoc :line (cond-> line tag dec) :column (or column 1)))
          opts)))
+
+(defn- defines-too?
+  "Whether code, a definition whose head is head and which names named,
+  defines name too: a protocol its functions, by their signatures, and a
+  record its constructors."
+  [code head named name]
+  (case (unqualified head)
+    "defprotocol" (boolean (some #(= name (some->> (lexer/coordinate-span code [% 0]) (apply subs code)))
+                                 (take-while #(lexer/coordinate-span code [%]) (range 2 Long/MAX_VALUE))))
+    ("defrecord" "deftype") (contains? #{(str "->" named) (str "map->" named)} name)
+    false))
 
 (defn instrument
   "Evaluates the source of the var sym names where ctx says again, with tag
@@ -1721,11 +1767,12 @@
   function or a map, gives for the var's qualified name. Returns the var's
   name, qualified. Throws ::failed when there's nothing called sym, or no
   source, as for a function defined at the REPL, or the source isn't its
-  definition, as when the file's changed since."
+  definition, as when the file's changed since, or a protocol's or a
+  record's, which define functions of other names."
   [client sym ctx tag opts]
   (let [{:keys [ns name file line column] :as found} (info client sym ctx opts)
         code (when found (source-of client sym ctx opts found))
-        [_ named] (some-> code lexer/defined)
+        [head named] (some-> code lexer/defined)
         qualified (str ns "/" name)]
     (cond
       (nil? found) (throw (ex-info (str "Nothing called " sym " in " (:ns ctx)) {:type ::failed}))
@@ -1736,7 +1783,12 @@
                                        (if tag (str "with " tag " in front") "again without #dbg") " instead")
                                   {:type ::failed}))
       (not= name named)
-      (throw (ex-info (str "The file doesn't have " qualified " where it was loaded from, which reloading it fixes")
+      (throw (ex-info (cond
+                        (not (defines-too? code head named name))
+                        (str "The file doesn't have " qualified " where it was loaded from, which reloading it fixes")
+                        (= "defprotocol" (unqualified head))
+                        (str qualified " is a function of the protocol " named ", which has no code to stop in")
+                        :else (unsteppable head))
                       {:type ::failed})))
     (instrument-code client {:code code :ns ns :file file :line line :column column}
                      tag (some-> (:lines opts) (apply [qualified])) opts)
@@ -1785,8 +1837,12 @@
   "Evaluates form, one of file-forms' of the file at path, again, in its
   namespace, or else ctx's, with #dbg in front of the forms that start on
   each of lines, as instrument-code does. Returns the var it evaluates to,
-  qualified, when it does, as a definition does."
+  qualified, when it does, as a definition does. Throws ::failed for a
+  ClojureScript file, the form being evaluated in Clojure, whatever ctx's
+  session is in."
   [client path {:keys [in] :as form} lines ctx opts]
+  (when (str/ends-with? (str path) ".cljs")
+    (throw (ex-info clojure-only {:type ::failed})))
   (some->> (instrument-code client (assoc form :ns (or in (:ns ctx)) :file (.getAbsolutePath (io/file path)))
                             nil lines opts)
            (some :value)

@@ -1450,7 +1450,17 @@
     (call-with-repl {}
       (fn [type screen]
         (type "#dbg (defn dbg-tagged [] 1)\r")
-        (is (screen #"The server's breakpoints stop in this REPL now(?s).*#'user/dbg-tagged\nuser=> $"))))))
+        (is (screen #"The server's breakpoints stop in this REPL now(?s).*#'user/dbg-tagged\nuser=> $")))))
+  (testing "but not in a ClojureScript session, which the debugger doesn't step through"
+    (reset! test-server/clojurescript true)
+    (try
+      (call-with-repl {}
+        (fn [type screen]
+          (doseq [command [",break inc" ",debug"]]
+            (type (str command "\r"))
+            (is (screen (re-pattern (str (Pattern/quote command) "\nThe debugger only steps through Clojure, not ClojureScript\nuser=> $")))))))
+      (finally
+        (reset! test-server/clojurescript false)))))
 
 (deftest edit-test
   ;; The editor's a shell script.

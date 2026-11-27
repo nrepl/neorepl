@@ -443,7 +443,14 @@
                  (is (str/includes? out "  => \"f\"\ndebug> "))
                  (is (str/includes? out "debug> \"hi f\"\n"))
                  (is (str/includes? out (str "user=> " file ":6\n")))
-                 (is (str/includes? out (str file ":6 runs without stopping again\nuser=> \"hi g\"\n")))))))))))
+                 (is (str/includes? out (str file ":6 runs without stopping again\nuser=> \"hi g\"\n")))))
+             (testing "but not in a protocol's function, whose source is the protocol, nor in a record's methods"
+               (let [file (spit-file (project-dir server) "scratch/shapes.clj"
+                                     "(ns demo.shapes)\n\n(defprotocol Shape\n  (area [s]))\n\n(defrecord Square [side]\n  Shape\n  (area [_] (* side side)))\n")
+                     {:keys [out]} (run-with server (str "(load-file " (pr-str (str file)) ")\n,break demo.shapes/area\n,break-at " file " 8\n")
+                                             "repl")]
+                 (is (str/includes? out "demo.shapes/area is a function of the protocol Shape, which has no code to stop in\n"))
+                 (is (str/includes? out "The debugger can't stop in what a defrecord defines, only in the functions its methods call\n"))))))))))
 
 (deftest mcp-test
   (on-each-server

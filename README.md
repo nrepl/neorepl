@@ -329,17 +329,19 @@ file stop at each step, evaluating the top-level form it's in again, as the
 file has it now, with `#dbg` in front of the forms on that line, so a
 method, a function in a `def` or a line in the middle of a long function can
 stop too, and a definition's first line has all of it stop, as `,break`
-does. `,breaks` lists the functions and the lines that stop, `,unbreak`
-evaluates the source again without `#dbg`, and `,unbreak-at FILE LINE` takes
-one line out. After an error, `,debug` runs the input
-again, stopping where it throws: the first of the project's functions in the
-stack trace gets `#dbg!` for that evaluation, which stops only at the form
-that throws, with its locals, where `j` returns a value in its place. When
-the REPL exits, what it instrumented runs as it is again. A server's
-debugger has one client, the last to start it, so CIDER's stops getting the
-breakpoints once the REPL starts it, and a breakpoint on a thread of its
-own, like an HTTP handler's, waits, with a note above the prompt, until
-`,stop` goes to it, and to the ones that come after it, or the REPL exits.
+does. The methods of a `defrecord` or a `deftype` can't, as cider-nrepl's
+debugger leaves them alone, and neither can ClojureScript. `,breaks` lists
+the functions and the lines that stop, `,unbreak` evaluates the source again
+without `#dbg`, and `,unbreak-at FILE LINE` takes one line out. After an
+error, `,debug` runs the input again, stopping where it throws: the first
+of the project's functions in the stack trace gets `#dbg!` for that
+evaluation, which stops only at the form that throws, with its locals,
+where `j` returns a value in its place. When the REPL exits, what it
+instrumented runs as it is again. A server's debugger has one client, the
+last to start it, so CIDER's stops getting the breakpoints once the REPL
+starts it, and a breakpoint on a thread of its own, like an HTTP handler's,
+waits, with a note above the prompt, until `,stop` goes to it, and to the
+ones that come after it, or the REPL exits.
 `q` takes JDK 19 or older, or `-Djdk.attach.allowAttachSelf`, which the
 servers `neorepl server` starts have, for nREPL to stop the evaluation.
 

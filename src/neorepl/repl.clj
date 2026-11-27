@@ -100,12 +100,12 @@
             :run (fn [state _] (browse-error state))}
            {:name "fix" :arg "N" :help "Try fix N of the ones the last error listed"
             :run #(fix %1 %2)}
-           {:name "break" :arg "SYM" :help "Stop at each step of SYM, evaluating its source again with #dbg" :debugger? true
+           {:name "break" :arg "SYM" :help "Stop at each step of SYM, evaluating its source again with #dbg" :debugger? true :clojure? true
             :run #(break %1 %2)}
            {:name "break-at" :arg "FILE LINE" :debugger? true
             :help "Stop at each step of what starts at LINE of FILE, evaluating its top-level form again with #dbg there"
             :run #(break-at %1 %2)}
-           {:name "debug" :help "Run the input that failed again, stopping where it throws" :debugger? true
+           {:name "debug" :help "Run the input that failed again, stopping where it throws" :debugger? true :clojure? true
             :run (fn [state _] (debug state))}
            {:name "stop" :help "Go to the breakpoint a thread of its own stopped at" :debugger? true
             :run (fn [{:keys [stop]} _] (stop))}
@@ -842,7 +842,9 @@
       (and (:debugger? command) (not (features/debugger? client))) (out no-debugger)
       :else (try
               (if-let [run (:run command)]
-                (run state arg)
+                (if (and (:clojure? command) (quietly #(features/clojurescript? client (:session state) {:timeout-ms 2000})))
+                  (out features/clojure-only)
+                  (run state arg))
                 (let [ctx (assoc state :tooling? (some-> (:settings state) deref :tooling))
                       {:keys [found text none]} (quietly #(lookups/run name client ctx (if args? (some-> arg (str/split #"\s+")) arg)))]
                   (some-> (follow-ups name) (apply [state found]))

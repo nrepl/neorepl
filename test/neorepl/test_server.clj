@@ -40,6 +40,12 @@
           (do (transport/respond-to msg :ns "user" :value (pr-str line))
               (transport/respond-to msg :status "done")))))))
 
+(def clojurescript
+  "Whether wrap-stuck answers the probe for ClojureScript,
+  #?(:cljs true :default false), true, as piggieback's sessions do in a
+  ClojureScript REPL."
+  (atom false))
+
 (defn wrap-stuck
   "Never answers an evaluation of (stuck), the way shadow-cljs doesn't one
   that keeps the JavaScript runtime busy, and answers one of (slow) after a
@@ -49,7 +55,8 @@
   slow to say it, and ends once interrupted. One of (stubborn-read) does
   the same, but takes 500ms to say it can't be interrupted. One of
   (nbb-throw) fails the way nbb's server says code threw, with :ex but no
-  eval-error."
+  eval-error. While clojurescript is on, the probe for ClojureScript
+  answers true, as in a ClojureScript session."
   [handler]
   (fn [{:keys [op code session interrupt-id stdin] :as msg}]
     (let [interrupted (get @late-reads interrupt-id)
@@ -74,6 +81,9 @@
                             (transport/respond-to msg :status "done"))
         (= "(late-read)" code) (late-read msg false)
         (= "(stubborn-read)" code) (late-read msg true)
+        (and @clojurescript (= "#?(:cljs true :default false)" code))
+        (do (transport/respond-to msg :ns "cljs.user" :value "true")
+            (transport/respond-to msg :status "done"))
         (= "(nbb-throw)" code) (do (transport/respond-to msg :err "bad\n")
                                    (transport/respond-to msg :ex "#error {:message \"bad\"}")
                                    (transport/respond-to msg :status "done"))
