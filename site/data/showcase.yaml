@@ -58,6 +58,36 @@
     out, and with cider-nrepl `i` inspects the cause and `d` its ex-data.
   docs: https://github.com/nrepl/neorepl#usage
 
+- title: Errors that say what to try
+  cast: hints
+  poster: end
+  caption: >-
+    A typo with its fix, `,fix 1`, then an order that isn't there, with its
+    ex-data, and `,debug` stopping at the throw, where `j` returns an order
+    in its place.
+  blurb: >-
+    After an error the REPL shows what could fix it: the name you meant, or
+    the require or import it takes, numbered for `,fix`. Other errors get
+    their ex-data, the arglists of a function called with the wrong
+    arguments, and the line of your code they came from, and `,debug` runs
+    the input again, stopping where it throws, with the locals.
+  docs: https://github.com/nrepl/neorepl#usage
+
+- title: Step through code
+  cast: debugger
+  poster: end
+  caption: >-
+    `,break` on `price`, then an order's total: each step's value, `l` for
+    the locals, `c` on to the next call and `C` past them all.
+  blurb: >-
+    `,break` has a function stop at each step, through cider-nrepl's
+    debugger, with CIDER's keys: `n` for the next step, `i` and `o` to step
+    in and out, `l` for the locals and `e` to evaluate with them.
+    `,break-at` does it for a line of a file, in a method or a handler, and
+    a breakpoint on another thread, like an HTTP request's, waits for
+    `,stop`.
+  docs: https://github.com/nrepl/neorepl#usage
+
 - title: Reload as you edit
   cast: reload
   poster: end

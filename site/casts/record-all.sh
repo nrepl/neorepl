@@ -60,7 +60,7 @@ tapes=("$@")
 if [ ${#tapes[@]} -eq 0 ]; then
   # The order the site shows them in, with cli last, where the test still
   # fails.
-  tapes=(overview docs inspector errors trace tests reload cli)
+  tapes=(overview docs inspector errors hints debugger trace tests reload cli)
 fi
 
 for name in "${tapes[@]}"; do
