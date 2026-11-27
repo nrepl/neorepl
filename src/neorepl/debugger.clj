@@ -37,11 +37,24 @@
   [{:keys [code original-ns]}]
   (or (some->> (lexer/defined code) second (str original-ns "/")) original-ns))
 
+(defn- untagged
+  "code, with span, a map of the :start and :end of a part of it, without
+  the #dbg tags in it, as ,break-at puts them in front of forms, as [code
+  span], the span moved to the same part of what's left."
+  [code span]
+  (let [cuts (for [{:keys [type start end] :as token} (lexer/tokenize code)
+                   :when (and (= :reader-macro type) (= "#dbg" (lexer/text code token)))]
+               [start (cond-> end (= \space (get code end)) inc)])
+        moved (fn [i] (- i (reduce + (for [[start end] cuts :when (<= end i)] (- end start)))))]
+    [(reduce (fn [code [start end]] (str (subs code 0 start) (subs code end))) code (reverse cuts))
+     (-> span (update :start moved) (update :end moved))]))
+
 (defn stop-text
   "What a breakpoint, a need-debug-input, shows: what it's in and where,
   the line of the form it stopped at with the form marked, unless that's
   wider than width, and the form's value, or what it threw, for one #dbg!
-  or #break! stop at."
+  or #break! stop at. The line leaves out the #dbg tags in it, which
+  ,break-at puts in front of the forms on its lines."
   [{:keys [code coor debug-value file line caught-msg] :as stop} width]
   (let [[start end] (some->> coor seq (lexer/coordinate-span code))
         at (+ (or line 1) -1 (first (lexer/position code (or start 0))))
@@ -50,8 +63,8 @@
     (str/join "\n" (concat [(str "● " (stop-name stop)
                                  (when file (str "  " (render/location-text {:file file :line at}))))]
                            (when start
-                             (render/marked-lines code {:start start :end (min end (or (str/index-of code "\n" start) end))}
-                                                  width))
+                             (let [[shown span] (untagged code {:start start :end (min end (or (str/index-of code "\n" start) end))})]
+                               (render/marked-lines shown span width)))
                            [(if caught-msg
                               (str "  ✗ " (some-> (re-find #"^#error\[(\S+)" (str debug-value)) second (str ": ")) caught-msg)
                               (str "  => " debug-value))]))))
