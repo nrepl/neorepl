@@ -1183,17 +1183,36 @@
         (testing "which go with the next evaluation"
           (type ",fix 1\r")
           (is (screen #",fix 1\nNo fixes to try: the last evaluation's error listed none\nuser=> $")))
-        (testing "or where to see more of an error, the first few times"
+        (testing "or where to see more of an error, the first few times, and ,debug, which stops where it throws"
           (dotimes [_ 3]
             (type "(/ 1 0)\r")
-            (is (screen #"Divide by zero.*\n  ,pst shows its stack trace, ,stacktrace browses it\nuser=> $")))
+            (is (screen #"Divide by zero.*\n  ,pst shows its stack trace, ,stacktrace browses it, ,debug stops at the throw\nuser=> $")))
           (type "(/ 1 0)\r")
           (is (= 3 (count (re-seq #",pst shows" (screen #"Divide by zero.*\nuser=> $")))))))))
   (testing "but nothing past the message from a server that doesn't analyze errors, rather than evaluating code at each"
     (call-with-repl {:hints true}
       (fn [type screen]
         (type "(throw (ex-info \"boom\" {:a 1}))\r")
-        (is (screen #"boom.*\n  ,pst shows its stack trace, ,stacktrace browses it\nuser=> $")))))
+        (is (screen #"boom.*\n  ,pst shows its stack trace, ,stacktrace browses it, ,debug stops at the throw\nuser=> $")))))
+  ;; bb's errors don't say which phase they're from.
+  (when-not (System/getProperty "babashka.version")
+    (testing "without ,debug for an error compiling, which it can't stop at"
+      (call-with-repl {:hints true}
+        (fn [type screen]
+          (type "(let [x])\r")
+          (is (screen #"Syntax error (?s).*\n  ,pst shows its stack trace, ,stacktrace browses it\nuser=> $"))
+          (testing "or printing, after the input's done"
+            (type "(map (fn [_] (throw (ex-info \"late\" {}))) [1])\r")
+            (is (screen #"Error printing return value (?s).*\n  ,pst shows its stack trace, ,stacktrace browses it\nuser=> $")))))))
+  (testing "nor in ClojureScript, which the debugger doesn't step through"
+    (reset! test-server/clojurescript true)
+    (try
+      (call-with-repl {:hints true}
+        (fn [type screen]
+          (type "(/ 1 0)\r")
+          (is (screen #"Divide by zero.*\n  ,pst shows its stack trace, ,stacktrace browses it\nuser=> $"))))
+      (finally
+        (reset! test-server/clojurescript false))))
   (testing "or neither, with them off"
     (call-with-repl {:hints true}
       (fn [type screen]
@@ -1274,7 +1293,8 @@
                ;; Line 5 is in line 4's let.
                (is (= "(defn h [x]\n  #dbg (let [y (inc x)]\n    (* y 2)))" (test-server/evaluated "h")))
                (type ",breaks\r")
-               (is (after ",breaks" (str ".*" (at 4) "\n" (at 5))))
+               (testing "which ,breaks lists with their text"
+                 (is (after ",breaks" (str ".*" (at 4) "  " (Pattern/quote "(let [y (inc x)]") "\n" (at 5) "  " (Pattern/quote "(* y 2)))")))))
                (type (str ",unbreak-at " file " 4\r"))
                (is (screen (re-pattern (str (at 4) " runs without stopping again\nuser=> $"))))
                (is (= "(defn h [x]\n  (let [y (inc x)]\n    #dbg (* y 2)))" (test-server/evaluated "h"))))
@@ -1290,7 +1310,7 @@
                (is (screen #"\ndbg\.at/h stops at each step now\nuser=> $"))
                (is (= "#dbg\n(defn h [x]\n  (let [y (inc x)]\n    #dbg (* y 2)))" (test-server/evaluated "h")))
                (type ",breaks\r")
-               (is (after ",breaks" (str "(?m).*^dbg\\.at/h$.*" (at 5))))
+               (is (after ",breaks" (str "(?m).*^dbg\\.at/h$.*" (at 5) "  .*")))
                (testing "which ,unbreak takes out, keeping the lines"
                  (type ",unbreak dbg.at/h\r")
                  (is (screen #"dbg\.at/h only stops at the lines ,breaks lists now\nuser=> $"))
@@ -1314,7 +1334,7 @@
                (screen (re-pattern (str (at 5) " stops at each step now\nuser=> $")))
                (spit file "(ns dbg.edits)\n\n(def z 1)\n\n(defn e [w]\n  (let [y (inc w)]\n    (+ 1)\n    (* y 2)))\n")
                (type ",breaks\r")
-               (is (screen (re-pattern (str ",breaks\n(?s).*" (at 8) "\nuser=> $"))))
+               (is (screen (re-pattern (str ",breaks\n(?s).*" (at 8) "  " (Pattern/quote "(* y 2)))") "\nuser=> $"))))
                (type (str ",break-at " file " 7\r"))
                (screen (re-pattern (str (at 7) " stops at each step now\nuser=> $")))
                (is (= "(defn e [w]\n  (let [y (inc w)]\n    #dbg (+ 1)\n    #dbg (* y 2)))" (test-server/evaluated "e")))
@@ -1437,7 +1457,8 @@
           (testing "and the ones after it"
             (is (screen #"debug> next\n● user\n(?s).*debug> $")))
           (type "c")
-          (is (screen #"debug> continue\nuser=> $"))
+          (testing "saying when the thread's gone on"
+            (is (screen #"debug> continue\nThe thread went on without stopping again\nuser=> $")))
           (type "@parked\r")
           (is (screen #"\[\":next\" \":continue\"\]\nuser=> $"))
           (testing "which go on when the REPL exits"

@@ -347,7 +347,7 @@ servers `neorepl server` starts have, for nREPL to stop the evaluation.
 
 ```
 user=> ,break demo.cart/line-total
-The server's breakpoints stop in this REPL now, as its debugger answers one client, the last to start it
+The server's breakpoints stop in this REPL now, the last client to start its debugger
 demo.cart/line-total stops at each step now
 user=> (demo.cart/total [{:price 3 :qty 4}])
 ● demo.cart/line-total  src/demo/cart.clj:5

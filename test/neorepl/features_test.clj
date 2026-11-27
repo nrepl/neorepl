@@ -947,7 +947,7 @@
               (testing "with the stack trace of each error, by its index"
                 (is (= {:op "test-stacktrace" :ns "neorepl.sample-suite" :var "erring" :index 0}
                        (some #(when (= "test-stacktrace" (:op %)) %) @test-requests))))))
-          (is (= [{:class "clojure.lang.ExceptionInfo" :message "boom" :data "{:k 1}"
+          (is (= [{:class "clojure.lang.ExceptionInfo" :message "boom" :data "{:k 1}" :phase "execution"
                    :stacktrace [{:name "user$f/invoke" :file "x.clj" :line 1 :var "user/f"}
                                 {:name "my.app$g/invoke" :file "app.clj" :line 5 :var "my.app/g"
                                  :path (str (java.io.File. (java.net.URI. "file:/src/my/app.clj")))}
@@ -983,6 +983,12 @@
                                                              :file-url (str (.toURI (io/file path)))}
                                                             {:name "app/g" :file path :line 2}
                                                             {:name "user/fn" :file "NO_SOURCE_PATH" :line 1}]}]))))))))
+  (testing "the phase of one compiling, without the colon of a keyword"
+    (is (= ["compile-syntax-check" nil]
+           (map :phase (#'features/normalize-causes [{:class "clojure.lang.Compiler$CompilerException" :phase ":compile-syntax-check"
+                                                      :stacktrace []}
+                                                     ;; As cider-nrepl sends none.
+                                                     {:class "java.lang.ArithmeticException" :phase [] :stacktrace []}])))))
   (testing "a function's frame, after one of its anonymous fn's, which has its var"
     (is (= [nil nil]
            (map :flags (:stacktrace (first (#'features/normalize-causes
