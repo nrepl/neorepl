@@ -19,7 +19,7 @@ ignoreLogs = ["github-fetch", "news-feed"]
   copyright = "Bozhidar Batsov and neorepl contributors."
   socialImage = "img/social.png"
   # Used only when GitHub can't be reached at build time.
-  fallbackVersion = "0.5.1"
+  fallbackVersion = "0.6.0"
   # News: posts with this tag in the feed, merged with data/news.yaml.
   newsFeed = "https://metaredux.com/feed.xml"
   newsTag = "neorepl"

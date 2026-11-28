@@ -47,7 +47,7 @@ option included, with the latest release's tag and commit:
 
 ```clojure
 {:aliases
- {:neorepl {:replace-deps {io.github.nrepl/neorepl {:git/tag "v0.5.1" :git/sha "155a066"}}
+ {:neorepl {:replace-deps {io.github.nrepl/neorepl {:git/tag "v0.6.0" :git/sha "99012f6"}}
             :jvm-opts ["--enable-native-access=ALL-UNNAMED"]
             :main-opts ["-m" "neorepl.main"]}}}
 ```
