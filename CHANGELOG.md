@@ -2,6 +2,10 @@
 
 ## main (unreleased)
 
+## 0.6.0 (2026-11-28)
+
+Errors made easy (to fix).
+
 ### Features
 
 - [#89](https://github.com/nrepl/neorepl/pull/89): neorepl installs as a Clojure CLI tool, from git, with `clojure -Ttools install-latest :lib io.github.nrepl/neorepl :as neorepl`, and each command is a function of the tool, as in `clojure -Tneorepl repl`.
