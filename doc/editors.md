@@ -22,6 +22,25 @@ REPL steps into it, to see the editor's last error with `,pst`, and
 
 They're checked with Neovim 0.12, Emacs 31 and Helix 25.07.
 
+## Which does what
+
+The editor is where the code changes, so it's the one that evaluates and
+loads it. The REPL is where the code runs, and where to look into it when
+something's off:
+
+- Evaluate a definition from the editor each time it changes, and call it
+  from the REPL.
+- When it does something it shouldn't, the REPL has the tools for finding
+  out why: `,pst` and `,stacktrace` for an error, `,inspect` for a value,
+  `,test` and `,retest` for the tests, and `,break` and `,debug` to step
+  through it.
+- `,break-at FILE LINE` stops at a line of a file, like the one the
+  cursor's on in the editor.
+- The fix goes in the file, and evaluating it from the editor puts it on the
+  server, so the next call from the REPL runs it.
+- `,edit NAME` in the REPL opens a definition in `$EDITOR`, going the other
+  way.
+
 ## Neovim
 
 In `init.lua`, or a file it loads. With `maplocalleader` set to `,`, `,ee`
@@ -150,5 +169,4 @@ l = [":write", ":sh neorepl load %{buffer_name}"]
 ## Editors with an nREPL client of their own
 
 CIDER and the like connect to the same server, through the same port file,
-and the REPL beside them sees what they evaluate. Going the other way,
-`,edit NAME` in the REPL opens a definition in `$EDITOR`.
+and the REPL beside them sees what they evaluate.
