@@ -446,6 +446,39 @@ interrupted after 60 seconds, unless `--max-output` and `--timeout` say
 otherwise, so a stray `(range)` or an endless loop can't take over the
 agent's context or the session.
 
+## What works where
+
+neorepl follows CIDER, so it does the most with cider-nrepl on the server,
+which jack-in adds. Without it, a good part still works through nREPL's
+built-in ops and evaluating code, and in ClojureScript, about what CIDER
+does there:
+
+| | With cider-nrepl | nREPL alone | In ClojureScript |
+|---|---|---|---|
+| Completion, arglists as you type | yes | yes, with nREPL 0.8 or later | yes |
+| `,doc`, `,source`, `,where` | yes | yes | yes |
+| `,apropos` | yes | yes | Clojure's vars only |
+| `,macroexpand` | yes | yes | yes |
+| Errors, `,pst`, `,stacktrace` | yes | yes | the message, without JavaScript frames |
+| `,fix` and what an error says past its message | yes, requires and imports with 0.64 or later | typos only | no, ClojureScript only warns |
+| `,inspect` | yes | no | the value, read back as data |
+| `,test` | yes | the namespaces you name | yes |
+| `,retest` | yes | no | yes |
+| `,reload` | yes, and what changed | the namespaces you name | Clojure's only |
+| `,autoreload` | yes | no | no |
+| `,break`, `,break-at`, `,debug` | yes | no | no |
+| `,trace`, `,profile` | yes | no | no |
+| `,refs`, `,deps` | yes | no | no |
+| `,ns` and its browser | yes | yes | yes |
+| `,spec` | yes | yes | Clojure's specs only |
+| `,tap` | yes, 0.64 or later | no | no |
+
+The ClojureScript column is with cider-nrepl, through piggieback or
+shadow-cljs. babashka's server, 1.13.230 or later, does everything in the
+first column but `,refs`, `,deps`, reloading what changed and `,tap`. Checked
+in November 2026, with cider-nrepl 0.64.1, nREPL 1.8.0, babashka 1.13.230
+and ClojureScript 1.12.134 through piggieback 0.8.0.
+
 ## How does it compare?
 
 neorepl isn't the only terminal REPL that talks nREPL these days. The
